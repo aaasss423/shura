@@ -1,0 +1,6 @@
+pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+rootProject.name = 'Shura'
+include ':app', ':shura-source-api', ':shura-source-host'
+project(':shura-source-api').projectDir = file('shura-source-api')
+project(':shura-source-host').projectDir = file('shura-source-host')

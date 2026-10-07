@@ -1,0 +1,3 @@
+# Pipeline
+
+Candidates enter durable pending state. Validation checks package/version/path-safe characters, metadata, language, provenance, HTTPS and source-specific host policy, plus a trusted signing fingerprint from source configuration. Artifact download is bounded and SHA-256 hashed. APK archive limits, manifest presence, package identity via `aapt`, and signature via `apksigner` gate security success. The source quality score is recorded for operator ranking, but cannot bypass these security gates. This is not a malware scan and does not build/test the extension. Operators inspect `pending`, explicitly `accept` a security-passed item, then `publish --release`. Quarantine is durable and cannot be accepted/retried around.

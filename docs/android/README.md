@@ -1,0 +1,5 @@
+# Android
+
+The application ID is `app.shura.manga`. `shura-source-api` defines manga/chapter/page operations; `shura-source-host` registers source adapters and provides a bounded HTTPS downloader with per-hop host checks and SHA-256 output. No Mihon runtime dependency is present.
+
+The app can import an ordered set of image URIs using Android’s document picker, persist URI access and page progress, and read the local chapter with vertical scrolling and pinch zoom inside Compose. It has no concrete online source adapter, chapter downloader, multi-chapter library/database, or source browsing. The reader bar supports optional chapter navigation and a translation mode menu. Gesture and offline URI behavior have Android instrumentation tests defined but not run on a device in this environment. Translation is behind `BuildConfig.TRANSLATION_ENABLED=false`; no overlay/accessibility permission is declared; pure translation planning logic has JVM unit tests. Android build and Kotlin tests require Android SDK and a working JVM; this workspace's JVM cannot start (grsecurity/PaX), so no Kotlin build/test result is claimed here. CI is configured to run them.
