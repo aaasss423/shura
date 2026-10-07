@@ -13,7 +13,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.transformable
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -24,11 +24,17 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.testTag
+import app.shura.host.MangaDexChapterDownloader
+import app.shura.host.MangaDexSource
+import app.shura.host.SourceHost
 import app.shura.manga.reader.translation.TranslationMode
 import app.shura.manga.reader.translation.TranslationSettings
 import app.shura.manga.reader.translation.TranslationSettingsStore
+import app.shura.source.Chapter
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); setContent { ShuraApp() } }
@@ -60,6 +66,66 @@ class MainActivity : ComponentActivity() {
             tab = "Reader"
         }
     }
+
+    val sourceHost = remember { SourceHost().apply { register(MangaDexSource()) } }
+    val appScope = rememberCoroutineScope()
+    var readerTitle by remember { mutableStateOf("Local chapter") }
+    var readerMangaTitle by remember { mutableStateOf("") }
+    var readerChapters by remember { mutableStateOf<List<Chapter>?>(null) }
+    var readerChapterId by remember { mutableStateOf<String?>(null) }
+    var activeSource by remember { mutableStateOf<app.shura.source.ShuraSource?>(null) }
+    var downloadNotice by remember { mutableStateOf<String?>(null) }
+    var downloadsVersion by remember { mutableIntStateOf(0) }
+
+    fun currentChapterIndex(): Int = readerChapters?.indexOfFirst { it.id == readerChapterId } ?: -1
+    fun neighbor(offset: Int): Chapter? {
+        val index = currentChapterIndex()
+        val list = readerChapters ?: return null
+        val target = index + offset
+        return if (target in list.indices) list[target] else null
+    }
+
+    val openChapter: (app.shura.source.ShuraSource, String, Chapter, List<Chapter>) -> Unit = { source, mangaTitle, chapter, chapterList ->
+        appScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val pageRefs = source.pages(chapter.id)
+                    val dir = File(context.cacheDir, "reader-${chapter.id}".replace(Regex("[^A-Za-z0-9_.-]"), "_"))
+                    MangaDexChapterDownloader().downloadChapter(pageRefs, dir).map { Uri.fromFile(it) }
+                }
+            }.onSuccess { uris ->
+                pages.clear()
+                pages.addAll(uris)
+                readerTitle = "$mangaTitle · ${chapter.name}"
+                readerMangaTitle = mangaTitle
+                readerChapters = chapterList
+                readerChapterId = chapter.id
+                activeSource = source
+                preferences.edit().putString("chapter-pages", org.json.JSONArray(pages.map(Uri::toString)).toString()).apply()
+                tab = "Reader"
+            }.onFailure { tab = "Sources"; downloadNotice = it.message ?: "failed to open chapter" }
+        }
+    }
+
+    fun neighborChapter(source: app.shura.source.ShuraSource, offset: Int): Chapter? {
+        val target = neighbor(offset) ?: return null
+        openChapter(source, readerMangaTitle.ifBlank { "Chapter" }, target, readerChapters ?: emptyList())
+        return target
+    }
+
+    val downloadChapter: (app.shura.source.ShuraSource, String, Chapter) -> Unit = { source, mangaTitle, chapter ->
+        appScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val pageRefs = source.pages(chapter.id)
+                    val staging = File(context.cacheDir, "dl-${chapter.id}".replace(Regex("[^A-Za-z0-9_.-]"), "_"))
+                    val files = MangaDexChapterDownloader().downloadChapter(pageRefs, staging)
+                    persistStoredChapter(chapterStore(context), source.id, chapter.id, "$mangaTitle · ${chapter.name}", files)
+                }
+            }.onSuccess { downloadNotice = "Downloaded ${source.name} · ${chapter.name}"; downloadsVersion++ }
+                .onFailure { downloadNotice = it.message ?: "download failed" }
+        }
+    }
     MaterialTheme {
         Scaffold(
             topBar = { TopAppBar(title = { Text("Shura · $tab") }) },
@@ -72,14 +138,42 @@ class MainActivity : ComponentActivity() {
             }
         ) { padding ->
             when (tab) {
-                "Reader" -> ReaderScreen(pages, preferences.getInt("reader-page", 0), { page -> preferences.edit().putInt("reader-page", page).apply() }, Modifier.padding(padding), translationSettings) { updated -> translationStore.save(updated); translationSettings = updated }
-                "Sources" -> PlaceholderScreen("No source adapters are installed yet. Configure a Shura source host to browse manga.", Modifier.padding(padding))
+                "Reader" -> ReaderScreen(
+                    pages,
+                    preferences.getInt("reader-page", 0),
+                    { page -> preferences.edit().putInt("reader-page", page).apply() },
+                    Modifier.padding(padding),
+                    translationSettings,
+                    onTranslationSettingsChange = { updated -> translationStore.save(updated); translationSettings = updated },
+                    chapterTitle = readerTitle,
+                    onPrevChapter = { activeSource?.let { source -> neighborChapter(source, -1) } },
+                    onNextChapter = { activeSource?.let { source -> neighborChapter(source, +1) } },
+                )
+                "Sources" -> MangaBrowserScreen(
+                    sources = sourceHost.all(),
+                    onOpenChapter = openChapter,
+                    onDownloadChapter = downloadChapter,
+                    notice = downloadNotice,
+                    modifier = Modifier.padding(padding),
+                )
                 "Library" -> Column(Modifier.fillMaxSize().padding(padding).padding(20.dp)) {
+                    downloadNotice?.let { Text(it, color = MaterialTheme.colorScheme.primary); Spacer(Modifier.height(8.dp)) }
                     Text(if (pages.isEmpty()) "Your library is empty" else "Local chapter · ${pages.size} pages")
                     if (pages.isNotEmpty()) Button(onClick = { tab = "Reader" }) { Text("Continue reading") }
                     Button(onClick = { picker.launch(arrayOf("image/*")) }) { Text("Import chapter images") }
                 }
-                "Downloads" -> PlaceholderScreen("Imported chapter pages are available offline on this device.", Modifier.padding(padding))
+                "Downloads" -> DownloadsScreen(
+                    context,
+                    onRead = { stored ->
+                        pages.clear()
+                        pages.addAll(stored.pageUris)
+                        readerTitle = stored.title
+                        activeSource = null
+                        tab = "Reader"
+                    },
+                    refresh = downloadsVersion,
+                    modifier = Modifier.padding(padding),
+                )
                 "Settings" -> PlaceholderScreen("Translation mode (Full chapter / Follow reading) lives in the reader bar and stays on across chapters until disabled. No screen overlay is used; the reader owns all touch input. Offline: imported chapter images are read from device storage.", Modifier.padding(padding))
                 else -> Column(Modifier.fillMaxSize().padding(padding).padding(20.dp)) {
                     Text("Read comics stored on this device", style = MaterialTheme.typography.headlineSmall)

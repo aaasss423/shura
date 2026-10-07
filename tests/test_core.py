@@ -77,8 +77,8 @@ class CoreTests(unittest.TestCase):
         pub=RepositoryPublisher(self.store,Path(self.tmp.name)/"repo");r=pub.publish(stage=True);self.assertTrue(r["refused"]);self.assertFalse((Path(self.tmp.name)/"repo").exists())
         r=pub.publish(release=True);self.assertTrue(r["refused"])
     def test_only_security_passed_candidate_publishes(self):
-        c=Candidate("s1","org.example.ext","1.0","https://example.org/x.apk",name="x",language="ar",provenance={"page":"x"},metadata={"_artifact_path":str(Path(self.tmp.name)/"x.apk")});Path(self.tmp.name,"x.apk").write_bytes(b"verified") ;self.store.put_pending(c,"security-passed");self.store.accept_pending(c.source_id,c.identity)
-        r=RepositoryPublisher(self.store,Path(self.tmp.name)/"repo").publish(release=True);self.assertEqual(r["published"],1);self.assertTrue((Path(self.tmp.name)/"repo/index.json").exists());self.assertTrue((Path(self.tmp.name)/"repo/org_example_ext-1.0.apk").exists())
+        c=Candidate("s1","org.example.ext","1.0","https://example.org/x.apk",name="x",language="ar",provenance={"page":"x"},metadata={"_artifact_path":str(Path(self.tmp.name)/"x.apk"),"_security":{"sha256":"a"*64,"certificate":"a"*64}});Path(self.tmp.name,"x.apk").write_bytes(b"verified") ;self.store.put_pending(c,"security-passed");self.store.accept_pending(c.source_id,c.identity)
+        r=RepositoryPublisher(self.store,Path(self.tmp.name)/"repo").publish(release=True);self.assertEqual(r["published"],1);self.assertTrue((Path(self.tmp.name)/"repo/index.json").exists());self.assertTrue((Path(self.tmp.name)/"repo/apk/org_example_ext-1.0.apk").exists())
     def test_quarantine_record_and_forget_cannot_bypass(self):
         c=Candidate("s1","org.example.ext","bad","https://example.org/x.apk",provenance={"page":"x"});self.store.quarantine_item(c,"signature mismatch","deadbeef");self.assertEqual(self.store.get_source("s1").state,SourceState.QUARANTINED)
         with self.assertRaises(ValueError):Scheduler(self.store).retry("s1")
@@ -143,8 +143,8 @@ class CoreTests(unittest.TestCase):
         finally:os.environ["PATH"]=old_path
         published=RepositoryPublisher(self.store,Path(self.tmp.name)/"repository").publish(release=True)
         self.assertEqual(published["published"],1);self.assertEqual(published["published_this_run"],1);self.assertTrue(published["publication_charged"]);self.assertEqual(published["publications_today"],1)
-        repo=json.loads((Path(self.tmp.name)/"repository/index.json").read_text());self.assertTrue(repo["packages"][0]["apk"])
-        noop=RepositoryPublisher(self.store,Path(self.tmp.name)/"repository").publish(release=True);self.assertTrue(noop["noop"]);self.assertEqual(len(json.loads((Path(self.tmp.name)/"repository/index.json").read_text())["packages"]),1)
+        repo=json.loads((Path(self.tmp.name)/"repository/index.json").read_text());self.assertTrue(repo[0]["apk"]);self.assertTrue((Path(self.tmp.name)/"repository/apk/org_example_ext-1.2.apk").exists())
+        noop=RepositoryPublisher(self.store,Path(self.tmp.name)/"repository").publish(release=True);self.assertTrue(noop["noop"]);self.assertEqual(len(json.loads((Path(self.tmp.name)/"repository/index.json").read_text())),1)
 
     def test_publisher_refuses_path_traversal(self):
         c=Candidate("s1","org.example.ext","../escape","https://example.org/x.apk",name="x",language="ar",provenance={"page":"x"},metadata={"_artifact_path":str(Path(self.tmp.name)/"x.apk")})
@@ -154,7 +154,7 @@ class CoreTests(unittest.TestCase):
     def test_publisher_rolls_back_files_when_ledger_fails(self):
         root=Path(self.tmp.name)/"repo";root.mkdir();(root/"index.json").write_text("old")
         artifact=Path(self.tmp.name)/"x.apk";artifact.write_bytes(b"apk")
-        c=Candidate("s1","org.example.ext","1.0","https://example.org/x.apk",name="x",language="ar",provenance={"page":"x"},metadata={"_artifact_path":str(artifact)})
+        c=Candidate("s1","org.example.ext","1.0","https://example.org/x.apk",name="x",language="ar",provenance={"page":"x"},metadata={"_artifact_path":str(artifact),"_security":{"sha256":"a"*64,"certificate":"a"*64}})
         self.store.put_pending(c,"security-passed");self.store.accept_pending(c.source_id,c.identity)
         original=self.store.publish
         def fail(_):raise RuntimeError("ledger unavailable")
@@ -162,7 +162,7 @@ class CoreTests(unittest.TestCase):
         try:
             with self.assertRaises(RuntimeError):RepositoryPublisher(self.store,root).publish(release=True)
         finally:self.store.publish=original
-        self.assertEqual((root/"index.json").read_text(),"old");self.assertFalse((root/"org_example_ext-1.0.apk").exists());self.assertTrue(self.store.has_pending_for(c.source_id,c.identity))
+        self.assertEqual((root/"index.json").read_text(),"old");self.assertFalse((root/"apk/org_example_ext-1.0.apk").exists());self.assertTrue(self.store.has_pending_for(c.source_id,c.identity))
 
     def test_config_reload_cannot_unpause_operator_stopped_source(self):
         self.store.transition("s1",SourceState.PAUSED,"operator stop")

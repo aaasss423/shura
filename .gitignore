@@ -18,11 +18,15 @@ local.properties
 .and-code/
 /caches/
 
-# Runtime-generated repository outputs (committed repo/README.md documents them)
-repo/*.apk
-repo/index.json
-repo/index.min.json
-repo/index.pb
-repo/repo.json
+# Client-facing published artifacts are committed so Mihon can fetch them over
+# raw.githubusercontent / Pages: repo.json, index.json/index.min.json, index.pb,
+# index.shura.json and apk/*.apk. Runtime state (store *.db, /artifacts/) and
+# stale top-level copies at repo/ root stay ignored.
+!repo/index.json
+!repo/index.min.json
+!repo/index.pb
+!repo/repo.json
+!repo/apk/
+!repo/apk/*.apk
 
 /artifacts/

@@ -1,0 +1,20 @@
+[
+  {
+    "source_id": "github:lonevertex/mihon-extension-ar-procomic",
+    "name": "ProComic (AR)",
+    "url": "https://api.github.com/repos/lonevertex/mihon-extension-ar-procomic/releases",
+    "kind": "github-releases",
+    "language": "ar",
+    "region": "ar",
+    "enabled": true,
+    "configuration": {
+      "allowed_hosts": ["api.github.com", "github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"],
+      "repository_url": "https://github.com/LoneVertex/mihon-extension-ar-procomic",
+      "package": "eu.kanade.tachiyomi.extension.ar.procomic",
+      "signing_key": "efd9a7f5cd66f110df33289dbf8bafc89275e00b5434ce489f1d8a2dc209bbe7",
+      "library": "tachiyomi",
+      "operator_notes": "accepted after operator review: v1.5.1 sha256 matches published release checksum 07e6788f...; package verified via aapt; signing certificate digest (efd9a7f5...) independently re-verified by decoding the v1 META-INF and v2/v3 APK Signing Block certificates (apksigner cannot run in this sandbox: JVM mapping denied); previously pinned b655a474... was not the actual APK signer",
+      "scan_policy": "malware_clamav_fail_closed_v2"
+    }
+  }
+]

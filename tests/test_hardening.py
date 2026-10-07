@@ -73,27 +73,30 @@ class HardeningTests(unittest.TestCase):
         scalar = protobuf.varint_field(3, 300)
         self.assertEqual(protobuf.decode(scalar)[3][0], 300)
         entries = [{"name": "Example", "pkg": "org.example.ext", "apk": "x.apk", "lang": "ar",
-                    "version": "1.0", "code": 0, "nsfw": False, "sources": ["https://example.org"],
-                    "shura": {"source_id": "s1", "identity": "org.example.ext|1.0",
-                              "artifact_sha256": "a" * 64, "signing_certificate_sha256": "b" * 64}}]
-        decoded = index_pb.decode_index(index_pb.encode_index(entries, repo="Shura", generated_at=123))
+                    "version": "1.0", "code": 10000, "nsfw": False, "sources": [],
+                    "apk_url": "https://example.org/apk/x.apk", "icon_url": ""}]
+        decoded = index_pb.decode_index(index_pb.encode_index(
+            entries, repo="Shura", signing_key="b" * 64, website="https://example.org"))
         self.assertEqual(decoded["repo"], "Shura")
-        self.assertEqual(decoded["generated_at"], 123)
-        self.assertEqual(decoded["extensions"][0]["pkg"], "org.example.ext")
-        self.assertEqual(decoded["extensions"][0]["identity"], "org.example.ext|1.0")
-        self.assertEqual(decoded["extensions"][0]["artifact_sha256"], "a" * 64)
+        self.assertEqual(decoded["signing_key"], "b" * 64)
+        self.assertEqual(decoded["website"], "https://example.org")
+        self.assertEqual(decoded["extensions"][0]["package_name"], "org.example.ext")
+        self.assertEqual(decoded["extensions"][0]["apk_url"], "https://example.org/apk/x.apk")
+        self.assertEqual(decoded["extensions"][0]["version_code"], 10000)
 
     def test_publisher_emits_index_pb(self):
         artifact = Path(self.tmp.name) / "x.apk"; artifact.write_bytes(b"apk")
         c = Candidate("s1", "org.example.ext", "1.0", "https://example.org/x.apk", name="X", language="ar",
                       provenance={"page": "https://example.org/list"},
-                      metadata={"_artifact_path": str(artifact), "_security": {"sha256": "c" * 64}})
+                      metadata={"_artifact_path": str(artifact), "_security": {"sha256": "c" * 64, "certificate": "a" * 64}})
         self.store.put_pending(c, "security-passed"); self.store.accept_pending("s1", c.identity)
         repo = Path(self.tmp.name) / "repo"
         RepositoryPublisher(self.store, repo).publish(release=True)
         self.assertTrue((repo / "index.pb").is_file())
         decoded = index_pb.decode_index((repo / "index.pb").read_bytes())
-        self.assertEqual(decoded["extensions"][0]["pkg"], "org.example.ext")
+        self.assertEqual(decoded["extensions"][0]["package_name"], "org.example.ext")
+        self.assertEqual(decoded["signing_key"], "a" * 64)
+        self.assertTrue((repo / "apk" / "org_example_ext-1.0.apk").is_file())
 
     def test_accepted_source_state_is_reachable_and_eligible(self):
         self.store.transition("s1", SourceState.PAUSED, "discovered")

@@ -2,14 +2,15 @@ from __future__ import annotations
 import re
 from shura_core.models import Candidate
 from shura_core.security.artifacts import ArtifactScanner,ScanVerdict
+from shura_core.security.malware import MalwareScanner
 from shura_core.security.network import SafeHTTP
 from shura_core.security.network import validate_url
 from shura_core.quality.ranking import source_quality
 from datetime import datetime,timezone
 class CandidateProcessor:
-    def __init__(self,store,artifact_dir="artifacts",scanner=None,expected_hosts=None,http_factory=None,url_validator=None):
+    def __init__(self,store,artifact_dir="artifacts",scanner=None,malware_scanner=None,expected_hosts=None,http_factory=None,url_validator=None):
         from pathlib import Path
-        self.store=store;self.dir=Path(artifact_dir);self.dir.mkdir(parents=True,exist_ok=True);self.scanner=scanner or ArtifactScanner();self.expected_hosts=expected_hosts or set();self.http_factory=http_factory or SafeHTTP;self.url_validator=url_validator or validate_url
+        self.store=store;self.dir=Path(artifact_dir);self.dir.mkdir(parents=True,exist_ok=True);self.scanner=scanner or ArtifactScanner();self.malware_scanner=malware_scanner or MalwareScanner();self.expected_hosts=expected_hosts or set();self.http_factory=http_factory or SafeHTTP;self.url_validator=url_validator or validate_url
     def validate(self,c):
         errors=[]
         source=self.store.get_source(c.source_id)
@@ -42,9 +43,14 @@ class CandidateProcessor:
             result=self.scanner.scan(path,expected_package=c.package,expected_certificate=source.configuration.get("signing_key"))
             if result.verdict!=ScanVerdict.CLEAN:
                 self.store.mark_processed(c.source_id,c.identity,self.store.get_source(c.source_id).configuration_fingerprint,"quarantined")
-                self.store.quarantine_item(c,result.reason,result.sha256,{"verdict":result.verdict.value,"size":result.size});return {"verdict":"QUARANTINED","reason":result.reason,"sha256":result.sha256}
+                self.store.quarantine_item(c,result.reason,result.sha256,{"verdict":result.verdict.value,"scanner":type(self.scanner).__name__,"size":result.size});return {"verdict":"QUARANTINED","reason":result.reason,"sha256":result.sha256}
+            malware=self.malware_scanner.scan(path)
+            if malware.verdict!=ScanVerdict.CLEAN:
+                self.store.mark_processed(c.source_id,c.identity,self.store.get_source(c.source_id).configuration_fingerprint,"quarantined")
+                self.store.quarantine_item(c,malware.reason,result.sha256,{"verdict":malware.verdict.value,"scanner":type(self.malware_scanner).__name__,"size":malware.size,"artifact_sha256":result.sha256})
+                return {"verdict":"QUARANTINED","reason":malware.reason,"sha256":result.sha256,"malware_verdict":malware.verdict.value}
             c.metadata["_artifact_path"]=str(path)
-            c.metadata["_security"]={"sha256":result.sha256,"package":result.package,"certificate":result.certificate,"verdict":result.verdict.value}
+            c.metadata["_security"]={"sha256":result.sha256,"package":result.package,"certificate":result.certificate,"verdict":result.verdict.value,"malware":{"engine":type(self.malware_scanner).__name__,"verdict":malware.verdict.value,"detail":malware.reason}}
             status=self.store.status(c.source_id);counts=status["counts"] if status else {};source=self.store.get_source(c.source_id)
             days=30
             if source and source.last_success:
@@ -52,6 +58,6 @@ class CandidateProcessor:
             c.metadata["_quality_score"]=source_quality(language=c.language,successes=counts.get("crawl_success",0),attempts=max(1,source.attempt_count if source else 1),valid=counts.get("candidate_accepted",0)+1,duplicates=counts.get("duplicatesSkipped",0),quarantined=0,fresh_days=days)
             self.store.put_pending(c,"security-passed")
             self.store.mark_processed(c.source_id,c.identity,self.store.get_source(c.source_id).configuration_fingerprint,"security-passed")
-            return {"verdict":"ACCEPTED","reason":result.reason,"sha256":result.sha256,"quality_score":c.metadata["_quality_score"],"artifact":str(path)}
+            return {"verdict":"ACCEPTED","reason":f"{result.reason}; {malware.reason}","sha256":result.sha256,"malware_verdict":malware.verdict.value,"quality_score":c.metadata["_quality_score"],"artifact":str(path)}
         except Exception as e:
             self.store.put_pending(c,"download-failed");return {"verdict":"PENDING","reason":str(e)}

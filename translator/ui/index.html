@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Translation Platform</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Translation Platform</h1>
+    <p>Standalone translation service. Every request below goes through the real REST API and a real translation engine.</p>
+    <div class="status-row">
+      <span class="badge" id="engineBadge">engine: …</span>
+      <span class="badge" id="healthBadge">health: …</span>
+      <span class="badge" id="limitBadge">limit: …</span>
+    </div>
+  </header>
+
+  <main>
+    <div class="tabs">
+      <button class="tab active" data-mode="single">Text</button>
+      <button class="tab" data-mode="chapter">Chapter</button>
+      <button class="tab" data-mode="settings">Settings</button>
+    </div>
+
+    <!-- Single text mode -->
+    <section id="singleMode">
+      <fieldset>
+        <legend>Source</legend>
+        <label for="text">Text to translate</label>
+        <textarea id="text" dir="auto" placeholder="Type or paste text in any supported language…"></textarea>
+
+        <div class="grid">
+          <div class="field">
+            <label for="sourceLang">Source language</label>
+            <select id="sourceLang"></select>
+          </div>
+          <div class="field">
+            <label for="targetLang">Target language</label>
+            <select id="targetLang"></select>
+          </div>
+          <div class="field">
+            <label for="timeoutMs">Timeout (ms)</label>
+            <input type="number" id="timeoutMs" min="200" step="100" value="15000" />
+          </div>
+        </div>
+
+        <div class="checkbox">
+          <input type="checkbox" id="noCache" />
+          <label for="noCache" style="margin:0">Bypass cache (noCache)</label>
+        </div>
+
+        <div class="actions">
+          <button class="primary" id="translateBtn">Translate</button>
+          <button id="detectBtn">Detect language</button>
+          <button id="clearBtn">Clear</button>
+        </div>
+      </fieldset>
+
+      <div class="result hidden" id="singleResult">
+        <div class="result-header">
+          <h2>Result</h2>
+          <div class="actions" style="margin:0">
+            <button id="copyBtn">Copy</button>
+            <button id="retryBtn">Retry</button>
+          </div>
+        </div>
+        <div class="result-text" id="resultText" dir="rtl"></div>
+        <div class="meta" id="resultMeta"></div>
+        <div id="qualityBox"></div>
+      </div>
+
+      <div id="singleError"></div>
+    </section>
+
+    <!-- Settings mode: engine selection and secure API key storage -->
+    <section id="settingsMode" class="hidden">
+      <fieldset>
+        <legend>Engines</legend>
+        <div id="engineList" class="engine-list"><span class="muted">loading…</span></div>
+        <div class="meta" id="routingMeta"></div>
+      </fieldset>
+
+      <fieldset>
+        <legend>DeepL API key</legend>
+        <p class="muted">
+          Stored encrypted on this machine, outside the project folder, with
+          owner-only permissions. It is never written to the repository, never
+          returned by the API, and never appears in logs.
+        </p>
+
+        <div class="secret-row">
+          <label class="sr-only" for="deeplKey">DeepL API key</label>
+          <input
+            type="password"
+            id="deeplKey"
+            class="secret-input"
+            autocomplete="off"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck="false"
+            placeholder="Paste your DeepL API key"
+          />
+          <button id="toggleKeyBtn" type="button" aria-pressed="false" title="Show or hide the key">Show</button>
+        </div>
+
+        <div class="status-line">
+          <span class="badge" id="secretBadge">key: …</span>
+          <span class="muted" id="secretDetail"></span>
+        </div>
+
+        <div class="actions">
+          <button class="primary" id="saveKeyBtn">Save key</button>
+          <button id="testKeyBtn">Test connection</button>
+          <button class="danger" id="deleteKeyBtn">Delete key</button>
+        </div>
+
+        <div id="secretMessage"></div>
+      </fieldset>
+    </section>
+
+    <!-- Chapter mode -->
+    <section id="chapterMode" class="hidden">
+      <fieldset>
+        <legend>Chapter</legend>
+        <label for="chapterText">Chapter text (blank line between panels)</label>
+        <textarea id="chapterText" style="min-height:200px" dir="auto" placeholder="One panel or line of dialogue per paragraph…"></textarea>
+
+        <div class="grid">
+          <div class="field">
+            <label for="cSourceLang">Source language</label>
+            <select id="cSourceLang"></select>
+          </div>
+          <div class="field">
+            <label for="cTargetLang">Target language</label>
+            <select id="cTargetLang"></select>
+          </div>
+          <div class="field">
+            <label for="concurrency">Concurrency</label>
+            <input type="number" id="concurrency" min="1" max="8" value="3" />
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="primary" id="chapterBtn">Translate chapter</button>
+          <button id="chapterRetryBtn" disabled>Retry failed segments</button>
+          <button id="chapterClearBtn">Clear</button>
+        </div>
+
+        <div class="progress hidden" id="chapterProgress">
+          <div class="progress-bar"><div class="progress-fill" id="chapterProgressFill"></div></div>
+          <div class="progress-label" id="chapterProgressLabel">waiting…</div>
+        </div>
+      </fieldset>
+
+      <div class="result hidden" id="chapterResult">
+        <div class="result-header">
+          <h2>Chapter</h2>
+          <div class="actions" style="margin:0">
+            <button id="chapterCopyBtn">Copy</button>
+          </div>
+        </div>
+        <div class="meta" id="chapterMeta"></div>
+        <div class="alert warn hidden" id="chapterDegraded"></div>
+        <div class="segment-list" id="chapterSegments"></div>
+      </div>
+
+      <div id="chapterError"></div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

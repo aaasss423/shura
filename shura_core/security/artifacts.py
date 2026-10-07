@@ -46,10 +46,13 @@ class ArtifactScanner:
                 if bad:return ScanResult(ScanVerdict.REJECTED,digest,size,f"corrupt archive member: {bad}")
         except (zipfile.BadZipFile,RuntimeError,EOFError) as exc:
             return ScanResult(ScanVerdict.REJECTED,digest,size,f"malformed APK archive: {exc}")
-        package=None;aapt=shutil.which("aapt")
+        package=None;aapt=shutil.which("aapt2") or shutil.which("aapt")
         if aapt:
             try:
-                out=subprocess.run([aapt,"dump","badging",str(p)],capture_output=True,text=True,timeout=self.timeout,check=False)
+                cmd=["dump","badging",str(p)]
+                if Path(aapt).name=="aapt2":cmd=["aapt2","dump","badging",str(p)]
+                else:cmd=["aapt","dump","badging",str(p)]
+                out=subprocess.run(cmd,capture_output=True,text=True,timeout=self.timeout,check=False)
                 if out.returncode:return ScanResult(ScanVerdict.REJECTED,digest,size,"aapt could not parse APK manifest")
                 match=re.search(r"^package: name='([^']+)'",out.stdout,re.M)
                 package=match.group(1) if match else None
@@ -67,4 +70,4 @@ class ArtifactScanner:
         else:return ScanResult(ScanVerdict.SUSPICIOUS,digest,size,"apksigner unavailable; signature cannot be verified",package=package)
         if expected and not cert:return ScanResult(ScanVerdict.SUSPICIOUS,digest,size,"signing certificate fingerprint unavailable",package=package)
         if expected and cert.lower().replace(":","")!=expected.lower().replace(":",""):return ScanResult(ScanVerdict.REJECTED,digest,size,"signing certificate mismatch",package=package,certificate=cert)
-        return ScanResult(ScanVerdict.CLEAN,digest,size,"APK package and signature verified; malware scanning is not configured",package=package,certificate=cert)
+        return ScanResult(ScanVerdict.CLEAN,digest,size,"APK package and signature verified",package=package,certificate=cert)

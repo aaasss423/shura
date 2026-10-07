@@ -57,12 +57,14 @@ object ReaderTranslationPlanner {
 class TranslationSettingsStore(context: Context) {
     private val preferences = context.getSharedPreferences("reader-translation", Context.MODE_PRIVATE)
 
-    fun load(): TranslationSettings = TranslationSettings(
-        mode = runCatching { TranslationMode.valueOf(preferences.getString(KEY_MODE, null) ?: return@runCatching "") }
-            .getOrDefault(TranslationMode.OFF),
-        targetLanguage = preferences.getString(KEY_TARGET, "ar") ?: "ar",
-        sourceLanguage = preferences.getString(KEY_SOURCE, "ja") ?: "ja",
-    )
+    fun load(): TranslationSettings {
+        val rawMode = preferences.getString(KEY_MODE, null)
+        return TranslationSettings(
+            mode = rawMode?.let { runCatching { TranslationMode.valueOf(it) }.getOrNull() } ?: TranslationMode.OFF,
+            targetLanguage = preferences.getString(KEY_TARGET, "ar") ?: "ar",
+            sourceLanguage = preferences.getString(KEY_SOURCE, "ja") ?: "ja",
+        )
+    }
 
     fun save(settings: TranslationSettings) {
         preferences.edit()

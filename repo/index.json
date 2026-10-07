@@ -1,0 +1,22 @@
+[
+  {
+    "name": "ProComic (AR)",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.procomic",
+    "apk": "eu_kanade_tachiyomi_extension_ar_procomic-v1.5.1.apk",
+    "lang": "ar",
+    "code": 10501,
+    "version": "1.5.1",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "ProComic (AR)",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.procomic",
+    "apk": "eu_kanade_tachiyomi_extension_ar_procomic-v1.5.0.apk",
+    "lang": "ar",
+    "code": 10500,
+    "version": "1.5.0",
+    "nsfw": 0,
+    "sources": []
+  }
+]

@@ -1,0 +1,42 @@
+{
+  "name": "@shura-tools/translation-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone translation platform: pluggable translation engines, Arabic-first quality, chapter translation, REST API and UI.",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "scripts": {
+    "clean": "node scripts/clean.js",
+    "build": "npm run clean && tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prestart": "npm run build",
+    "start": "node dist/src/server/main.js",
+    "dev": "npm run build && node dist/src/server/main.js",
+    "sync-ui": "node scripts/sync-ui.js",
+    "pretest": "npm run build",
+    "test": "node --test dist/test/unit/*.test.js dist/test/integration/*.test.js dist/test/rest/*.test.js dist/test/platform/*.test.js",
+    "test:unit": "npm run build && node --test dist/test/unit/*.test.js",
+    "test:integration": "npm run build && node --test dist/test/integration/*.test.js",
+    "test:rest": "npm run build && node --test dist/test/rest/*.test.js",
+    "test:live": "npm run build && node --test dist/test/live/*.test.js",
+    "smoke": "npm run build && node dist/src/scripts/smoke.js",
+    "smoke:live": "npm run build && node dist/src/scripts/smoke.js --live",
+    "verify": "npm run typecheck && npm run test && npm run smoke",
+    "benchmark": "npm run build && node dist/src/scripts/benchmark.js",
+    "test:live:deepl": "npm run build && node --test dist/test/live/deeplLive.test.js",
+    "test:platform": "npm run build && node --test dist/test/platform/*.test.js",
+    "loadtest": "npm run build && node dist/src/scripts/loadtest.js",
+    "serving:plan": "npm run build && node dist/src/scripts/servingPlan.js",
+    "preflight": "npm run build && node dist/src/scripts/preflight.js --all",
+    "serve": "npm run build && node dist/src/scripts/serve.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "version": "1.0.0",
+  "created": "2026-10-07",
+  "description": "Manga/manhwa translation evaluation corpus. Reference Arabic is machine-drafted and NOT human-verified: items are scored for agreement with the reference, never for absolute quality, until promoted by review.",
+  "languages": ["ja", "zh", "ko", "en"],
+  "target_language": "ar",
+  "splits": {
+    "dev": "Development split. May be inspected when tuning prompts, glossary and segmentation, and may seed the knowledge base and translation memory.",
+    "test": "Evaluation split (holdout). Never used to seed the knowledge base, translation memory, research queue or any training data. Enforced at runtime by src/platform/eval/holdout.ts."
+  },
+  "reference_provenance": {
+    "ai_drafted": "Reference written by an AI assistant. Comparable across models, but it is not a native-speaker gold standard. Reported as agreement only.",
+    "human_verified": "Reviewed by a competent Arabic speaker. Only these items may back a quality claim."
+  },
+  "categories": [
+    "dialogue",
+    "colloquial",
+    "slang",
+    "idiom",
+    "honorific",
+    "name",
+    "place",
+    "sound_effect",
+    "short",
+    "long",
+    "context_dependent",
+    "manga_expression"
+  ],
+  "leakage_policy": {
+    "holdout_enforcement": "holdout.ts",
+    "guarantees": [
+      "test items are rejected by KnowledgeRepository, TranslationMemoryRepository, ResearchQueue and Prewarmer",
+      "dataset export filters out test items by default",
+      "an evaluation run records the dataset version so results are not compared across corpora"
+    ]
+  }
+}
