@@ -13,7 +13,7 @@ message Index {
   string badgeLabel = 2;
   string signingKey = 3;              // SHA-256 certificate fingerprint (64 hex)
   Contact contact = 4;
-  ExtensionList extensionList = 5;    // inline extension list
+  ExtensionList extensionList = 101;  // inline extension list (NOT 5)
   string extensionListUrl = 102;      // alternative external list URL (unused)
 }
 

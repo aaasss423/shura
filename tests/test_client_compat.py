@@ -19,6 +19,7 @@ configured trusted ``signing_key``.
 """
 import json
 import os
+import re
 import tempfile
 import unittest
 import zipfile
@@ -27,6 +28,7 @@ from pathlib import Path
 from shura_core.models import Candidate, Source
 from shura_core.state import StateStore
 from shura_core.publishing import protobuf as pb
+from shura_core.publishing import index_pb
 from shura_core.publishing.repository import (
     RepositoryPublisher,
     PublishRefused,
@@ -38,7 +40,16 @@ CERT = "efd9a7f5cd66f110df33289dbf8bafc89275e00b5434ce489f1d8a2dc209bbe7"
 CERT_OTHER = "a" * 64
 
 # Mihon NetworkExtensionStore @ProtoNumber tables (authoritative reference).
-MHON_INDEX = {1: "name", 2: "badgeLabel", 3: "signingKey", 4: "contact", 5: "extensionList"}
+# ``Index.extensionList`` is @ProtoNumber(101) upstream, and Keiyoushi's
+# index.proto puts it in the ``extensions`` oneof with extensionListUrl=102.
+# Tag 5 is NOT part of the contract; keeping it here is exactly the regression
+# this file exists to catch.
+MHON_INDEX = {1: "name", 2: "badgeLabel", 3: "signingKey", 4: "contact",
+              101: "extensionList", 102: "extensionListUrl"}
+#: Field numbers the contract leaves unused inside ``Index``. Shura must never
+#: emit any of them; 5 is the historical mistake (the real tag is 101).
+MHON_INDEX_RESERVED = {5}
+MHON_INDEX_EXTENSION_LIST = 101
 MHON_CONTACT = {1: "website", 2: "discord"}
 MHON_EXTENSION = {1: "name", 2: "packageName", 3: "resources", 4: "extensionLib",
                   5: "versionCode", 6: "versionName", 7: "contentWarning", 8: "sources"}
@@ -55,7 +66,7 @@ def mihon_decode_store(data: bytes) -> dict:
     for raw in top.get(4, []):
         store["contact"] = {MHON_CONTACT[k]: v for k, v in _scalars(raw).items()}
     extensions = []
-    for raw in top.get(5, []):
+    for raw in top.get(101, []):
         for ext_raw in pb.decode(raw).get(1, []):
             fields = pb.decode(ext_raw)
             ext = {
@@ -81,6 +92,91 @@ def mihon_decode_store(data: bytes) -> dict:
 
 def _s(fields: dict, number: int) -> str:
     return fields[number][0].decode("utf-8", "replace") if fields.get(number) else ""
+
+
+def walk_fields(data: bytes) -> list[tuple[int, int, object]]:
+    """Decode ``data`` into ``[(field_number, wire_type, value), ...]``.
+
+    ``pb.decode`` deliberately drops wire types, so a schema test that used it
+    could not tell a length-delimited string from a varint. Contract tests
+    need both the tag *and* the wire type of every field on the wire.
+    """
+    out: list[tuple[int, int, object]] = []
+    offset = 0
+    while offset < len(data):
+        key, offset = pb.decode_varint(data, offset)
+        number, wire_type = key >> 3, key & 0x07
+        if wire_type == pb.WIRE_VARINT:
+            value, offset = pb.decode_varint(data, offset)
+        elif wire_type == pb.WIRE_LENGTH:
+            length, offset = pb.decode_varint(data, offset)
+            value = data[offset:offset + length]
+            offset += length
+        else:  # pragma: no cover - would itself be a contract violation
+            raise AssertionError(f"field {number}: unexpected wire type {wire_type}")
+        out.append((number, wire_type, value))
+    return out
+
+
+def index_tags(data: bytes) -> list[tuple[int, int]]:
+    """``[(field_number, wire_type), ...]`` for the top-level Index message."""
+    raw = data
+    if raw[:2] == b"\x1f\x8b":
+        import gzip
+        raw = gzip.decompress(raw)
+    return [(number, wire) for number, wire, _ in walk_fields(raw)]
+
+
+def extension_list_payloads(data: bytes) -> list[bytes]:
+    """Raw ``ExtensionList`` sub-messages found at the contract tag (101)."""
+    raw = data
+    if raw[:2] == b"\x1f\x8b":
+        import gzip
+        raw = gzip.decompress(raw)
+    return [value for number, wire, value in walk_fields(raw)
+            if number == MHON_INDEX_EXTENSION_LIST and wire == pb.WIRE_LENGTH]
+
+
+def _gunzip(data: bytes) -> bytes:
+    import gzip
+    if data[:2] == b"\x1f\x8b":
+        return gzip.decompress(data)
+    return data
+
+
+def _only(data: bytes, number: int) -> bytes:
+    """The single length-delimited payload at ``number``, else a failure."""
+    found = [v for n, w, v in walk_fields(data) if n == number and w == pb.WIRE_LENGTH]
+    if len(found) != 1:
+        raise AssertionError(f"expected exactly one field {number}, got {len(found)}")
+    return found[0]
+
+
+def _contract_entry() -> dict:
+    return {
+        "name": "Example", "pkg": "org.example.ext", "apk": "org_example_ext-1.0.apk",
+        "version": "1.0.2", "code": 102, "nsfw": 1,
+        "apk_url": "apk/org_example_ext-1.0.apk",
+        "icon_url": "icon/org.example.ext.png",
+        "sources": [{"id": 7, "name": "Fixture", "language": "ar",
+                     "home_url": "https://example.org",
+                     "mirror_urls": ["https://mirror.example.org"],
+                     "message": "hello"}],
+    }
+
+
+def _encode_with_tag_5(entries: list[dict]) -> bytes:
+    """Build the *broken* index the encoder used to emit, on purpose.
+
+    Reproduces the pre-fix wire format (extensionList at tag 5) so tests can
+    prove the new decoder does not keep accepting it by accident.
+    """
+    original = index_pb.INDEX_EXTENSION_LIST
+    try:
+        index_pb.INDEX_EXTENSION_LIST = 5
+        return index_pb.encode_index(entries, repo="Shura", signing_key=CERT)
+    finally:
+        index_pb.INDEX_EXTENSION_LIST = original
 
 
 def _scalars(raw: bytes) -> dict:
@@ -319,6 +415,221 @@ class ProtoV2CompatibilityTests(LegacyIndexCompatibilityTests):
             store["extensions"][0]["resources"]["iconUrl"],
             "https://repo.example/shura/icon/eu.kanade.tachiyomi.extension.ar.procomic.png",
         )
+
+
+class ExtensionListField101RegressionTests(LegacyIndexCompatibilityTests):
+    """Regression: ``Index.extensionList`` must be field 101, never 5.
+
+    Shura emitted the inline list at tag 5. Mihon declares the field at
+    ``@ProtoNumber(101)`` and Keiyoushi declares it inside the ``extensions``
+    oneof, so tag 5 is an unknown field to a real client: the store parsed
+    cleanly and then reported **zero extensions**. The repository looked
+    installed and simply appeared empty, with no error anywhere -- which is
+    why the piggyback decoder passed the suite at the time (see
+    ``mihon_decode_store``, which had itself been written with tag 5).
+    """
+
+    def test_extension_list_is_written_to_field_101(self):
+        tags = index_tags((self.repo / "index.pb").read_bytes())
+        self.assertIn(
+            (MHON_INDEX_EXTENSION_LIST, pb.WIRE_LENGTH), tags,
+            f"extensionList (101, wire 2) missing from the Index message: {tags}",
+        )
+
+    def test_extension_list_is_never_written_to_field_5(self):
+        tags = index_tags((self.repo / "index.pb").read_bytes())
+        for number, wire in tags:
+            self.assertNotEqual(
+                number, 5,
+                "extensionList regressed to field 5; Mihon reads 101 "
+                "(@ProtoNumber(101) in NetworkExtensionStore.kt)",
+            )
+        # Belt and braces: 5 is a *reserved* tag in this contract, so nothing
+        # at all may appear there -- not even a differently-typed field.
+        self.assertFalse([t for t in tags if t[0] in MHON_INDEX_RESERVED])
+
+    def test_index_pb_actually_contains_the_extensions(self):
+        """Not a byte-pattern check: decode field 101 and enumerate extensions."""
+        data = (self.repo / "index.pb").read_bytes()
+        payloads = extension_list_payloads(data)
+        self.assertEqual(len(payloads), 1, "exactly one inline ExtensionList is expected")
+        decoded = pb.decode(payloads[0])
+        raws = decoded.get(1, [])
+        self.assertEqual(len(raws), 1, "ExtensionList.extensions must carry the extension")
+        fields = pb.decode(raws[0])
+        self.assertEqual(fields[1][0].decode(), "ProComic (AR)")
+        self.assertEqual(fields[2][0].decode(), "eu.kanade.tachiyomi.extension.ar.procomic")
+        self.assertEqual(fields[6][0].decode(), "1.5.1")
+
+    def test_piggyback_decoder_and_mihon_decoder_agree_on_extension_count(self):
+        """Both decoders must see the same extensions; a tag drift makes them
+        disagree silently rather than raising."""
+        data = (self.repo / "index.pb").read_bytes()
+        self.assertEqual(len(index_pb.decode_index(data)["extensions"]), 1)
+        self.assertEqual(len(mihon_decode_store(data)["extensions"]), 1)
+
+    def test_decoder_rejects_legacy_tag_5_index(self):
+        """A field-5 index must decode to *zero* extensions, proving the fix is
+        load-bearing: the old encoder's output is not silently still accepted."""
+        legacy = _encode_with_tag_5([{
+            "name": "X", "pkg": "org.example.ext", "apk": "org_example_ext-1.0.apk",
+            "version": "1.0", "code": 100, "nsfw": 0, "sources": [],
+            "apk_url": "apk/org_example_ext-1.0.apk", "icon_url": "",
+        }])
+        self.assertEqual(index_pb.decode_index(legacy)["extensions"], [])
+        self.assertEqual(mihon_decode_store(legacy)["extensions"], [])
+
+    def test_contact_discord_stays_inside_the_contact_submessage(self):
+        """Regression: Contact was built as ``message_field(4, website)`` and
+        then ``+=``'d discord, which appends *after* the length prefix. The
+        discord bytes escaped the Contact submessage and landed at Index level
+        as a stray field 2 -- a duplicate ``badgeLabel`` to Mihon. Protobuf
+        stays structurally valid, so no error surfaced anywhere."""
+        data = index_pb.encode_index([], repo="Shura", website="https://w",
+                                     discord="https://d", gzip_output=False)
+        top = {n: v for n, _, v in walk_fields(data)}
+        self.assertEqual({n for n, _, _ in walk_fields(data)}, {1, 2, 3, 4, 101})
+        contact = _only(data, 4)
+        self.assertEqual({n for n, _, _ in walk_fields(contact)}, {1, 2})
+        # And the round-trip decoder must actually recover the discord handle.
+        self.assertEqual(index_pb.decode_index(data)["discord"], "https://d")
+        # Website-only must not gain a bogus discord.
+        website_only = index_pb.encode_index([], website="https://w", gzip_output=False)
+        self.assertEqual(index_pb.decode_index(website_only)["discord"], "")
+
+
+class IndexProtoContractTests(unittest.TestCase):
+    """Whole-schema guard: every field number and wire type Shura can emit,
+    checked against the upstream Mihon/Keiyoushi tables. The point is to catch
+    a *different* wrong tag in the future, not just the 101 one."""
+
+    # message -> {field_number: (name, proto_type)} from upstream.
+    CONTRACT = {
+        "Index": {1: ("name", "string"), 2: ("badgeLabel", "string"),
+                  3: ("signingKey", "string"), 4: ("contact", "message"),
+                  101: ("extensionList", "message"), 102: ("extensionListUrl", "string")},
+        "Contact": {1: ("website", "string"), 2: ("discord", "string")},
+        "ExtensionList": {1: ("extensions", "message")},
+        "Extension": {1: ("name", "string"), 2: ("packageName", "string"),
+                      3: ("resources", "message"), 4: ("extensionLib", "string"),
+                      5: ("versionCode", "int64"), 6: ("versionName", "string"),
+                      7: ("contentWarning", "enum"), 8: ("sources", "message")},
+        "Resources": {1: ("apkUrl", "string"), 2: ("iconUrl", "string")},
+        "Source": {1: ("id", "int64"), 2: ("name", "string"), 3: ("language", "string"),
+                   4: ("homeUrl", "string"), 5: ("mirrorUrls", "string"),
+                   7: ("message", "string")},
+    }
+    # proto3 wire types: length-delimited for strings/messages, varint for
+    # int64/enum.
+    WIRE_BY_TYPE = {"string": pb.WIRE_LENGTH, "message": pb.WIRE_LENGTH,
+                    "int64": pb.WIRE_VARINT, "enum": pb.WIRE_VARINT}
+
+    def test_index_proto_declares_the_upstream_field_numbers(self):
+        text = Path(__file__).resolve().parents[1].joinpath(
+            "shura_core/publishing/index.proto").read_text()
+        declared: dict[str, dict[int, str]] = {}
+        message = None
+        for raw in text.splitlines():
+            line = raw.split("//")[0].strip()
+            header = re.match(r"^(message|enum)\s+(\w+)\s*\{$", line)
+            if header:
+                if header.group(1) == "enum":
+                    message = None  # enum bodies are not message fields
+                else:
+                    message = header.group(2)
+                    declared.setdefault(message, {})
+                continue
+            if line == "}":
+                message = None
+                continue
+            field = re.match(
+                r"^(?:repeated\s+|optional\s+)?\w[\w.]*\s+(\w+)\s*=\s*(\d+);$", line)
+            if field and message:
+                declared[message][int(field.group(2))] = field.group(1)
+        self.assertEqual(
+            declared, {msg: {n: name for n, (name, _) in fields.items()}
+                       for msg, fields in self.CONTRACT.items()},
+            "index.proto field numbers drifted from the Mihon/Keiyoushi contract",
+        )
+
+    def test_every_emitted_field_matches_tag_and_wire_type(self):
+        data = index_pb.encode_index([_contract_entry()], repo="Shura", signing_key=CERT,
+                                     website="https://example.org",
+                                     discord="https://discord.gg/shura")
+        # Index level
+        self.assertEqual(
+            {(n, w) for n, w, _ in walk_fields(_gunzip(data))},
+            {(1, pb.WIRE_LENGTH), (2, pb.WIRE_LENGTH), (3, pb.WIRE_LENGTH),
+             (4, pb.WIRE_LENGTH), (101, pb.WIRE_LENGTH)},
+        )
+        # Contact level
+        contact = _only(_gunzip(data), 4)
+        self.assertEqual({n for n, _, _ in walk_fields(contact)}, {1, 2})
+        # ExtensionList level
+        ext_list = _only(_gunzip(data), 101)
+        self.assertEqual({n for n, _, _ in walk_fields(ext_list)}, {1})
+        # Extension level
+        extension = _only(ext_list, 1)
+        self.assertEqual({n for n, _, _ in walk_fields(extension)}, set(range(1, 9)))
+        resources = _only(extension, 3)
+        self.assertEqual({n for n, _, _ in walk_fields(resources)}, {1, 2})
+        # Source level (note: 6 is intentionally absent upstream)
+        source = _only(extension, 8)
+        self.assertEqual({n for n, _, _ in walk_fields(source)}, {1, 2, 3, 4, 5, 7})
+
+    def test_scalar_wire_types_are_varint_where_the_contract_says_so(self):
+        data = _gunzip(index_pb.encode_index([_contract_entry()], signing_key=CERT))
+        extension = _only(_only(data, 101), 1)
+        by_number = {n: w for n, w, _ in walk_fields(extension)}
+        for number, kind in ((5, "int64"), (7, "enum")):
+            self.assertEqual(by_number[number], self.WIRE_BY_TYPE[kind])
+        for number, kind in ((1, "string"), (2, "string"), (4, "string"), (6, "string")):
+            self.assertEqual(by_number[number], self.WIRE_BY_TYPE[kind])
+        self.assertEqual(by_number[3], pb.WIRE_LENGTH)  # Resources message
+
+    def test_source_message_field_is_7_not_6(self):
+        """Source.message is @ProtoNumber(7); field 6 was commented out
+        upstream and must stay unused."""
+        data = _gunzip(index_pb.encode_index([_contract_entry()], signing_key=CERT))
+        source = _only(_only(_only(data, 101), 1), 8)
+        numbers = [n for n, _, _ in walk_fields(source)]
+        self.assertNotIn(6, numbers)
+        self.assertIn(7, numbers)
+
+
+class RepoJsonIndexV2ContractTests(LegacyIndexCompatibilityTests):
+    """``repo.json``'s ``index_v2`` is the only handle Mihon uses to find the
+    protobuf index, so it must point at the file we actually emit -- and that
+    file must be the 101-tag one."""
+
+    def test_index_v2_points_at_an_index_pb_that_decodes_extensions(self):
+        import os
+        os.environ["SHURA_REPO_BASE_URL"] = "https://repo.example/shura"
+        try:
+            RepositoryPublisher(self.store, self.repo).publish(release=True)
+        finally:
+            del os.environ["SHURA_REPO_BASE_URL"]
+        repo_doc = json.loads((self.repo / "repo.json").read_text())
+        index_v2 = repo_doc["index_v2"]
+        self.assertEqual(index_v2, "https://repo.example/shura/index.pb")
+
+        # Resolve the advertised URL the way a client would: the path segment
+        # under the repository root.
+        advertised = Path(index_v2).name
+        self.assertEqual(advertised, "index.pb")
+        target = self.repo / advertised
+        self.assertTrue(target.is_file(), f"index_v2 advertises a missing file: {index_v2}")
+
+        store = mihon_decode_store(target.read_bytes())
+        self.assertEqual(len(store["extensions"]), 1)
+        self.assertEqual(store["extensions"][0]["packageName"],
+                         "eu.kanade.tachiyomi.extension.ar.procomic")
+        self.assertEqual(store["extensions"][0]["resources"]["apkUrl"],
+                         "https://repo.example/shura/apk/"
+                         "eu_kanade_tachiyomi_extension_ar_procomic-v1.5.1.apk")
+        # And the advertised URL's APK must actually exist locally, else the
+        # client 404s on install.
+        self.assertTrue((self.repo / "apk" / "eu_kanade_tachiyomi_extension_ar_procomic-v1.5.1.apk").is_file())
 
 
 class RealArtifactSigningTests(unittest.TestCase):

@@ -6,7 +6,7 @@ The wire schema mirrors the one interpreted by Mihon's
 and produced by Keiyoushi's ``publish-repo.py``. Field numbers match the
 Kotlin ``@ProtoNumber`` annotations so a real Mihon client can decode the file:
 
-    Index {1 name, 2 badgeLabel, 3 signingKey, 4 contact, 5 extensionList}
+    Index {1 name, 2 badgeLabel, 3 signingKey, 4 contact, 101 extensionList}
       Contact {1 website, 2 discord}
       ExtensionList {1 repeated Extension}
       Extension {1 name, 2 packageName, 3 resources, 4 extensionLib,
@@ -29,6 +29,13 @@ from shura_core.publishing import protobuf as pb
 CONTENT_WARNING_SAFE = 1
 CONTENT_WARNING_MIXED = 2
 CONTENT_WARNING_NSFW = 3
+
+#: ``Index.extensionList`` tag. Upstream Mihon's ``NetworkExtensionStore``
+#: annotates it ``@ProtoNumber(101)`` and Keiyoushi's ``index.proto`` declares
+#: it ``101`` inside the ``extensions`` oneof. Tag 5 is unused by the contract,
+#: so encoding there produces an ``Index`` that a real Mihon client parses as
+#: "zero extensions" -- a silently empty repository rather than an error.
+INDEX_EXTENSION_LIST = 101
 
 
 def _source_message(source: dict) -> bytes:
@@ -82,17 +89,23 @@ def encode_index(
     ``generated_at`` is accepted for API compatibility only; the Mihon schema
     has no timestamp field. The ``index_v2`` field (102, external extension
     list URL) is deliberately not emitted: Shura writes the extension list
-    inline so clients never need a second network hop.
+    inline so clients never need a second network hop. Inline means field
+    ``101`` -- the oneof partner of 102, not a private low tag.
     """
     name = str(repo)
     badge = badge_label if badge_label is not None else name
-    contact = pb.message_field(4, pb.string_field(1, website))
+    # Build the Contact payload first and wrap it once: appending to an
+    # already-wrapped message_field(4, ...) writes *after* the length prefix,
+    # which strands Contact.discord outside the submessage (a real field-2 at
+    # Index level, where Mihon reads it as badgeLabel).
+    contact_parts = [pb.string_field(1, website)]
     if discord:
-        contact += pb.string_field(2, discord)
+        contact_parts.append(pb.string_field(2, discord))
+    contact = pb.message_field(4, b"".join(contact_parts))
     extensions = b"".join(
         pb.message_field(1, _extension_message(entry)) for entry in entries
     )
-    extension_list = pb.message_field(5, extensions)
+    extension_list = pb.message_field(INDEX_EXTENSION_LIST, extensions)
     message = b"".join(
         [
             pb.string_field(1, name),
@@ -148,7 +161,7 @@ def decode_index(data: bytes) -> dict:
         website = _text(contact[1][0]) if contact.get(1) else website
         discord = _text(contact[2][0]) if contact.get(2) else discord
     extensions = []
-    for raw in top.get(5, []):
+    for raw in top.get(INDEX_EXTENSION_LIST, []):
         list_fields = pb.decode(raw)
         for ext_raw in list_fields.get(1, []):
             fields = pb.decode(ext_raw)
