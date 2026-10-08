@@ -8,12 +8,17 @@
     "region": "ar",
     "enabled": true,
     "configuration": {
-      "allowed_hosts": ["api.github.com", "github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"],
+      "allowed_hosts": [
+        "api.github.com",
+        "github.com",
+        "objects.githubusercontent.com",
+        "release-assets.githubusercontent.com"
+      ],
       "repository_url": "https://github.com/LoneVertex/mihon-extension-ar-procomic",
       "package": "eu.kanade.tachiyomi.extension.ar.procomic",
-      "signing_key": "efd9a7f5cd66f110df33289dbf8bafc89275e00b5434ce489f1d8a2dc209bbe7",
+      "signing_key": "b655a474503f4471fdaf6ba35b9385f71d144669f3c28602c5b60b062022c41d",
       "library": "tachiyomi",
-      "operator_notes": "accepted after operator review: v1.5.1 sha256 matches published release checksum 07e6788f...; package verified via aapt; signing certificate digest (efd9a7f5...) independently re-verified by decoding the v1 META-INF and v2/v3 APK Signing Block certificates (apksigner cannot run in this sandbox: JVM mapping denied); previously pinned b655a474... was not the actual APK signer",
+      "operator_notes": "accepted after operator review: v1.5.1 sha256 matches published release checksum 07e6788f...; package verified via aapt. Signing certificate digest (b655a474...) re-verified independently with apksigner verify --print-certs and keytool -printcert over the v1 META-INF certificate. The previously published pin (efd9a7f5...) was sha256 of that certificate with its 4-byte SEQUENCE header removed, which is not the fingerprint Android or any signing tool reports.",
       "scan_policy": "malware_clamav_fail_closed_v2"
     }
   }

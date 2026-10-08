@@ -23,6 +23,7 @@ import re
 import tempfile
 import unittest
 import zipfile
+from hashlib import sha256
 from pathlib import Path
 
 from shura_core.models import Candidate, Source
@@ -36,7 +37,27 @@ from shura_core.publishing.repository import (
     _normalize_version,
 )
 
-CERT = "efd9a7f5cd66f110df33289dbf8bafc89275e00b5434ce489f1d8a2dc209bbe7"
+#: Fixture certificate for synthetic APKs. Deliberately distinct from
+#: CERT_OTHER so the multi-key and mismatch gates below actually have two
+#: different fingerprints to compare.
+CERT = "b" * 64
+
+#: Source of truth for the shipped ProComic artifacts' signer, taken from the
+#: certificate itself rather than from any code in this repository. Two
+#: independent Google tools agree on it:
+#:
+#:   apksigner verify --print-certs -> b655a474...c41d
+#:   keytool -printcert -file META-INF/PROCOMIC.RSA -> B6:55:A4:74:...:C4:1D
+#:
+#: Mihon computes the value it trusts as ``Hash.sha256(signature.toByteArray())``
+#: over ``SigningInfo.apkContentsSigners``, i.e. the SHA-256 of the *complete* DER
+#: certificate, and requires the store's signingKey to contain it literally.
+PROCOMIC_SIGNER_SHA256 = "b655a474503f4471fdaf6ba35b9385f71d144669f3c28602c5b60b062022c41d"
+
+#: What this repository used to publish. It is sha256 of the same certificate
+#: with its 4-byte ``30 82 LL LL`` header removed, which is not a fingerprint any
+#: client computes. Kept only so a regression test can name the wrong value.
+LEGACY_TRUNCATED_SIGNER_SHA256 = "efd9a7f5cd66f110df33289dbf8bafc89275e00b5434ce489f1d8a2dc209bbe7"
 CERT_OTHER = "a" * 64
 
 # Mihon NetworkExtensionStore @ProtoNumber tables (authoritative reference).
@@ -189,73 +210,193 @@ def _scalars(raw: bytes) -> dict:
     return out
 
 
-def signer_cert_digests(apk_path: str) -> set[str]:
-    """SHA-256 digests of every certificate that actually verifies an APK
-    install (v1 JAR META-INF + APK Signature Scheme v2/v3 signing block),
-    derived without apksigner (which cannot run in this sandbox)."""
-    import gzip  # noqa:F401
-    from hashlib import sha256
-    import struct
+def der_elements(buf: bytes) -> list[tuple[int, bytes, bytes]]:
+    """DER elements as ``(tag, full_element, content)``.
 
-    def parse_tlv(data):
-        nodes, off = [], 0
-        while off < len(data):
-            t = data[off]; off += 1
-            if (t & 0x1F) == 0x1F:
-                t = (t << 8) | data[off]; off += 1
-            l = data[off]; off += 1
-            if l & 0x80:
-                n = l & 0x7F; l = int.from_bytes(data[off:off + n], "big"); off += n
-            nodes.append((t, data[off:off + l])); off += l
-        return nodes
+    ``full_element`` includes the tag and the length header, which is what a
+    certificate digest is computed over. Returning only ``content`` is the bug
+    this replaced: hashing a certificate without its ``30 82 LL LL`` header
+    silently yields a different fingerprint than any tool that hashes the DER.
+    """
+    out: list[tuple[int, bytes, bytes]] = []
+    index = 0
+    while index < len(buf):
+        tag = buf[index]
+        cursor = index + 1
+        length = buf[cursor]
+        cursor += 1
+        if length & 0x80:
+            count = length & 0x7F
+            length = int.from_bytes(buf[cursor:cursor + count], "big")
+            cursor += count
+        end = cursor + length
+        out.append((tag, buf[index:end], buf[cursor:end]))
+        index = end
+    return out
 
-    def is_cert_value(blob: bytes) -> bool:
-        return len(blob) >= 4 and blob[:1] == b"\x02" and blob[1:2] in (b"\x01", b"\x02", b"\x03")
 
-    digests: set[str] = set()
+def apk_certificates(apk_path: str) -> list[bytes]:
+    """Every DER certificate the APK is signed with, header included.
 
+    Handles the JAR/v1 ``META-INF/*.RSA`` signature block, which is what the
+    shipped ProComic artifacts use. apksigner's own output is the reference
+    this is checked against.
+    """
     try:
-        zf = zipfile.ZipFile(apk_path)
+        archive = zipfile.ZipFile(apk_path)
     except (zipfile.BadZipFile, OSError, RuntimeError):
-        zf = None
-    if zf is not None:
-        with zf:
-            for infra in ("META-INF/PROCOMIC.RSA", "META-INF/CERT.RSA", "META-INF/SIGNER.RSA"):
-                try:
-                    seq = parse_tlv(zf.read(infra))
-                except (KeyError, OSError, RuntimeError):
+        return []
+    with archive:
+        for name in archive.namelist():
+            if not (name.startswith("META-INF/") and name.endswith((".RSA", ".DSA", ".EC"))):
+                continue
+            try:
+                content_info = der_elements(archive.read(name))[0]
+                wrapped = [c for t, _, c in der_elements(content_info[2]) if t == 0xA0]
+                if not wrapped:
                     continue
-                try:
-                    top_children = parse_tlv(seq[0][1])
-                    a0 = [v for t, v in top_children if t == 0xA0][0]
-                    sd = parse_tlv(a0)[0]
-                    for t, v in parse_tlv(sd[1]):
-                        if t in (0xA0, 0xA1):
-                            for ct, cv in parse_tlv(v):
-                                if ct == 0x30:
-                                    digests.add(sha256(cv).hexdigest())
-                except (IndexError, KeyError, struct.error, ValueError):
-                    pass
-
-    blob = open(apk_path, "rb").read()
-    eocd = blob.rfind(b"PK\x05\x06")
-    if eocd != -1 and blob[eocd + 20:eocd + 22] == b"\x00\x00":
-        cd = struct.unpack_from("<I", blob, eocd + 16)[0]
-        magic_start = cd - 16
-        if blob[magic_start:cd] == b"APK Sig Block 42":
-            size = struct.unpack_from("<Q", blob, cd - 24)[0]
-            area = blob[cd - size:cd - 24]
-            i = 0
-            while i < len(area) - 4:
-                if area[i] == 0x30 and area[i + 1] == 0x82:
-                    ln = (area[i + 2] << 8) | area[i + 3]
-                    if 600 <= ln <= 8192 and i + 4 + ln <= len(area) and is_cert_value(area[i + 4:i + 4 + ln]):
-                        digests.add(sha256(area[i + 4:i + 4 + ln]).hexdigest())
-                        i += ln
+                signed_data = der_elements(wrapped[0])[0]
+                for tag, _, payload in der_elements(signed_data[2]):
+                    if tag not in (0xA0, 0xA1):
                         continue
-                i += 1
+                    for cert_tag, cert, _ in der_elements(payload):
+                        if cert_tag == 0x30:
+                            yield cert
+            except (IndexError, KeyError, ValueError, struct.error):
+                continue
 
-    return digests
+
+def signer_cert_digests(apk_path: str) -> set[str]:
+    """SHA-256 of each signing certificate, exactly as Android computes it.
+
+    Mihon derives the value it trusts with ``Hash.sha256(signature.toByteArray())``
+    over ``SigningInfo.apkContentsSigners``, i.e. the SHA-256 of the complete
+    DER certificate, and compares it to the store's signingKey by literal
+    containment. Hashing anything other than the whole certificate produces a
+    fingerprint no client will ever match.
+    """
+    from hashlib import sha256 as _sha256
+    return {_sha256(cert).hexdigest() for cert in apk_certificates(apk_path)}
+
+
+def truncated_cert_digests(apk_path: str) -> set[str]:
+    """The fingerprint this helper used to report: the certificate minus its
+    4-byte SEQUENCE header. Kept only so a test can assert it is NOT the value
+    the repository publishes."""
+    from hashlib import sha256 as _sha256
+    return {_sha256(cert[4:]).hexdigest() for cert in apk_certificates(apk_path)}
+
+
+class SigningFingerprintIsTheWholeCertificate(unittest.TestCase):
+    """Regression: the published signingKey was sha256 of the certificate with its
+    4-byte SEQUENCE header stripped.
+
+    Nothing rejected it. The extractor and the assertion it was checked against
+    were the same code, so the wrong value agreed with itself. Mihon compares
+    ``Hash.sha256(signature.toByteArray())`` -- the whole DER -- by literal
+    containment against the store's signingKey, so the published repository was
+    silently untrustable and every extension came back as an untrusted warning.
+    """
+
+    APK_DIR = Path(os.environ.get("SHURA_TEST_APK_DIR", "/workspace/repo/apk"))
+
+    def _apks(self):
+        apks = sorted(self.APK_DIR.glob("*.apk")) if self.APK_DIR.is_dir() else []
+        if not apks:
+            self.skipTest(f"no artifacts under {self.APK_DIR}")
+        return apks
+
+    def test_extracted_fingerprint_matches_the_independently_verified_pin(self):
+        for apk in self._apks():
+            with self.subTest(apk=apk.name):
+                digests = signer_cert_digests(str(apk))
+                self.assertEqual(digests, {PROCOMIC_SIGNER_SHA256})
+
+    def test_certificate_is_hashed_in_full_header_included(self):
+        for apk in self._apks():
+            for cert in apk_certificates(str(apk)):
+                with self.subTest(apk=apk.name):
+                    self.assertEqual(cert[0], 0x30, "certificate must start with SEQUENCE")
+                    self.assertIn(cert[1], (0x81, 0x82), "length must be encoded")
+                    self.assertEqual(len(cert), 1414)
+                    self.assertEqual(sha256(cert).hexdigest(), PROCOMIC_SIGNER_SHA256)
+
+    def test_the_truncated_variant_is_not_the_published_value(self):
+        """Names the exact bug: dropping the 4-byte header yields the old pin."""
+        for apk in self._apks():
+            with self.subTest(apk=apk.name):
+                self.assertEqual(truncated_cert_digests(str(apk)),
+                                 {LEGACY_TRUNCATED_SIGNER_SHA256})
+                self.assertNotEqual(truncated_cert_digests(str(apk)),
+                                    signer_cert_digests(str(apk)))
+                self.assertNotIn(LEGACY_TRUNCATED_SIGNER_SHA256,
+                                 signer_cert_digests(str(apk)))
+
+    def test_published_repository_carries_the_real_pin(self):
+        """repo.json and index.pb must both carry the signer the APKs are
+        actually signed with, in every place it appears."""
+        root = Path(__file__).resolve().parents[1] / "repo"
+        doc = json.loads((root / "repo.json").read_text())
+        self.assertEqual(doc["meta"]["signingKeyFingerprint"], PROCOMIC_SIGNER_SHA256)
+        store = mihon_decode_store((root / "index.pb").read_bytes())
+        self.assertEqual(store["signingKey"], PROCOMIC_SIGNER_SHA256)
+        for entry in store["extensions"]:
+            self.assertEqual(entry["packageName"],
+                             "eu.kanade.tachiyomi.extension.ar.procomic")
+        self.assertNotIn(LEGACY_TRUNCATED_SIGNER_SHA256, (root / "repo.json").read_text())
+
+    def test_publishing_refuses_when_the_pin_is_the_truncated_one(self):
+        """The gate must reject the bad fingerprint, or the fix proves nothing."""
+        tmp = tempfile.TemporaryDirectory()
+        try:
+            store = StateStore(Path(tmp.name) / "s.db")
+            repo = Path(tmp.name) / "repo"
+            store.add_source(Source("s1", "fixture", "https://example.org/i.json",
+                                    "index", "ar",
+                                    configuration={"allowed_hosts": ["example.org"],
+                                                  "signing_key": LEGACY_TRUNCATED_SIGNER_SHA256}))
+            artifact = Path(tmp.name) / "x.apk"
+            artifact.write_bytes(b"apk")
+            c = Candidate("s1", "org.example.ext", "1.0", "https://example.org/x.apk",
+                          name="X", language="ar", provenance={"page": "p"},
+                          metadata={"_artifact_path": str(artifact),
+                                    "_security": {"sha256": "c" * 64,
+                                                  "certificate": PROCOMIC_SIGNER_SHA256}})
+            store.put_pending(c, "security-passed")
+            store.accept_pending("s1", c.identity)
+            with self.assertRaises(PublishRefused) as ctx:
+                RepositoryPublisher(store, repo).publish(release=True)
+            self.assertIn("signing key mismatch", str(ctx.exception))
+            self.assertFalse((repo / "index.json").exists())
+            store.close()
+        finally:
+            tmp.cleanup()
+
+    def test_publishing_accepts_the_real_pin(self):
+        tmp = tempfile.TemporaryDirectory()
+        try:
+            store = StateStore(Path(tmp.name) / "s.db")
+            repo = Path(tmp.name) / "repo"
+            store.add_source(Source("s1", "fixture", "https://example.org/i.json",
+                                    "index", "ar",
+                                    configuration={"allowed_hosts": ["example.org"],
+                                                  "signing_key": PROCOMIC_SIGNER_SHA256}))
+            artifact = Path(tmp.name) / "x.apk"
+            artifact.write_bytes(b"apk")
+            c = Candidate("s1", "org.example.ext", "1.0", "https://example.org/x.apk",
+                          name="X", language="ar", provenance={"page": "p"},
+                          metadata={"_artifact_path": str(artifact),
+                                    "_security": {"sha256": "c" * 64,
+                                                  "certificate": PROCOMIC_SIGNER_SHA256}})
+            store.put_pending(c, "security-passed")
+            store.accept_pending("s1", c.identity)
+            result = RepositoryPublisher(store, repo).publish(release=True)
+            self.assertEqual(result["published"], 1)
+            self.assertEqual(json.loads((repo / "repo.json").read_text())
+                             ["meta"]["signingKeyFingerprint"], PROCOMIC_SIGNER_SHA256)
+            store.close()
+        finally:
+            tmp.cleanup()
 
 
 class SigningGateTests(unittest.TestCase):
@@ -736,8 +877,8 @@ class RealArtifactSigningTests(unittest.TestCase):
             )
             digest = digests.pop()
             self.assertEqual(
-                digest, CERT,
-                f"{apk.name} install-time signer {digest} != published pin {CERT}",
+                digest, PROCOMIC_SIGNER_SHA256,
+                f"{apk.name} install-time signer {digest} != published pin",
             )
 
     def test_signer_cert_digest_helper_rejects_nonsense(self):
