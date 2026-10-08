@@ -55,6 +55,40 @@ class Candidate:
     def identity(self) -> str: return f"{self.package}|{self.version}"
     def as_dict(self) -> dict[str, Any]: return asdict(self)
 
+class ChapterStatus(StrEnum):
+    HEALTHY="HEALTHY"
+    # Preview slice verified but the chapter's remaining pages are served via deferred/protected
+    # media that the manifest does not publish. Recorded distinctly so full chapter health is
+    # never silently asserted on a preview-only check.
+    PARTIAL="PARTIAL"
+    PAID="PAID"; TEMPORARY_FAILURE="TEMPORARY_FAILURE"; STALE_LINK="STALE_LINK"; PARSE_ERROR="PARSE_ERROR"; UNAVAILABLE="UNAVAILABLE"
+
+RETRYABLE_CHAPTER_STATUSES=(ChapterStatus.TEMPORARY_FAILURE,ChapterStatus.STALE_LINK,ChapterStatus.PARSE_ERROR)
+
+@dataclass
+class ChapterRecord:
+    """Per-chapter content verdict. Chapter health is tracked independently of the work,
+    so a damaged chapter never degrades decisions about the manga/series as a whole."""
+    work_id: str
+    chapter_id: str
+    status: ChapterStatus
+    reason: str = ""
+    pages: list[str] = field(default_factory=list)
+    attempts: int = 0
+    def identity(self) -> str: return f"{self.work_id}|{self.chapter_id}"
+
+@dataclass
+class WorkReview:
+    """Work-level summary derived from independent per-chapter verdicts. A work is
+    publishable whenever it has at least one healthy, public chapter; damaged or paid
+    chapters are recorded and excluded but never drag the whole work down."""
+    work_id: str
+    work_name: str
+    verdict: str
+    reason: str = ""
+    totals: dict[str, int] = field(default_factory=dict)
+    chapters: list[ChapterRecord] = field(default_factory=list)
+
 @dataclass
 class ProcessingResult:
     identity: str

@@ -18,6 +18,8 @@ def main(argv=None):
  q=sub.add_parser("crawl");q.add_argument("--source-id",action="append");q.add_argument("--config",default="sources.json");q.add_argument("--max-sources",type=int,default=250);q.add_argument("--max-downloads",type=int,default=250)
  q=sub.add_parser("publish");q.add_argument("--repo",default=os.getenv("SHURA_REPO_DIR","repo"));q.add_argument("--stage",action="store_true");q.add_argument("--release",action="store_true")
  q=sub.add_parser("discover");q.add_argument("--limit",type=int,default=250)
+ q=sub.add_parser("content-status");q.add_argument("--source-id")
+ q=sub.add_parser("recheck-content");q.add_argument("--limit",type=int,default=250)
  for cmd in ("status","stop","retry","forget","accept","pending","review-quarantine","accept-source"):
   q=sub.add_parser(cmd);q.add_argument("source_id",nargs="?");q.add_argument("--source-id",dest="source_id_option");
   if cmd=="stop":q.add_argument("--reason",required=True)
@@ -79,6 +81,18 @@ def main(argv=None):
    rows=store.pending()
    if args.source_id:rows=[x for x in rows if x["source_id"]==args.source_id]
    print(json.dumps(rows,ensure_ascii=False));return 0
+  elif args.command=="content-status":
+   from shura_core.pipeline.content import evaluate_work
+   works=store.content_works(args.source_id)
+   out=[]
+   for w in works:
+    row=store.content_work(w["source_id"],w["work_id"]);chapters=store.content_chapters(w["source_id"],w["work_id"])
+    out.append({**row,"source_id":w["source_id"],"chapters":chapters})
+   print(json.dumps(out,ensure_ascii=False));return 0
+  elif args.command=="recheck-content":
+   from shura_core.pipeline.recheck import ManifestRechecker
+   result=Scheduler(store).recheck_due_chapters(ManifestRechecker(store),limit=args.limit)
+   print(json.dumps(result,ensure_ascii=False));return 0
  except (ValueError,KeyError,PublishRefused) as e:print(str(e),file=sys.stderr);return 2
  except Exception as e:
   message=f"critical {type(e).__name__}: {e}";print(message,file=sys.stderr)

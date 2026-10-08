@@ -6,11 +6,36 @@ from shura_core.security.malware import MalwareScanner
 from shura_core.security.network import SafeHTTP
 from shura_core.security.network import validate_url
 from shura_core.quality.ranking import source_quality
+from shura_core.pipeline.content import MANIFEST_KEY, evaluate_work
 from datetime import datetime,timezone
 class CandidateProcessor:
-    def __init__(self,store,artifact_dir="artifacts",scanner=None,malware_scanner=None,expected_hosts=None,http_factory=None,url_validator=None):
+    def __init__(self,store,artifact_dir="artifacts",scanner=None,malware_scanner=None,expected_hosts=None,http_factory=None,url_validator=None,content_review_enabled=None):
         from pathlib import Path
-        self.store=store;self.dir=Path(artifact_dir);self.dir.mkdir(parents=True,exist_ok=True);self.scanner=scanner or ArtifactScanner();self.malware_scanner=malware_scanner or MalwareScanner();self.expected_hosts=expected_hosts or set();self.http_factory=http_factory or SafeHTTP;self.url_validator=url_validator or validate_url
+        self.store=store;self.dir=Path(artifact_dir);self.dir.mkdir(parents=True,exist_ok=True);self.scanner=scanner or ArtifactScanner();self.malware_scanner=malware_scanner or MalwareScanner();self.expected_hosts=expected_hosts or set();self.http_factory=http_factory or SafeHTTP;self.url_validator=url_validator or validate_url;self._force_content_review=content_review_enabled
+    def _content_review(self,c):
+        """Generic per-chapter content review. Runs in the production accept path whenever
+        the source enables content_policy.review_enabled (or it is forced). The work is only
+        rejected when it has no healthy public chapter and nothing left to retry; paid and
+        damaged chapters are recorded in the ledger and excluded, never blocking the rest."""
+        s=self.store.get_source(c.source_id);cfg=s.configuration if s else {}
+        policy=cfg.get("content_policy") or {}
+        enabled=self._force_content_review if self._force_content_review is not None else policy.get("review_enabled",False)
+        if not enabled:return ("SKIP","")
+        manifest=(c.metadata or {}).get(MANIFEST_KEY)
+        if not manifest:
+            self.store.put_pending(c,"content-review-required")
+            self.store.event(c.source_id,"content_review",{"identity":c.identity,"verdict":"REQUIRED","reason":"content review enabled but candidate carries no content manifest"})
+            return ("PENDING","content review enabled but candidate carries no content manifest")
+        hosts=set(cfg.get("allowed_hosts",[])) if s else set(self.expected_hosts)
+        http=self.http_factory(hosts,timeout=policy.get("fetch_timeout",15),max_bytes=policy.get("max_page_bytes",2_000_000))
+        def fetch(url):
+            data,h,final=http.get(url,max_bytes=policy.get("max_page_bytes",2_000_000))
+            return data,h,final
+        review=evaluate_work(str(manifest.get("work_id") or c.identity),str(manifest.get("work_name") or c.name),list(manifest.get("chapters") or []),fetch,policy)
+        self.store.record_chapters(c.source_id,review)
+        self.store.event(c.source_id,"content_review",{"identity":c.identity,"verdict":review.verdict,"reason":review.reason,"totals":review.totals})
+        if review.verdict=="PENDING":self.store.put_pending(c,"content-review")
+        return (review.verdict,review.reason)
     def validate(self,c):
         errors=[]
         source=self.store.get_source(c.source_id)
@@ -56,6 +81,11 @@ class CandidateProcessor:
             if source and source.last_success:
                 days=max(0,(datetime.now(timezone.utc)-datetime.fromisoformat(source.last_success)).days)
             c.metadata["_quality_score"]=source_quality(language=c.language,successes=counts.get("crawl_success",0),attempts=max(1,source.attempt_count if source else 1),valid=counts.get("candidate_accepted",0)+1,duplicates=counts.get("duplicatesSkipped",0),quarantined=0,fresh_days=days)
+            verdict,reason=self._content_review(c)
+            if verdict=="REJECTED":
+                self.store.put_pending(c,"content-review")
+                return {"verdict":"REJECTED","reason":"content: "+reason}
+            if verdict=="PENDING":return {"verdict":"PENDING","reason":"content: "+reason}
             self.store.put_pending(c,"security-passed")
             self.store.mark_processed(c.source_id,c.identity,self.store.get_source(c.source_id).configuration_fingerprint,"security-passed")
             return {"verdict":"ACCEPTED","reason":f"{result.reason}; {malware.reason}","sha256":result.sha256,"malware_verdict":malware.verdict.value,"quality_score":c.metadata["_quality_score"],"artifact":str(path)}

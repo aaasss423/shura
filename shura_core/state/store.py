@@ -24,7 +24,10 @@ class StateStore:
         CREATE TABLE IF NOT EXISTS quarantine(source_id TEXT NOT NULL,identity TEXT NOT NULL,reason TEXT NOT NULL,artifact_sha256 TEXT,details TEXT NOT NULL,at TEXT NOT NULL,reviewed INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(source_id,identity));
         CREATE TABLE IF NOT EXISTS publications(identity TEXT PRIMARY KEY,candidate TEXT NOT NULL,published_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS counters(day TEXT PRIMARY KEY,published INTEGER NOT NULL DEFAULT 0);
-        CREATE TABLE IF NOT EXISTS publication_runs(run_id TEXT PRIMARY KEY,day TEXT NOT NULL,published_this_run INTEGER NOT NULL,publication_charged INTEGER NOT NULL,outcome TEXT NOT NULL,created_at TEXT NOT NULL);''')
+        CREATE TABLE IF NOT EXISTS publication_runs(run_id TEXT PRIMARY KEY,day TEXT NOT NULL,published_this_run INTEGER NOT NULL,publication_charged INTEGER NOT NULL,outcome TEXT NOT NULL,created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS content_works(source_id TEXT NOT NULL,work_id TEXT NOT NULL,data TEXT NOT NULL,PRIMARY KEY(source_id,work_id));
+        CREATE TABLE IF NOT EXISTS content_chapters(source_id TEXT NOT NULL,work_id TEXT NOT NULL,chapter_id TEXT NOT NULL,status TEXT NOT NULL,reason TEXT NOT NULL,pages TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,updated_at TEXT NOT NULL,next_retry TEXT NOT NULL,PRIMARY KEY(source_id,work_id,chapter_id));
+        CREATE INDEX IF NOT EXISTS idx_chapter_due ON content_chapters(status,next_retry);''')
         version=self.db.execute("SELECT max(version) FROM schema_version").fetchone()[0]
         if version>1:raise RuntimeError(f"database schema {version} is newer than this Shura build")
     def close(self): self.db.close()
@@ -105,6 +108,55 @@ class StateStore:
         if not s:return None
         counts={r[0]:r[1] for r in self.db.execute("SELECT event,count(*) FROM history WHERE source_id=? GROUP BY event",(sid,))}
         return {"source":s,"counts":counts,"recent":[dict(r) for r in self.db.execute("SELECT event,detail,at FROM history WHERE source_id=? ORDER BY id DESC LIMIT 20",(sid,))]}
+    def record_chapters(self,sid,review,at=None):
+        at=at or now()
+        self.db.execute("INSERT OR REPLACE INTO content_works VALUES(?,?,?)",(sid,review.work_id,json.dumps({"work_id":review.work_id,"name":review.work_name,"verdict":review.verdict,"reason":review.reason,"totals":review.totals,"updated_at":at},ensure_ascii=False,default=str)))
+        for ch in review.chapters:
+            self.db.execute("INSERT OR REPLACE INTO content_chapters VALUES(?,?,?,?,?,?,?,?,?)",(sid,ch.work_id,ch.chapter_id,ch.status.value,ch.reason,json.dumps(ch.pages,default=str),ch.attempts,at,at))
+        return review
+    def content_work(self,sid,work_id):
+        row=self.db.execute("SELECT data FROM content_works WHERE source_id=? AND work_id=?",(sid,work_id)).fetchone()
+        return json.loads(row[0]) if row else None
+    def content_works(self,sid=None):
+        rows=self.db.execute("SELECT source_id,work_id FROM content_works ORDER BY source_id,work_id") if sid is None else self.db.execute("SELECT source_id,work_id FROM content_works WHERE source_id=? ORDER BY work_id",(sid,))
+        return [{"source_id":r[0],"work_id":r[1]} for r in rows]
+    def content_chapters(self,sid=None,work_id=None):
+        if sid is not None and work_id is not None:
+            rows=self.db.execute("SELECT source_id,work_id,chapter_id,status,reason,pages,attempts,updated_at,next_retry FROM content_chapters WHERE source_id=? AND work_id=? ORDER BY chapter_id",(sid,work_id))
+        elif sid is not None:
+            rows=self.db.execute("SELECT source_id,work_id,chapter_id,status,reason,pages,attempts,updated_at,next_retry FROM content_chapters WHERE source_id=? ORDER BY work_id,chapter_id",(sid,))
+        else:
+            rows=self.db.execute("SELECT source_id,work_id,chapter_id,status,reason,pages,attempts,updated_at,next_retry FROM content_chapters ORDER BY source_id,work_id,chapter_id")
+        return [{"source_id":r[0],"work_id":r[1],"chapter_id":r[2],"status":r[3],"reason":r[4],"pages":json.loads(r[5]),"attempts":r[6],"updated_at":r[7],"next_retry":r[8]} for r in rows]
+    def due_chapters(self,at=None,limit=250):
+        at=at or now()
+        rows=self.db.execute("SELECT source_id,work_id,chapter_id,status,reason,attempts FROM content_chapters WHERE status IN ('TEMPORARY_FAILURE','STALE_LINK','PARSE_ERROR') AND next_retry<=? ORDER BY next_retry LIMIT ?",(at,limit))
+        return [{"source_id":r[0],"work_id":r[1],"chapter_id":r[2],"status":r[3],"reason":r[4],"attempts":r[5]} for r in rows]
+    def update_chapter(self,sid,work_id,chapter_id,status,reason,pages,attempts,at=None,next_retry=None):
+        at=at or now();st=status if isinstance(status,str) else status.value;cid=str(chapter_id);page_json=json.dumps(pages,default=str);nrt=next_retry or at
+        if self.db.execute("SELECT 1 FROM content_chapters WHERE source_id=? AND work_id=? AND chapter_id=?",(sid,work_id,cid)).fetchone():
+            self.db.execute("UPDATE content_chapters SET status=?,reason=?,pages=?,attempts=?,updated_at=?,next_retry=? WHERE source_id=? AND work_id=? AND chapter_id=?",(st,reason,page_json,attempts,at,nrt,sid,work_id,cid))
+        else:
+            self.db.execute("INSERT OR REPLACE INTO content_chapters VALUES(?,?,?,?,?,?,?,?,?)",(sid,work_id,cid,st,reason,page_json,attempts,at,nrt))
+        self.recompute_work(sid,work_id)
+    def recompute_work(self,sid,work_id):
+        """Roll chapter-level verdicts up into the work summary. A work is publishable as long as
+        it has >=1 healthy (or preview-verified PARTIAL) public chapter; paid/unavailable/retryable
+        chapters are counted and excluded without affecting the rest, and nothing is deleted."""
+        rows=self.db.execute("SELECT status FROM content_chapters WHERE source_id=? AND work_id=?",(sid,work_id))
+        totals: dict[str,int]={}
+        for (st,) in rows: totals[st]=totals.get(st,0)+1
+        existing=self.db.execute("SELECT data FROM content_works WHERE source_id=? AND work_id=?",(sid,work_id)).fetchone()
+        name=work_id
+        if existing:
+            try: name=json.loads(existing[0]).get("name") or work_id
+            except Exception: pass
+        healthy=totals.get("HEALTHY",0);partial=totals.get("PARTIAL",0);retryable=sum(totals.get(s,0) for s in ("TEMPORARY_FAILURE","STALE_LINK","PARSE_ERROR"))
+        excluded=totals.get("PAID",0)+totals.get("UNAVAILABLE",0)
+        if healthy>0 or partial>0: verdict,reason="ACCEPTED",f"{healthy} healthy + {partial} partial(preview-verified) public chapter(s); {excluded} excluded; {retryable} retryable"
+        elif retryable>0: verdict,reason="PENDING",f"no healthy chapter yet; {retryable} retryable + {excluded} excluded; will retry per policy (not final)"
+        else: verdict,reason="REJECTED","no publicly available chapters left; recorded for later recheck"
+        self.db.execute("INSERT OR REPLACE INTO content_works VALUES(?,?,?)",(sid,work_id,json.dumps({"work_id":work_id,"name":name,"verdict":verdict,"reason":reason,"totals":totals,"updated_at":now()},ensure_ascii=False,default=str)))
     def forget_source(self,sid):
         # Security quarantine is durable and must survive source removal/re-registration.
         with self.tx():
