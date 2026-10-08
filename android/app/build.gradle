@@ -21,6 +21,10 @@ dependencies {
     implementation 'androidx.navigation:navigation-compose:2.8.5'
     debugImplementation 'androidx.compose.ui:ui-tooling'
     testImplementation 'junit:junit:4.13.2'
+    // The BOM constrains androidTest too; without it here ui-test-junit4 resolves
+    // to an empty version and :app:processDebugAndroidTestManifest fails, which
+    // takes the whole android CI job down.
+    androidTestImplementation platform('androidx.compose:compose-bom:2024.12.01')
     androidTestImplementation 'androidx.compose.ui:ui-test-junit4'
     androidTestImplementation 'androidx.test.ext:junit:1.2.1'
     androidTestImplementation 'androidx.test:runner:1.6.2'
