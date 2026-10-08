@@ -4,7 +4,7 @@ Shura is an independent, security-gated system for discovering manga sources, va
 
 ## Current implementation
 
-The Python control plane is runnable with only the Python standard library: SQLite state, guarded HTTP access with private-host SSRF protection, index/GitHub release/HTML crawlers, candidate validation, artifact hashing and APK signature inspection (when Android SDK build-tools are installed), quarantine, the full PAUSED/RETRY_LATER/DEAD/QUARANTINED/ACCEPTED lifecycle, scheduling, a local repository publisher (JSON plus a Shura-schema `index.pb`), and an optional Telegram notifier. See [operations](docs/operations/README.md) for commands and limitations.
+The Python control plane is runnable with only the Python standard library: SQLite state, guarded HTTP access with private-host SSRF protection, index/GitHub release/HTML crawlers, candidate validation, artifact hashing and APK signature inspection (when Android SDK build-tools are installed), quarantine, ClamAV malware scanning with a fail-closed engine/database preflight, generic per-chapter content review with retry, the full PAUSED/RETRY_LATER/DEAD/QUARANTINED/ACCEPTED lifecycle, scheduling, a Mihon/Keiyoushi-compatible repository publisher (JSON plus a protobuf `index.pb` whose field numbers match the upstream client contract), and an optional Telegram notifier. See [operations](docs/operations/README.md) for commands and limitations.
 
 The Android modules establish a source API/host boundary and a Shura reader shell. Translation is represented by an opt-in interface and reader settings model; no translation engine or screen overlay is implemented.
 
@@ -24,4 +24,4 @@ Crawler requests are HTTPS-only by default, validate every redirect against an e
 
 ## Project status
 
-This repository is an initial functional implementation, not a claim of production readiness. Android SDK/device testing, live source coverage, operational Telegram delivery, independent security review, and a real malware scanning engine remain environment/deployment work. See [the status matrix](docs/operations/status.md).
+This repository is an initial functional implementation, not a claim of production readiness. Android SDK/device testing, live source coverage and the 250/day throughput target, operational Telegram delivery, an extension build/test sandbox, signed repository metadata, crash-recovery across process death, and independent security review remain environment/deployment work. See [the status matrix](docs/operations/status.md).

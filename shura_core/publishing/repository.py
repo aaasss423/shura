@@ -175,6 +175,24 @@ class RepositoryPublisher:
             )
         return fingerprints.pop()
 
+    def _security_gate(self, items: list[dict]) -> None:
+        """Refuse to publish an artifact whose recorded malware verdict is not CLEAN.
+
+        Defense in depth behind the pipeline: an artifact only reaches the ledger
+        with a recorded verdict, and anything the scanner could not decide (engine
+        missing, signature database stale, scan error) must never be served. An
+        absent ``malware`` record means the item predates the malware gate and is
+        left alone, so this cannot strand a previously published repository.
+        """
+        for item in items:
+            security = (item.get("metadata", {}) or {}).get("_security", {}) or {}
+            verdict = str((security.get("malware") or {}).get("verdict", "") or "")
+            if verdict and verdict.upper() != "CLEAN":
+                raise PublishRefused(
+                    f"refusing to publish: {item.get('identity', 'unknown')} has malware verdict "
+                    f"{verdict}; only CLEAN-scanned artifacts may be published"
+                )
+
     def _materialize(self, items: list[dict]):
         """Write the consumable repository (apk/, index files) for ``items``.
 
@@ -185,6 +203,7 @@ class RepositoryPublisher:
         Returns ``(signing_key_fingerprint, rollback_callable)``.
         """
         fingerprint = self._signing_fingerprint(items)
+        self._security_gate(items)
         base_url = os.getenv("SHURA_REPO_BASE_URL", "").rstrip("/")
         website = os.getenv("SHURA_REPO_WEBSITE", "").rstrip("/")
         self.root.mkdir(parents=True, exist_ok=True)

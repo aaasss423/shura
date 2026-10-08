@@ -71,7 +71,16 @@ class CandidateProcessor:
                 self.store.quarantine_item(c,result.reason,result.sha256,{"verdict":result.verdict.value,"scanner":type(self.scanner).__name__,"size":result.size});return {"verdict":"QUARANTINED","reason":result.reason,"sha256":result.sha256}
             malware=self.malware_scanner.scan(path)
             if malware.verdict!=ScanVerdict.CLEAN:
-                self.store.mark_processed(c.source_id,c.identity,self.store.get_source(c.source_id).configuration_fingerprint,"quarantined")
+                fingerprint=self.store.get_source(c.source_id).configuration_fingerprint
+                if malware.verdict==ScanVerdict.UNAVAILABLE:
+                    # The scanner could not run. That is an infrastructure fault, not
+                    # evidence of malware, so the artifact is neither accepted nor
+                    # filed as malware: it is deferred so a later pass can scan it
+                    # once the engine is back. It can never reach the publisher.
+                    self.store.put_pending(c,"security-blocked")
+                    self.store.event(c.source_id,"security_blocked",{"identity":c.identity,"reason":malware.reason,"scanner":type(self.malware_scanner).__name__})
+                    return {"verdict":"PENDING","reason":"security scan unavailable: "+malware.reason,"sha256":result.sha256,"malware_verdict":malware.verdict.value}
+                self.store.mark_processed(c.source_id,c.identity,fingerprint,"quarantined")
                 self.store.quarantine_item(c,malware.reason,result.sha256,{"verdict":malware.verdict.value,"scanner":type(self.malware_scanner).__name__,"size":malware.size,"artifact_sha256":result.sha256})
                 return {"verdict":"QUARANTINED","reason":malware.reason,"sha256":result.sha256,"malware_verdict":malware.verdict.value}
             c.metadata["_artifact_path"]=str(path)

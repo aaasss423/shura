@@ -20,6 +20,7 @@ def main(argv=None):
  q=sub.add_parser("discover");q.add_argument("--limit",type=int,default=250)
  q=sub.add_parser("content-status");q.add_argument("--source-id")
  q=sub.add_parser("recheck-content");q.add_argument("--limit",type=int,default=250)
+ q=sub.add_parser("security-preflight")
  for cmd in ("status","stop","retry","forget","accept","pending","review-quarantine","accept-source"):
   q=sub.add_parser(cmd);q.add_argument("source_id",nargs="?");q.add_argument("--source-id",dest="source_id_option");
   if cmd=="stop":q.add_argument("--reason",required=True)
@@ -81,6 +82,10 @@ def main(argv=None):
    rows=store.pending()
    if args.source_id:rows=[x for x in rows if x["source_id"]==args.source_id]
    print(json.dumps(rows,ensure_ascii=False));return 0
+  elif args.command=="security-preflight":
+   from shura_core.security.malware import MalwareScanner
+   status=MalwareScanner().preflight()
+   print(json.dumps({"available":status.available,"reason":status.reason,"db_dir":status.db_dir,"version":status.version,"signatures":status.signatures},ensure_ascii=False));return 0 if status.available else 4
   elif args.command=="content-status":
    from shura_core.pipeline.content import evaluate_work
    works=store.content_works(args.source_id)

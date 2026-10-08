@@ -191,13 +191,22 @@ class DaemonPipelineTests(unittest.TestCase):
         self.assertEqual(counts.get("candidate_pipeline_error"), 1,
                          "the failure must be recorded, not swallowed")
 
-    def test_quarantine_is_recorded_and_counted_not_swallowed(self):
+    def test_malware_detection_quarantines_and_is_counted_not_swallowed(self):
         self.add_source()
-        proc = self.processor(malware=ScanVerdict.UNAVAILABLE)
-        self.run_pass(proc)
-        self.assertEqual(self.stages()["org.example.ext|1.0"], "validated")
+        self.run_pass(self.processor(malware=ScanVerdict.REJECTED))
         self.assertTrue(self.store.is_quarantined("s1", "org.example.ext|1.0"),
-                        "a non-CLEAN malware verdict must quarantine")
+                        "a malware verdict must quarantine durably")
+
+    def test_unavailable_scanner_defers_instead_of_quarantining(self):
+        """An engine fault is not malware: it must not enter the quarantine
+        ledger, and must not leave the candidate looking security-passed."""
+        self.add_source()
+        self.run_pass(self.processor(malware=ScanVerdict.UNAVAILABLE))
+        identity = "org.example.ext|1.0"
+        self.assertEqual(self.stages()[identity], "security-blocked")
+        self.assertFalse(self.store.is_quarantined("s1", identity))
+        counts = self.store.status("s1")["counts"]
+        self.assertEqual(counts.get("security_blocked"), 1)
 
     # -- budget ----------------------------------------------------------
     def test_download_budget_caps_a_pass_and_reports_the_remainder(self):

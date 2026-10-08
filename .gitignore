@@ -29,4 +29,13 @@ local.properties
 !repo/apk/
 !repo/apk/*.apk
 
+# Deferred Pro-chan harness. It is a port of ProComicImageInterceptor v1.5.1 and
+# imports PIL, which is deliberately not a project dependency (pyproject keeps
+# dependencies = [] and CI installs nothing). Committed as-is it fails
+# `python -m unittest discover -s tests` on a clean runner with
+# ModuleNotFoundError: No module named 'PIL'. It stays out of version control
+# until the Pro-chan phase either declares Pillow in CI or gates the harness on
+# it. Do not sweep this in with `git add -A`.
+tests/test_protected_tile_decode.py
+
 /artifacts/

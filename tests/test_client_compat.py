@@ -632,6 +632,90 @@ class RepoJsonIndexV2ContractTests(LegacyIndexCompatibilityTests):
         self.assertTrue((self.repo / "apk" / "eu_kanade_tachiyomi_extension_ar_procomic-v1.5.1.apk").is_file())
 
 
+class DuplicateVersionListingTests(unittest.TestCase):
+    """A store may legitimately list several versions of one package, and Shura
+    does: v1.5.0 and v1.5.1 of ProComic are both published.
+
+    That is safe because Mihon never reads the listing order. It collapses each
+    package to a single entry itself:
+
+        availableExtensionsFlow: groupBy(pkgName to signingKey).values
+                                       .map { maxWith(versionCode, libVersion) }
+        Extension.Installed.findListing: filter { pkgName == ... }
+                                       .maxWithOrNull(versionCode, libVersion)
+        Extension.Installed.findUpdate: findListing(...).takeIf { newer }
+
+    So the invariant that actually matters is not "one version per package" but
+    that Shura's ``versionCode`` orders the same way the versions do -- otherwise
+    ``maxWith`` would hand the client the *older* APK. These tests pin that.
+
+    Deliberately no test asserts the older listing is dropped: removing it would
+    be a change with no client-visible benefit.
+    """
+
+    ORDERING_VERSIONS = ["0.9.9", "1.0.0", "1.0.1", "1.5.0", "1.5.1",
+                         "1.5.2", "1.5.10", "1.6.0", "1.10.0", "2.0.0", "10.0.0"]
+
+    @staticmethod
+    def _semver(version):
+        return tuple(int(part) for part in version.split("."))
+
+    def _mihon_pick(self, listings):
+        """Reproduce Mihon's collapse exactly: maxWith(versionCode, libVersion)."""
+        keyed = [(_version_code(v), float(v.rsplit(".", 1)[0]), v) for v in listings]
+        return max(keyed)[2]
+
+    def test_mihon_collapse_selects_the_newest_version_not_the_last_listed(self):
+        for order in (self.ORDERING_VERSIONS,
+                      list(reversed(self.ORDERING_VERSIONS)),
+                      ["1.5.0", "1.5.1"], ["1.5.1", "1.5.0"]):
+            with self.subTest(order=order[:3]):
+                picked = self._mihon_pick(order)
+                self.assertEqual(
+                    self._semver(picked), max(self._semver(v) for v in order),
+                    f"Mihon would offer {picked}, not the newest, for {order}",
+                )
+
+    def test_version_code_is_monotonic_along_an_upgrade_path(self):
+        codes = [_version_code(v) for v in self.ORDERING_VERSIONS]
+        self.assertEqual(codes, sorted(codes),
+                         "versionCode must rise with the version or Mihon's maxWith "
+                         "would serve a downgrade")
+
+    def test_published_index_resolves_to_the_newest_listing(self):
+        live = Path(__file__).resolve().parents[1] / "repo" / "index.json"
+        if not live.is_file():
+            self.skipTest("no published repo/index.json")
+        entries = json.loads(live.read_text())
+        by_pkg = {}
+        for entry in entries:
+            by_pkg.setdefault(entry["pkg"], []).append(entry["version"])
+        self.assertTrue(by_pkg, "published index must not be empty")
+        for pkg, versions in by_pkg.items():
+            with self.subTest(pkg=pkg):
+                self.assertEqual(self._mihon_pick(versions),
+                                 max(versions, key=self._semver),
+                                 f"Mihon would not offer the newest build of {pkg}")
+
+    def test_duplicate_listings_stay_distinct_in_both_indexes(self):
+        """Both versions remain individually addressable (each keeps its own APK),
+        which is what makes the collapse safe rather than destructive."""
+        live = Path(__file__).resolve().parents[1] / "repo"
+        index_json = json.loads((live / "index.json").read_text())
+        self.assertEqual(
+            sorted(e["version"] for e in index_json if e["pkg"].endswith("procomic")),
+            ["1.5.0", "1.5.1"],
+        )
+        apks = {e["apk"] for e in index_json}
+        self.assertEqual(len(apks), len(index_json), "each listing needs its own APK file")
+        for name in apks:
+            self.assertTrue((live / "apk" / name).is_file(), f"missing APK {name}")
+        store = mihon_decode_store((live / "index.pb").read_bytes())
+        self.assertEqual(len(store["extensions"]), 2)
+        self.assertEqual(sorted(e["versionCode"] for e in store["extensions"]),
+                         [10500, 10501])
+
+
 class RealArtifactSigningTests(unittest.TestCase):
     """The published fingerprint must be the digest of the certificate that
     actually signs the shipped APKs. Regression for the stale ``b655a474...``

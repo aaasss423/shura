@@ -66,9 +66,15 @@ class Scheduler:
 
     def recheck_due_chapters(self,rechecker,limit=250,at=None):
         """Driver for chapter-level retry: every due retryable chapter is re-resolved through the
-        generic protocol. A chapter that heals is recorded HEALTHY and its source is woken so the
-        normal crawl cycle re-reviews the work (and publishes since it now has a healthy chapter).
-        A genuinely unavailable chapter is recorded as such; the work keeps its healthy chapters."""
+        generic protocol. A chapter that heals is recorded HEALTHY so the work rolls up to ACCEPTED.
+
+        Healing a chapter is deliberately *not* reported through ``record_attempt(True)``. That
+        call logs a ``crawl_success`` the source never produced, and the failure ladder in
+        ``StateStore.record_attempt`` counts failures since the last success -- so a chronic
+        crawler whose chapters kept healing would reset its own failure window on every pass,
+        never reach DEAD, skip its backoff entirely and be polled continuously. The heal is
+        recorded as its own event instead, and a source in backoff stays in backoff.
+        """
         if not hasattr(rechecker,"recheck") and not callable(rechecker):
             raise TypeError("rechecker must be a ContentRechecker (object with recheck(chapter_record) -> ChapterRecord)")
         due=self.store.due_chapters(at=at,limit=limit)
@@ -84,5 +90,5 @@ class Scheduler:
             self.store.event(ch["source_id"],"chapter_recheck",{"identity":rid,"status":review.status.value,"reason":review.reason,"attempt":attempts})
             if review.status==ChapterStatus.HEALTHY and source:
                 changed+=1;awake.add(ch["source_id"])
-                self.store.record_attempt(ch["source_id"],True,"chapter recheck healed")
-        return {"chapter_rechecks":len(due),"changed":changed,"awake_sources":sorted(awake)}
+                self.store.event(ch["source_id"],"chapter_recheck_healed",{"identity":rid,"attempts":attempts})
+        return {"chapter_rechecks":len(due),"changed":changed,"healed_sources":sorted(awake)}
