@@ -7,6 +7,7 @@ from shura_core.security.network import SafeHTTP
 from shura_core.security.network import validate_url
 from shura_core.quality.ranking import source_quality
 from shura_core.pipeline.content import MANIFEST_KEY, evaluate_work
+from shura_core.quality.adult import SourceClass, classify_source, classify_work
 from datetime import datetime,timezone
 class CandidateProcessor:
     def __init__(self,store,artifact_dir="artifacts",scanner=None,malware_scanner=None,expected_hosts=None,http_factory=None,url_validator=None,content_review_enabled=None):
@@ -36,6 +37,77 @@ class CandidateProcessor:
         self.store.event(c.source_id,"content_review",{"identity":c.identity,"verdict":review.verdict,"reason":review.reason,"totals":review.totals})
         if review.verdict=="PENDING":self.store.put_pending(c,"content-review")
         return (review.verdict,review.reason)
+    def _source_content_gate(self,c):
+        """Publication-policy gate on the source itself, before any download.
+
+        Returns ``(verdict, reason)`` where a non-``ALLOW`` verdict stops the
+        candidate: ``REJECTED`` for a source that is explicitly pornographic,
+        ``QUARANTINE`` for one under review, and ``PENDING`` when the signals are
+        inconclusive or the source is a mixed/unknown catalogue. Inconclusive
+        never becomes an automatic accept - that is the one failure mode the
+        policy exists to prevent.
+
+        This runs ahead of the artifact download so an explicit source never
+        costs a fetch, and it is recorded in the event ledger either way so the
+        decision can be audited and re-derived.
+        """
+        s=self.store.get_source(c.source_id);cfg=s.configuration if s else {}
+        policy=cfg.get("content_policy")
+        if not policy:
+            # No content policy configured means the source is not being published
+            # under the content policy at all; the legacy gates still apply. This
+            # keeps an unconfigured source from being held forever by a policy it
+            # never opted into.
+            return ("ALLOW","content policy not configured for this source")
+        assessment=classify_source(
+            declared=policy.get("classification"),
+            host=(c.apk_url or "").split("/")[2].split(":")[0] if "//" in (c.apk_url or "") else None,
+            # The source's own declared metadata, not the candidate's artifact
+            # name: "how this catalogue is described" is the question, and the APK
+            # filename answers nothing about it.
+            name=(s.name if s else c.name),description=cfg.get("description"),
+            tags=cfg.get("tags") or [],
+        )
+        self.store.event(c.source_id,"content_classification",
+                         {"identity":c.identity,"scope":"source",**assessment.to_dict()})
+        kind=assessment.classification
+        if kind is SourceClass.NSFW:
+            return ("REJECTED","source classified NSFW: "+"; ".join(assessment.reasons))
+        if kind is SourceClass.QUARANTINED:
+            return ("QUARANTINE","source is quarantined by content policy: "+"; ".join(assessment.reasons))
+        if kind in (SourceClass.MIXED, SourceClass.UNKNOWN):
+            if policy.get("review_unclassified", kind is SourceClass.MIXED):
+                self.store.put_pending(c,"content-classification")
+                return ("PENDING",f"source classified {kind.value}, operator review required: "+"; ".join(assessment.reasons))
+            return ("PENDING",f"source classification {kind.value} is unresolved: "+"; ".join(assessment.reasons))
+        return ("ALLOW","source classified "+kind.value)
+
+    def _work_content_gate(self,c):
+        """Per-title gate, independent of the source verdict.
+
+        A source marked SAFE may still carry one explicit title, and that title
+        must not inherit the source's verdict. Only applied when the source
+        declares per-title checking; absence of that is not permission to skip
+        silently.
+        """
+        s=self.store.get_source(c.source_id);cfg=s.configuration if s else {}
+        policy=cfg.get("content_policy") or {}
+        if not policy.get("check_titles",False):return None
+        manifest=(c.metadata or {}).get(MANIFEST_KEY) or {}
+        assessment=classify_work(
+            work_id=str(manifest.get("work_id") or c.identity),
+            name=str(manifest.get("work_name") or c.name),
+            tags=manifest.get("tags") or [],
+            description=manifest.get("description"),
+        )
+        self.store.event(c.source_id,"content_classification",
+                         {"identity":c.identity,"scope":"work",**assessment.to_dict()})
+        if assessment.classification is SourceClass.NSFW:
+            return ("REJECTED","title classified NSFW: "+"; ".join(assessment.reasons))
+        if assessment.classification in (SourceClass.MIXED, SourceClass.UNKNOWN):
+            return ("PENDING","title classification unresolved: "+"; ".join(assessment.reasons))
+        return None
+
     def validate(self,c):
         errors=[]
         source=self.store.get_source(c.source_id)
@@ -53,6 +125,21 @@ class CandidateProcessor:
         return errors
     def process(self,c,download=True):
         if self.store.is_source_quarantined(c.source_id) or self.store.is_quarantined(c.source_id,c.identity):return {"verdict":"QUARANTINED","reason":"durable security quarantine requires review"}
+        gate=self._source_content_gate(c)
+        if gate[0]=="REJECTED":
+            self.store.put_pending(c,"content-policy-rejected")
+            self.store.mark_processed(c.source_id,c.identity,self.store.get_source(c.source_id).configuration_fingerprint,"rejected")
+            return {"verdict":"REJECTED","reason":gate[1]}
+        if gate[0]=="QUARANTINE":
+            self.store.put_pending(c,"content-policy-quarantine")
+            return {"verdict":"QUARANTINED","reason":gate[1]}
+        if gate[0]=="PENDING":
+            return {"verdict":"PENDING","reason":gate[1]}
+        title_gate=self._work_content_gate(c)
+        if title_gate:
+            if title_gate[0]=="REJECTED":self.store.put_pending(c,"content-policy-rejected")
+            else:self.store.put_pending(c,"content-classification")
+            return {"verdict":title_gate[0],"reason":title_gate[1]}
         errors=self.validate(c)
         if errors:
             self.store.put_pending(c,"validation-rejected");self.store.mark_processed(c.source_id,c.identity,self.store.get_source(c.source_id).configuration_fingerprint, "rejected");return {"verdict":"REJECTED","reason":"; ".join(errors)}
