@@ -113,8 +113,8 @@ jobs:
           mkdir -p diagnostics
           # JUnit XML is what the android test plugin writes; it names every test
           # and the exception each failing one raised.
-          find android -path '*connected*' -name '*.xml' -exec cp --parents {} diagnostics/ ; 2>/dev/null || true
-          find android -path '*reports*' -name '*.html' -exec cp --parents {} diagnostics/ ; 2>/dev/null || true
+          find android -path '*connected*' -name '*.xml' -exec cp --parents {} diagnostics/ \; 2>/dev/null || true
+          find android -path '*reports*' -name '*.html' -exec cp --parents {} diagnostics/ \; 2>/dev/null || true
           adb logcat -d > diagnostics/logcat.txt 2>/dev/null || echo 'logcat unavailable' > diagnostics/logcat.txt
           {
             echo "### RealExtensionLoadTest"
