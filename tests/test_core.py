@@ -77,7 +77,7 @@ class CoreTests(unittest.TestCase):
         pub=RepositoryPublisher(self.store,Path(self.tmp.name)/"repo");r=pub.publish(stage=True);self.assertTrue(r["refused"]);self.assertFalse((Path(self.tmp.name)/"repo").exists())
         r=pub.publish(release=True);self.assertTrue(r["refused"])
     def test_only_security_passed_candidate_publishes(self):
-        c=Candidate("s1","org.example.ext","1.0","https://example.org/x.apk",name="x",language="ar",provenance={"page":"x"},metadata={"_artifact_path":str(Path(self.tmp.name)/"x.apk"),"_security":{"sha256":"a"*64,"certificate":"a"*64}});Path(self.tmp.name,"x.apk").write_bytes(b"verified") ;self.store.put_pending(c,"security-passed");self.store.accept_pending(c.source_id,c.identity)
+        c=Candidate("s1","org.example.ext","1.0","https://example.org/x.apk",name="x",language="ar",provenance={"page":"x"},metadata={"_artifact_path":str(Path(self.tmp.name)/"x.apk"),"_security":{"sha256":"a"*64,"certificate":"a"*64},"_content_policy":{"scope":"source","classification":"SAFE","reasons":["test fixture declared safe"],"evidence":{}}});Path(self.tmp.name,"x.apk").write_bytes(b"verified") ;self.store.put_pending(c,"security-passed");self.store.accept_pending(c.source_id,c.identity)
         r=RepositoryPublisher(self.store,Path(self.tmp.name)/"repo").publish(release=True);self.assertEqual(r["published"],1);self.assertTrue((Path(self.tmp.name)/"repo/index.json").exists());self.assertTrue((Path(self.tmp.name)/"repo/apk/org_example_ext-1.0.apk").exists())
     def test_quarantine_record_and_forget_cannot_bypass(self):
         c=Candidate("s1","org.example.ext","bad","https://example.org/x.apk",provenance={"page":"x"});self.store.quarantine_item(c,"signature mismatch","deadbeef");self.assertEqual(self.store.get_source("s1").state,SourceState.QUARANTINED)
@@ -154,7 +154,7 @@ class CoreTests(unittest.TestCase):
     def test_publisher_rolls_back_files_when_ledger_fails(self):
         root=Path(self.tmp.name)/"repo";root.mkdir();(root/"index.json").write_text("old")
         artifact=Path(self.tmp.name)/"x.apk";artifact.write_bytes(b"apk")
-        c=Candidate("s1","org.example.ext","1.0","https://example.org/x.apk",name="x",language="ar",provenance={"page":"x"},metadata={"_artifact_path":str(artifact),"_security":{"sha256":"a"*64,"certificate":"a"*64}})
+        c=Candidate("s1","org.example.ext","1.0","https://example.org/x.apk",name="x",language="ar",provenance={"page":"x"},metadata={"_artifact_path":str(artifact),"_security":{"sha256":"a"*64,"certificate":"a"*64},"_content_policy":{"scope":"source","classification":"SAFE","reasons":["test fixture declared safe"],"evidence":{}}})
         self.store.put_pending(c,"security-passed");self.store.accept_pending(c.source_id,c.identity)
         original=self.store.publish
         def fail(_):raise RuntimeError("ledger unavailable")
@@ -222,8 +222,8 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(self.store.status("s1")["counts"].get("quarantine_review",0))
 
     def test_publication_duplicate_identity_hash_conflict_stays_pending(self):
-        one=Candidate("s1","org.example.ext","1.0","https://example.org/a.apk",name="x",language="ar",provenance={"page":"a"},metadata={"_artifact_path":str(Path(self.tmp.name)/"a.apk"),"_security":{"sha256":"a"*64}})
-        two=Candidate("s2","org.example.ext","1.0","https://example.org/b.apk",name="x",language="ar",provenance={"page":"b"},metadata={"_artifact_path":str(Path(self.tmp.name)/"b.apk"),"_security":{"sha256":"b"*64}})
+        one=Candidate("s1","org.example.ext","1.0","https://example.org/a.apk",name="x",language="ar",provenance={"page":"a"},metadata={"_artifact_path":str(Path(self.tmp.name)/"a.apk"),"_security":{"sha256":"a"*64},"_content_policy":{"scope":"source","classification":"SAFE","reasons":["test fixture declared safe"],"evidence":{}}})
+        two=Candidate("s2","org.example.ext","1.0","https://example.org/b.apk",name="x",language="ar",provenance={"page":"b"},metadata={"_artifact_path":str(Path(self.tmp.name)/"b.apk"),"_security":{"sha256":"b"*64},"_content_policy":{"scope":"source","classification":"SAFE","reasons":["test fixture declared safe"],"evidence":{}}})
         Path(self.tmp.name,"a.apk").write_bytes(b"a");Path(self.tmp.name,"b.apk").write_bytes(b"b")
         self.store.add_source(Source("s2","other",self.base+"/list","html",configuration={"allowed_hosts":["127.0.0.1"],"signing_key":"e"*64}))
         for c in (one,two):self.store.put_pending(c,"security-passed");self.store.accept_pending(c.source_id,c.identity)

@@ -13,6 +13,7 @@ from shura_core.models import Candidate, Source
 from shura_core.pipeline.processor import CandidateProcessor
 from shura_core.quality.adult import SourceClass, classify_source, classify_work
 from shura_core.security.artifacts import ScanVerdict
+from shura_core.publishing.repository import PublishRefused, RepositoryPublisher
 from shura_core.state import StateStore
 
 
@@ -193,6 +194,109 @@ class ProductionGateTests(unittest.TestCase):
             ("s1", "content_classification")).fetchall()
         self.assertTrue(recorded, "classification decision must be auditable")
         self.assertIn("classification", recorded[0]["detail"])
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class PublisherContentGateTests(unittest.TestCase):
+    """The publisher must refuse on its own, not trust that the pipeline ran.
+
+    Each case stages an item directly at 'accepted', which is what any alternate
+    route into the repository looks like, and asserts the publisher refuses.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = StateStore(Path(self.tmp.name) / "s.db")
+        self.repo = Path(self.tmp.name) / "repo"
+        self.store.add_source(Source("s1", "fixture", "https://example.org/index.json", "index", "ar",
+                                     configuration={"allowed_hosts": ["example.org"],
+                                                    "signing_key": "ab" * 32}))
+
+    def tearDown(self):
+        self.store.close()
+        self.tmp.cleanup()
+
+    def _stage(self, decision, *, stage="accepted"):
+        artifact = Path(self.tmp.name) / "x.apk"
+        artifact.write_bytes(b"apk")
+        metadata = {"_artifact_path": str(artifact),
+                    "_security": {"sha256": "c" * 64, "certificate": "ab" * 32,
+                                  "malware": {"engine": "FakeClam", "verdict": "CLEAN", "detail": "clean"}}}
+        if decision is not None:
+            metadata["_content_policy"] = decision
+        candidate = Candidate("s1", "org.example.ext", "1.0", "https://example.org/x.apk",
+                              name="X", language="ar", provenance={"page": "p"}, metadata=metadata)
+        if stage == "accepted":
+            self.store.put_pending(candidate, "security-passed")
+            self.store.accept_pending("s1", candidate.identity)
+        else:
+            self.store.put_pending(candidate, stage)
+        return candidate
+
+    def _publish(self):
+        return RepositoryPublisher(self.store, self.repo).publish(release=True)
+
+    def _safe(self):
+        return {"scope": "source", "classification": "SAFE",
+                "policy_fingerprint": self.store.get_source("s1").fingerprint(),
+                "reasons": ["fixture"], "evidence": {}}
+
+    def test_safe_item_is_actually_published(self):
+        self._stage(self._safe())
+        result = self._publish()
+        self.assertEqual(result["published"], 1, result)
+        self.assertTrue((self.repo / "index.json").exists())
+
+    def test_nsfw_item_is_refused_even_though_staged_accepted(self):
+        self._stage(dict(self._safe(), classification="NSFW"))
+        with self.assertRaises(PublishRefused) as ctx:
+            self._publish()
+        self.assertIn("NSFW", str(ctx.exception))
+        self.assertFalse((self.repo / "index.json").exists())
+
+    def test_quarantined_classification_is_refused(self):
+        self._stage(dict(self._safe(), classification="QUARANTINED"))
+        with self.assertRaises(PublishRefused):
+            self._publish()
+
+    def test_item_with_no_classification_at_all_is_refused(self):
+        self._stage(None)
+        with self.assertRaises(PublishRefused) as ctx:
+            self._publish()
+        self.assertIn("no content classification", str(ctx.exception))
+
+    def test_unknown_is_refused_without_review(self):
+        self._stage(dict(self._safe(), classification="UNKNOWN"))
+        with self.assertRaises(PublishRefused) as ctx:
+            self._publish()
+        self.assertIn("UNKNOWN", str(ctx.exception))
+
+    def test_mixed_is_refused_without_provable_protection(self):
+        self._stage(dict(self._safe(), classification="MIXED"))
+        with self.assertRaises(PublishRefused):
+            self._publish()
+
+    def test_mixed_publishes_only_with_a_recorded_approval(self):
+        self._stage(dict(self._safe(), classification="MIXED",
+                         review_approved_by="operator-2026-10-10"))
+        self.assertEqual(self._publish()["published"], 1)
+
+    def test_policy_changed_after_approval_invalidates_it(self):
+        decision = self._safe()
+        decision["policy_fingerprint"] = "0" * 64
+        self._stage(decision)
+        with self.assertRaises(PublishRefused) as ctx:
+            self._publish()
+        self.assertIn("configuration changed", str(ctx.exception))
+
+    def test_failed_classifier_cannot_become_an_accept(self):
+        self._stage(dict(self._safe(), classification="UNKNOWN",
+                         reasons=["classifier unavailable"]))
+        with self.assertRaises(PublishRefused):
+            self._publish()
 
 
 if __name__ == "__main__":

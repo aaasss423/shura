@@ -88,7 +88,9 @@ class HardeningTests(unittest.TestCase):
         artifact = Path(self.tmp.name) / "x.apk"; artifact.write_bytes(b"apk")
         c = Candidate("s1", "org.example.ext", "1.0", "https://example.org/x.apk", name="X", language="ar",
                       provenance={"page": "https://example.org/list"},
-                      metadata={"_artifact_path": str(artifact), "_security": {"sha256": "c" * 64, "certificate": "a" * 64}})
+                      metadata={"_artifact_path": str(artifact), "_security": {"sha256": "c" * 64, "certificate": "a" * 64},
+                                  "_content_policy": {"scope": "source", "classification": "SAFE",
+                                                     "reasons": ["fixture"], "evidence": {}}})
         self.store.put_pending(c, "security-passed"); self.store.accept_pending("s1", c.identity)
         repo = Path(self.tmp.name) / "repo"
         RepositoryPublisher(self.store, repo).publish(release=True)

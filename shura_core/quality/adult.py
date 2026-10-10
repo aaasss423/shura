@@ -146,3 +146,7 @@ def classify_work(*, work_id: str, name: str | None, tags: Iterable[str] | None 
     if mature:
         return Assessment(SourceClass.MATURE, (f"maturity markers only: {mature}",), evidence)
     return Assessment(SourceClass.UNKNOWN, ("no per-title signal available",), evidence)
+
+#: Applied when a source configures no ``content_policy`` of its own. Absence of
+#: configuration is not permission: such a source is simply unclassified.
+DEFAULT_CONTENT_POLICY: dict = {"review_unclassified": True}

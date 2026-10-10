@@ -175,6 +175,52 @@ class RepositoryPublisher:
             )
         return fingerprints.pop()
 
+    def _content_gate(self, items: list[dict]) -> None:
+        """Final publication gate on the content classification.
+
+        The pipeline already classifies, but a publisher that trusts the pipeline
+        has no gate at all: anything that reaches ``stage='accepted'`` ships. This
+        re-derives the refusal from the decision recorded on the candidate, so a
+        direct call to ``publish`` - or an item promoted by some other route -
+        cannot put unclassified or explicit content into the public repository.
+
+        Refuses: no recorded decision, NSFW, QUARANTINED, MIXED/UNKNOWN without a
+        recorded operator approval, and any decision whose policy fingerprint no
+        longer matches the source's current configuration.
+        """
+        from shura_core.quality.adult import SourceClass
+
+        publishable = {SourceClass.SAFE.value, SourceClass.MATURE.value}
+        for item in items:
+            identity = item.get("identity", "unknown")
+            decision = (item.get("metadata", {}) or {}).get("_content_policy")
+            if not decision:
+                raise PublishRefused(
+                    f"refusing to publish: {identity} carries no content classification; "
+                    "an unclassified item must not reach the public repository"
+                )
+            classification = str(decision.get("classification") or "")
+            if classification in (SourceClass.NSFW.value, SourceClass.QUARANTINED.value):
+                raise PublishRefused(
+                    f"refusing to publish: {identity} is classified {classification}; "
+                    "explicit content is not admitted to the public repository"
+                )
+            if classification not in publishable:
+                approved = str(decision.get("review_approved_by") or "")
+                if classification == SourceClass.MIXED.value and approved:
+                    continue
+                raise PublishRefused(
+                    f"refusing to publish: {identity} is classified {classification or 'UNKNOWN'} "
+                    "with no recorded operator review"
+                )
+            recorded = decision.get("policy_fingerprint")
+            source = self.store.get_source(item.get("source_id", ""))
+            if recorded and source and recorded != source.fingerprint():
+                raise PublishRefused(
+                    f"refusing to publish: {identity} was approved under a different content "
+                    "policy; the source configuration changed after the decision"
+                )
+
     def _security_gate(self, items: list[dict]) -> None:
         """Refuse to publish an artifact whose recorded malware verdict is not CLEAN.
 
@@ -203,6 +249,7 @@ class RepositoryPublisher:
         Returns ``(signing_key_fingerprint, rollback_callable)``.
         """
         fingerprint = self._signing_fingerprint(items)
+        self._content_gate(items)
         self._security_gate(items)
         base_url = os.getenv("SHURA_REPO_BASE_URL", "").rstrip("/")
         website = os.getenv("SHURA_REPO_WEBSITE", "").rstrip("/")

@@ -7,7 +7,9 @@ from shura_core.security.network import SafeHTTP
 from shura_core.security.network import validate_url
 from shura_core.quality.ranking import source_quality
 from shura_core.pipeline.content import MANIFEST_KEY, evaluate_work
-from shura_core.quality.adult import SourceClass, classify_source, classify_work
+from shura_core.quality.adult import DEFAULT_CONTENT_POLICY, SourceClass, classify_source, classify_work
+
+CONTENT_DECISION_KEY = "_content_policy"
 from datetime import datetime,timezone
 class CandidateProcessor:
     def __init__(self,store,artifact_dir="artifacts",scanner=None,malware_scanner=None,expected_hosts=None,http_factory=None,url_validator=None,content_review_enabled=None):
@@ -52,13 +54,10 @@ class CandidateProcessor:
         decision can be audited and re-derived.
         """
         s=self.store.get_source(c.source_id);cfg=s.configuration if s else {}
-        policy=cfg.get("content_policy")
-        if not policy:
-            # No content policy configured means the source is not being published
-            # under the content policy at all; the legacy gates still apply. This
-            # keeps an unconfigured source from being held forever by a policy it
-            # never opted into.
-            return ("ALLOW","content policy not configured for this source")
+        # Default-deny: a source that configures no content policy is not thereby
+        # cleared, it is unclassified. Treating absence of configuration as
+        # permission was the first hole this gate had.
+        policy=cfg.get("content_policy") or DEFAULT_CONTENT_POLICY
         assessment=classify_source(
             declared=policy.get("classification"),
             host=(c.apk_url or "").split("/")[2].split(":")[0] if "//" in (c.apk_url or "") else None,
@@ -71,15 +70,22 @@ class CandidateProcessor:
         self.store.event(c.source_id,"content_classification",
                          {"identity":c.identity,"scope":"source",**assessment.to_dict()})
         kind=assessment.classification
+        # Carried on the candidate so the publisher can re-check it without
+        # trusting that the pipeline ran, and compared against the source's policy
+        # fingerprint so a reconfiguration cannot carry an old approval forward.
+        c.metadata[CONTENT_DECISION_KEY]={"scope":"source","policy_fingerprint":self.store.get_source(c.source_id).fingerprint(),**assessment.to_dict()}
         if kind is SourceClass.NSFW:
             return ("REJECTED","source classified NSFW: "+"; ".join(assessment.reasons))
         if kind is SourceClass.QUARANTINED:
             return ("QUARANTINE","source is quarantined by content policy: "+"; ".join(assessment.reasons))
         if kind in (SourceClass.MIXED, SourceClass.UNKNOWN):
-            if policy.get("review_unclassified", kind is SourceClass.MIXED):
-                self.store.put_pending(c,"content-classification")
-                return ("PENDING",f"source classified {kind.value}, operator review required: "+"; ".join(assessment.reasons))
-            return ("PENDING",f"source classification {kind.value} is unresolved: "+"; ".join(assessment.reasons))
+            # Never an automatic accept. MIXED additionally needs a recorded,
+            # auditable review before it can ever reach the publisher.
+            self.store.put_pending(c,"content-classification")
+            if kind is SourceClass.MIXED and policy.get("review_approved_by"):
+                c.metadata[CONTENT_DECISION_KEY]["review_approved_by"]=policy["review_approved_by"]
+                return ("ALLOW","mixed source accepted on recorded operator review by "+str(policy["review_approved_by"]))
+            return ("PENDING",f"source classified {kind.value}, operator review required: "+"; ".join(assessment.reasons))
         return ("ALLOW","source classified "+kind.value)
 
     def _work_content_gate(self,c):

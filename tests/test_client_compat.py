@@ -361,7 +361,9 @@ class SigningFingerprintIsTheWholeCertificate(unittest.TestCase):
                           name="X", language="ar", provenance={"page": "p"},
                           metadata={"_artifact_path": str(artifact),
                                     "_security": {"sha256": "c" * 64,
-                                                  "certificate": PROCOMIC_SIGNER_SHA256}})
+                                                  "certificate": PROCOMIC_SIGNER_SHA256},
+                                  "_content_policy": {"scope": "source", "classification": "SAFE",
+                                                     "reasons": ["test fixture declared safe"], "evidence": {}}})
             store.put_pending(c, "security-passed")
             store.accept_pending("s1", c.identity)
             with self.assertRaises(PublishRefused) as ctx:
@@ -387,7 +389,9 @@ class SigningFingerprintIsTheWholeCertificate(unittest.TestCase):
                           name="X", language="ar", provenance={"page": "p"},
                           metadata={"_artifact_path": str(artifact),
                                     "_security": {"sha256": "c" * 64,
-                                                  "certificate": PROCOMIC_SIGNER_SHA256}})
+                                                  "certificate": PROCOMIC_SIGNER_SHA256},
+                                  "_content_policy": {"scope": "source", "classification": "SAFE",
+                                                     "reasons": ["test fixture declared safe"], "evidence": {}}})
             store.put_pending(c, "security-passed")
             store.accept_pending("s1", c.identity)
             result = RepositoryPublisher(store, repo).publish(release=True)
@@ -421,7 +425,9 @@ class SigningGateTests(unittest.TestCase):
             security["certificate"] = certificate
         return Candidate(source_id, "org.example.ext", version, "https://example.org/x.apk",
                          name="Example", language="ar", provenance={"page": "p"},
-                         metadata={"_artifact_path": str(artifact), "_security": security})
+                         metadata={"_artifact_path": str(artifact), "_security": security,
+                                  "_content_policy": {"scope": "source", "classification": "SAFE",
+                                                     "reasons": ["test fixture declared safe"], "evidence": {}}})
 
     def accept_and_publish(self, *candidates: Candidate):
         for c in candidates:
@@ -470,7 +476,10 @@ class LegacyIndexCompatibilityTests(unittest.TestCase):
                       "https://example.org/x.apk", name="ProComic (AR)", language="ar",
                       provenance={"page": "p"},
                       metadata={"_artifact_path": str(artifact),
-                                "_security": {"sha256": "c" * 64, "certificate": CERT}})
+                                "_security": {"sha256": "c" * 64, "certificate": CERT},
+                                "_content_policy": {"scope": "source", "classification": "SAFE",
+                                                    "reasons": ["test fixture declared safe"],
+                                                    "evidence": {}}})
         self.store.add_source(Source("s1", "fixture", "https://example.org/index.json", "index", "ar",
                                      configuration={"allowed_hosts": ["example.org"], "signing_key": CERT}))
         self.store.put_pending(c, "security-passed")
@@ -905,7 +914,9 @@ class MaterializationTests(unittest.TestCase):
                 c = Candidate("s1", "org.example.ext", version, "https://example.org/x.apk",
                               name="X", language="ar", provenance={"page": "p"},
                               metadata={"_artifact_path": str(artifact),
-                                        "_security": {"sha256": "c" * 64, "certificate": CERT}})
+                                        "_security": {"sha256": "c" * 64, "certificate": CERT},
+                                        "_content_policy": {"scope": "source", "classification": "SAFE",
+                                            "reasons": ["test fixture declared safe"], "evidence": {}}})
                 store.put_pending(c, "security-passed")
                 store.accept_pending("s1", c.identity)
                 result = RepositoryPublisher(store, repo).publish(release=True)
@@ -931,8 +942,10 @@ class MaterializationTests(unittest.TestCase):
                           name="X", language="ar", provenance={"page": "https://example.org/list"},
                           metadata={"_artifact_path": str(artifact),
                                     "_security": {"sha256": "c" * 64, "certificate": CERT,
-                                                  "malware": {"engine": "MalwareScanner", "verdict": "CLEAN",
-                                                              "detail": "no threats detected"}}})
+                                                                                          "malware": {"engine": "MalwareScanner", "verdict": "CLEAN",
+                                                              "detail": "no threats detected"}},
+                                  "_content_policy": {"scope": "source", "classification": "SAFE",
+                                                     "reasons": ["test fixture declared safe"], "evidence": {}}})
             store.put_pending(c, "security-passed")
             store.accept_pending("s1", c.identity)
             RepositoryPublisher(store, repo).publish(release=True)

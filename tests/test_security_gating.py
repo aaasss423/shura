@@ -145,7 +145,11 @@ class PublisherSecurityGateTests(unittest.TestCase):
             security["malware"] = malware_record
         c = Candidate("s1", "org.example.ext", "1.0", "https://example.org/a.apk",
                       name="Ext", language="ar", provenance={"page": "p"},
-                      metadata={"_artifact_path": str(artifact), "_security": security})
+                      metadata={"_artifact_path": str(artifact), "_security": security,
+                                "_content_policy": {"scope": "source", "classification": "SAFE",
+                                                   "policy_fingerprint": self.store.get_source("s1").fingerprint(),
+                                                   "reasons": ["test fixture declared safe"],
+                                                   "evidence": {}}})
         self.store.put_pending(c, "security-passed")
         self.store.accept_pending("s1", c.identity)
         return RepositoryPublisher(self.store, self.root / "repo").publish(release=True)
