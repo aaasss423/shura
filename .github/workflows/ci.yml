@@ -9,7 +9,31 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m compileall -q shura_core tests
-      - run: python -m unittest discover -s tests -v
+      - name: Run the Python test suite
+        run: |
+          set -o pipefail
+          python -m unittest discover -s tests -v 2>&1 | tee python-tests.log
+          status=${PIPESTATUS[0]}
+          {
+            echo "### Python test suite"
+            echo
+            echo '```'
+            grep -E '^(FAIL|ERROR|OK|Ran )|^(FAILED|OK)' python-tests.log | tail -40 || true
+            echo '```'
+            echo
+            echo '### Tracebacks'
+            echo
+            echo '```'
+            grep -A 25 -E '^(FAIL|ERROR):' python-tests.log | head -120 || echo 'no failure blocks matched'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+      - name: Upload the python test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-tests-log
+          path: python-tests.log
       - run: git diff --check
   android:
     runs-on: ubuntu-latest
@@ -83,13 +107,40 @@ jobs:
           profile: pixel_6
           disable-animations: true
           script: gradle --no-daemon :shura-extension-runtime:connectedDebugAndroidTest
-      - name: Upload the emulator log
-        if: failure()
-        uses: reactivecircus/android-emulator-runner@v2
+      - name: Collect the diagnostics
+        if: always()
+        run: |
+          mkdir -p diagnostics
+          # JUnit XML is what the android test plugin writes; it names every test
+          # and the exception each failing one raised.
+          find android -path '*connected*' -name '*.xml' -exec cp --parents {} diagnostics/ ; 2>/dev/null || true
+          find android -path '*reports*' -name '*.html' -exec cp --parents {} diagnostics/ ; 2>/dev/null || true
+          adb logcat -d > diagnostics/logcat.txt 2>/dev/null || echo 'logcat unavailable' > diagnostics/logcat.txt
+          {
+            echo "### RealExtensionLoadTest"
+            echo
+            if compgen -G 'diagnostics/**/TEST-*.xml' > /dev/null; then
+              for f in $(find diagnostics -name 'TEST-*.xml'); do
+                echo "#### $f"
+                echo '```'
+                grep -oE 'tests="[0-9]+" *(skipped|failures)="[0-9]+"|testcase name="[^"]*"|<failure[^>]*>|message="[^"]{0,300}"' "$f" | head -60
+                echo '```'
+                echo
+              done
+            else
+              echo 'No JUnit XML was produced. The test run failed before reporting, or the'
+              echo 'instrumentation never reached the device. See logcat.txt and the Gradle log.'
+            fi
+            echo '### logcat (filtered)'
+            echo '```'
+            grep -iE 'shura|dexclassloader|ClassNotFound|NoSuchMethod|NoClassDef|AndroidRuntime|TestRunner' diagnostics/logcat.txt 2>/dev/null | tail -60 || echo 'nothing matched'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          api-level: 34
-          arch: x86_64
-          profile: pixel_6
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
-          disable-animations: true
-          script: gradle --no-daemon :shura-extension-runtime:connectedDebugAndroidTest || true
+          name: emulator-diagnostics
+          path: |
+            diagnostics/
+            android/**/build/reports/**
