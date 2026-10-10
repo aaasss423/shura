@@ -67,32 +67,41 @@ open class Page(
 /** One page of search results. */
 open class MangasPage(
     val mangas: List<SManga>,
-    val hasNextPage: Boolean,
+    val hasNextPage: Boolean = false,
 )
 
 /** Filter header. */
 open class Filter(val name: String) {
+    /**
+     * Single-select filter. The DEX signature is exactly `(String, Object[], int)`:
+     * a name, an array of candidate values, and an int in third position. No vararg
+     * overload is offered on purpose - a second constructor would only add a
+     * descriptor nothing calls.
+     *
+     * Nested so the binary name is `Filter$Select`, which is the descriptor the
+     * extension invokes. A top-level `Select` compiles to the name `Select`, and
+     * the string-pool assertions in AbiSurfaceTest would not have caught that.
+     */
+    class Select(
+        name: String,
+        val values: Array<Any?>,
+        val mask: Int,
+    ) : Filter(name) {
+        var state: Any? = values.firstOrNull()
+    }
+
     override fun equals(other: Any?): Boolean = other is Filter && other.name == name
     override fun hashCode(): Int = name.hashCode()
 }
 
-/**
- * Single-select filter. The DEX signature is exactly `(String, Object[], int)`:
- * a name, an array of candidate values, and an int in third position. No vararg
- * overload is offered on purpose - a second constructor would only add a
- * descriptor nothing calls.
- */
-class Select(
-    name: String,
-    val values: Array<Any?>,
-    val mask: Int,
-) : Filter(name) {
-    var state: Any? = values.firstOrNull()
-}
 
 /** The filters applied to one request. The DEX calls `FilterList(Filter[])`. */
 class FilterList {
     val list: List<Filter>
+
+    constructor() {
+        list = emptyList()
+    }
 
     constructor(filters: Array<Filter>) {
         list = filters.toList()
