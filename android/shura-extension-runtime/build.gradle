@@ -8,6 +8,35 @@ android {
     kotlinOptions { jvmTarget = '17' }
     testOptions { unitTests.all { it.systemProperty 'shura.repo.dir', rootProject.file('../repo').absolutePath } }
 }
+// The instrumentation tests need the artifacts Shura Core publishes. A device
+// cannot see the build machine's filesystem, and the previous fallback path
+// (/workspace/repo) only exists in the development sandbox, so on CI the tests
+// found no repository at all. The published repository is packaged into the test
+// APK's assets instead, so the tests read exactly the committed bytes wherever
+// they run.
+def publishedRepo = rootProject.file('../repo')
+android {
+    sourceSets {
+        androidTest {
+            assets.srcDirs += layout.buildDirectory.dir('androidTest-published-repo')
+        }
+    }
+}
+tasks.register('stagePublishedRepoForTests', Copy) {
+    from publishedRepo
+    into layout.buildDirectory.dir('androidTest-published-repo')
+    include '**'
+}
+tasks.matching { it.name ==~ /androidTest.*Assets/ || it.name ==~ /merge.*AndroidTestAssets/ }.configureEach {
+    dependsOn 'stagePublishedRepoForTests'
+}
+afterEvaluate {
+    tasks.matching { it.name ==~ /connected.*AndroidTest/ }.configureEach {
+        dependsOn 'stagePublishedRepoForTests'
+        systemProperty 'shura.repo.dir', publishedRepo.absolutePath
+    }
+}
+
 dependencies {
     // The shipped extension APKs bind against okhttp3 types they do not bundle,
     // so the host supplies the library. Apache-2.0; this is the transitive

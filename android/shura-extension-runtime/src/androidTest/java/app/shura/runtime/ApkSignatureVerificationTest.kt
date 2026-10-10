@@ -23,14 +23,29 @@ class ApkSignatureVerificationTest {
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
     private val anchor = "b655a474503f4471fdaf6ba35b9385f71d144669f3c28602c5b60b062022c41d"
 
-    private fun repoRoot(): File {
-        val candidates = listOf(
-            File(System.getProperty("shura.repo.dir") ?: ""),
-            File("/workspace/repo"),
-        )
-        val root = candidates.firstOrNull { File(it, "apk").isDirectory }
-        return root ?: error("no published repository found in $candidates")
+    /**
+     * The published repository, read out of the test APK's own assets.
+     *
+     * It is packaged there by `stagePublishedRepoForTests`, so these tests read
+     * the committed bytes on any machine. A host path would not exist on a
+     * device, and the sandbox path did not exist on CI.
+     */
+    private fun publishDir(name: String): File {
+        val assets = InstrumentationRegistry.getInstrumentation().context.assets
+        val out = File(context.cacheDir, "published-repo")
+        fun copy(path: String) {
+            assets.open(path).use { input ->
+                val target = File(out, path)
+                target.parentFile?.mkdirs()
+                input.copyTo(target.outputStream())
+            }
+        }
+        copy("repo.json"); copy("index.shura.json")
+        assets.list("apk")?.forEach { copy("apk/$it") }
+        return File(out, name)
     }
+
+    private fun repoRoot(): File = publishDir("")
 
     private fun procomic(): File {
         val apks = File(repoRoot(), "apk").listFiles { f: File -> f.name.endsWith(".apk") }!!
