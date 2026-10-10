@@ -85,6 +85,17 @@ class TrustAnchorIndependenceTest {
     }
 
     @Test
+    fun aForgedRepositoryWithSelfConsistentMetadataIsStillRefused() {
+        // The strongest form of the original defect: a repository whose
+        // repo.json, index entry and artifact all agree with each other, served
+        // by the attacker. It must not get as far as the APK.
+        val dir = forgeRepository(folder.root, attacker)
+        val client = ShuraRepositoryClient(dir, null, TrustAnchor(genuine))
+        val failure = try { client.entries(); null } catch (e: LoadFailure) { e }
+        assertTrue("a self-consistent forgery must still be refused", failure is LoadFailure.NotVerified)
+    }
+
+    @Test
     fun theGenuineRepositoryIsAcceptedByItsAnchor() {
         val repo = File(System.getProperty("shura.repo.dir") ?: "../../repo")
         assertTrue("no published repository at $repo", File(repo, "repo.json").isFile)

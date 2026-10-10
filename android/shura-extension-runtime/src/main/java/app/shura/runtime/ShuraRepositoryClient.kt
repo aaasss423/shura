@@ -72,42 +72,50 @@ class ShuraRepositoryClient(
     }
 
     /**
-     * Verifies one entry and returns it ready to load.
+     * Stages the artifact, then verifies *that copy*, and returns a descriptor
+     * pointing at the staged bytes.
      *
-     * Order matters and is not negotiable: the digest is checked against the
-     * value Shura Core published, the certificate against the repository anchor,
-     * and only then is the ABI read out of the artifact itself. Nothing is
-     * taken on trust from the file we are about to execute.
+     * The order is the point. Verifying a file in place and copying it afterwards
+     * leaves a window: whatever serves the repository can swap the bytes between
+     * the two steps, and the loader would then execute a file nobody checked.
+     * So the copy is made first, and the digest, the signature and the manifest
+     * are all read from the copy -- the exact bytes the class loader is handed.
      */
     fun verify(entry: RepositoryPackage): VerifiedExtension {
-        val apk = File(root, "apk").resolve(entry.apk)
-        if (!apk.isFile) throw LoadFailure.NotVerified("${entry.apk} is not present under ${apk.parentFile}")
+        val downloaded = File(root, "apk").resolve(entry.apk)
+        if (!downloaded.isFile) {
+            throw LoadFailure.NotVerified("${entry.apk} is not present under ${downloaded.parentFile}")
+        }
+        val staged = File(stagingDir(), entry.apk)
+        staged.parentFile?.mkdirs()
+        downloaded.inputStream().use { input -> staged.outputStream().use { input.copyTo(it) } }
 
-        val digest = sha256(apk)
+        val digest = sha256(staged)
         if (digest != entry.artifactSha256) {
+            staged.delete()
             throw LoadFailure.NotVerified(
                 "SHA-256 mismatch for ${entry.apk}: got $digest, repository published ${entry.artifactSha256}"
             )
         }
-        // The digest that decides trust is read out of the file being loaded, not
-        // out of the metadata that describes it.
         val anchor = trustAnchor()
-        val fromFile = signatures?.verify(apk, anchor, entry.signingCertificateSha256)
+        val fromFile = signatures?.verify(staged, anchor, entry.signingCertificateSha256)
         if (fromFile == null) {
+            staged.delete()
             throw LoadFailure.NotVerified(
                 "no APK signature verifier was supplied; refusing to trust ${entry.identity} on metadata alone"
             )
         }
-        val metadata = ApkManifestReader().read(apk)
+        val metadata = ApkManifestReader().read(staged)
         if (metadata.packageName != entry.pkg) {
+            staged.delete()
             throw LoadFailure.Manifest(
                 "${entry.apk} declares package ${metadata.packageName}, index says ${entry.pkg}"
             )
         }
         val abiText = metadata.metaData["tachiyomix.extensionLib"]
-            ?: throw LoadFailure.Manifest("no tachiyomix.extensionLib in ${entry.apk}")
+            ?: throw LoadFailure.Manifest("no tachiyomix.extensionLib in ${entry.apk}").also { staged.delete() }
         val abi = abiText.toFloatOrNull()
-            ?: throw LoadFailure.Manifest("extensionLib '$abiText' is not a number")
+            ?: throw LoadFailure.Manifest("extensionLib '$abiText' is not a number").also { staged.delete() }
 
         // Recorded, never silently reconciled: the index publishes a derived
         // extensionLib/versionCode, the artifact declares its own. The artifact
@@ -120,13 +128,25 @@ class ShuraRepositoryClient(
         }
 
         return VerifiedExtension(
-            apk = apk,
+            apk = staged,
             packageName = metadata.packageName,
             metadata = metadata,
             abi = abi,
             sourceClassName = "",
         )
     }
+
+    /**
+     * Where verified copies live. The real install target on device; a temp
+     * directory in unit tests, where no Context exists.
+     */
+    private fun stagingDir(): File =
+        staging ?: File(System.getProperty("java.io.tmpdir"), "shura-staging")
+
+    /** Test seam: the staging root. Production uses the app's files dir. */
+    fun useStaging(dir: File) { staging = dir }
+
+    private var staging: File? = null
 
     private fun indexApkMismatch(entry: RepositoryPackage, field: String, published: Any?, declared: Any?) {
         System.err.println(

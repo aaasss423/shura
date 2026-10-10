@@ -72,15 +72,19 @@ class ExtensionLoader(
     fun extensionsDir(): File = File(context.filesDir, "extensions").apply { mkdirs() }
 
     /**
-     * Stages a verified APK into internal storage and prepares its native library.
+     * Moves an already-verified artifact into the location the loader uses.
      *
-     * The APK is copied rather than referenced in place so the file the class
-     * loader opens is the one that was hashed.
+     * `ShuraRepositoryClient` has already copied and verified the bytes, so this
+     * is a move of that exact file rather than a fresh copy of something that
+     * might have changed: the loader must never be handed a file that was not
+     * the one whose digest and signature were checked.
      */
     fun stage(verified: VerifiedExtension): File {
         val dir = File(extensionsDir(), verified.packageName).apply { mkdirs() }
         val target = File(dir, "base.apk")
-        verified.apk.inputStream().use { input -> target.outputStream().use { input.copyTo(it) } }
+        if (verified.apk.canonicalPath != target.canonicalPath) {
+            verified.apk.inputStream().use { input -> target.outputStream().use { input.copyTo(it) } }
+        }
         extractNativeLibrary(verified, dir)
         return target
     }
@@ -112,7 +116,18 @@ class ExtensionLoader(
         if (abi < minExtensionLib || abi > maxExtensionLib) {
             throw LoadFailure.AbiUnsupported(abi.toString(), minExtensionLib, maxExtensionLib)
         }
+        // Re-hash what is about to be opened. If anything changed between verify()
+        // and load(), this is the last place it can be caught, and it is caught
+        // before any code from the APK runs.
         val apkFile = stage(verified)
+        val expected = sha256(verified.apk)
+        val stagedDigest = sha256(apkFile)
+        if (expected != stagedDigest) {
+            throw LoadFailure.NotVerified(
+                "${apkFile.name} changed between verification and load " +
+                    "(verified $expected, about to load $stagedDigest)"
+            )
+        }
         val nativeDir = extractNativeLibrary(verified, apkFile.parentFile!!)
         val optimized = File(apkFile.parentFile, "dex").apply { mkdirs() }
 
@@ -144,6 +159,10 @@ class ExtensionLoader(
         }
         return LoadedExtension(verified, instance, loader)
     }
+
+    private fun sha256(file: File): String =
+        java.security.MessageDigest.getInstance("SHA-256").digest(file.readBytes())
+            .joinToString("") { "%02x".format(it) }
 
     /**
      * Turns the manifest's `tachiyomi.extension.class` into a binary class name.
