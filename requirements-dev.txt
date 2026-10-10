@@ -1,0 +1,4 @@
+# Test-only dependencies. The CI python job installs these before running the
+# suite; without Pillow, tests/test_protected_tile_decode.py fails at import and
+# the whole run exits 1.
+Pillow>=10.0.0

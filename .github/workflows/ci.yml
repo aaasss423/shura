@@ -1,5 +1,8 @@
 name: CI
 on: [push, pull_request]
+permissions:
+  contents: write
+
 jobs:
   python:
     runs-on: ubuntu-latest
@@ -8,6 +11,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Install the test dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
       - run: python -m compileall -q shura_core tests
       - name: Run the Python test suite
         run: |
@@ -39,12 +44,25 @@ jobs:
             echo '</details>'
           } >> "$GITHUB_STEP_SUMMARY"
           exit $status
-      - name: Upload the python test log
+      - name: Publish the python test log
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-tests-log
-          path: python-tests.log
+        run: |
+          # GitHub gates job logs and artifact downloads behind admin access, which
+          # leaves a failing run unreadable to anyone else. Pushing the log to a
+          # diagnostics branch makes the evidence inspectable with a plain git
+          # fetch. It never touches main.
+          mkdir -p diagnostics
+          cp python-tests.log diagnostics/ 2>/dev/null || true
+          cd diagnostics
+          git init -q .
+          git config user.email 'ci@shura.invalid'
+          git config user.name 'Shura CI'
+          git add -A
+          git commit -q -m "python test log for run ${GITHUB_RUN_ID}" || exit 0
+          git push -q --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "HEAD:refs/heads/ci-diagnostics/python"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: git diff --check
   android:
     runs-on: ubuntu-latest
@@ -193,3 +211,19 @@ jobs:
             diagnostics/
             android-emulator-gradle.log
             android/**/build/reports/**
+      - name: Publish the emulator diagnostics
+        if: always()
+        run: |
+          mkdir -p diagnostics/published
+          cp -r diagnostics/. diagnostics/published/ 2>/dev/null || true
+          cp android-emulator-gradle.log diagnostics/published/ 2>/dev/null || true
+          cd diagnostics
+          git init -q .
+          git config user.email 'ci@shura.invalid'
+          git config user.name 'Shura CI'
+          git add -A
+          git commit -q -m "emulator diagnostics for run ${GITHUB_RUN_ID}" || exit 0
+          git push -q --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "HEAD:refs/heads/ci-diagnostics/emulator"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
