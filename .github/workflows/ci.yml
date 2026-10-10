@@ -24,8 +24,19 @@ jobs:
             echo '### Tracebacks'
             echo
             echo '```'
-            grep -A 25 -E '^(FAIL|ERROR):' python-tests.log | head -120 || echo 'no failure blocks matched'
+            grep -A 30 -E '^(FAIL|ERROR):' python-tests.log | head -200 || echo 'no FAIL/ERROR block matched'
             echo '```'
+            echo
+            # The full log goes in as well: the job-log endpoint needs admin, so
+            # for anyone without it this summary is the only place the traceback
+            # can be read from.
+            echo "<details><summary>Full unittest output ($(wc -l < python-tests.log) lines)</summary>"
+            echo
+            echo '```'
+            cat python-tests.log
+            echo '```'
+            echo
+            echo '</details>'
           } >> "$GITHUB_STEP_SUMMARY"
           exit $status
       - name: Upload the python test log
@@ -106,36 +117,73 @@ jobs:
           arch: x86_64
           profile: pixel_6
           disable-animations: true
-          script: gradle --no-daemon :shura-extension-runtime:connectedDebugAndroidTest
-      - name: Collect the diagnostics
-        if: always()
-        run: |
-          mkdir -p diagnostics
-          # JUnit XML is what the android test plugin writes; it names every test
-          # and the exception each failing one raised.
-          find android -path '*connected*' -name '*.xml' -exec cp --parents {} diagnostics/ \; 2>/dev/null || true
-          find android -path '*reports*' -name '*.html' -exec cp --parents {} diagnostics/ \; 2>/dev/null || true
-          adb logcat -d > diagnostics/logcat.txt 2>/dev/null || echo 'logcat unavailable' > diagnostics/logcat.txt
-          {
-            echo "### RealExtensionLoadTest"
-            echo
-            if compgen -G 'diagnostics/**/TEST-*.xml' > /dev/null; then
-              for f in $(find diagnostics -name 'TEST-*.xml'); do
-                echo "#### $f"
+          # Everything here runs while the emulator is still alive: this action
+          # kills the device when the script exits, so adb logcat and the JUnit
+          # XML have to be captured in here, not in a later step.
+          script: |
+            set -o pipefail
+            gradle --no-daemon -Dorg.gradle.jvmargs="-Xmx1536m -Dfile.encoding=UTF-8" \
+              :shura-extension-runtime:connectedDebugAndroidTest \
+              2>&1 | tee android-emulator-gradle.log
+            status=${PIPESTATUS[0]}
+            mkdir -p diagnostics
+            cp android-emulator-gradle.log diagnostics/ || true
+            find android/shura-extension-runtime/build -name '*.xml' -path '*connected*' \
+              -exec cp --parents {} diagnostics/ \; 2>/dev/null || true
+            find android/shura-extension-runtime/build/reports -type f \
+              -exec cp --parents {} diagnostics/ \; 2>/dev/null || true
+            adb logcat -d -v threadtime > diagnostics/logcat.txt 2>&1 || \
+              echo 'adb logcat failed: no device' > diagnostics/logcat.txt
+            {
+              echo "### Emulator: RealExtensionLoadTest"
+              echo
+              echo "gradle exit status: $status"
+              echo
+              echo '#### Gradle tail'
+              echo '```'
+              tail -60 android-emulator-gradle.log
+              echo '```'
+              echo
+              if find diagnostics -name 'TEST-*.xml' | grep -q .; then
+                echo '#### Per-test results'
                 echo '```'
-                grep -oE 'tests="[0-9]+" *(skipped|failures)="[0-9]+"|testcase name="[^"]*"|<failure[^>]*>|message="[^"]{0,300}"' "$f" | head -60
+                for f in $(find diagnostics -name 'TEST-*.xml'); do
+                  echo "-- $f"
+                  python3 - "$f" <<'PYEOF'
+          import sys, xml.etree.ElementTree as ET
+          try:
+              root = ET.parse(sys.argv[1]).getroot()
+          except Exception as exc:
+              print(f"unreadable: {exc}")
+              raise SystemExit(0)
+          for case in root.iter("testcase"):
+              name = case.get("name", "?")
+              bad = [c for c in case if c.tag in ("failure", "error")]
+              if bad:
+                  print(f"FAIL {name}")
+                  for c in bad:
+                      print(f"  {c.tag}: {c.get('message','')}")
+                      print("  " + "\n  ".join((c.text or "").strip().splitlines()[:25]))
+                      print(f"  at {c.get('classname','')}")
+              elif any(c.tag == "skipped" for c in case):
+                  print(f"SKIP {name}")
+              else:
+                  print(f"PASS {name}")
+          PYEOF
+                done
                 echo '```'
-                echo
-              done
-            else
-              echo 'No JUnit XML was produced. The test run failed before reporting, or the'
-              echo 'instrumentation never reached the device. See logcat.txt and the Gradle log.'
-            fi
-            echo '### logcat (filtered)'
-            echo '```'
-            grep -iE 'shura|dexclassloader|ClassNotFound|NoSuchMethod|NoClassDef|AndroidRuntime|TestRunner' diagnostics/logcat.txt 2>/dev/null | tail -60 || echo 'nothing matched'
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo '#### No JUnit XML'
+                echo 'The instrumentation produced no XML, so no test ever reported.'
+                echo 'See the Gradle tail and logcat above.'
+              fi
+              echo
+              echo '#### logcat (class-loading and failures)'
+              echo '```'
+              grep -iE 'shura|dexclassloader|ClassNotFound|NoSuchMethod|NoClassDef|AndroidRuntime|TestRunner|INSTRUMENTATION' diagnostics/logcat.txt | tail -80 || echo 'nothing matched'
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit $status
       - name: Upload the diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -143,4 +191,5 @@ jobs:
           name: emulator-diagnostics
           path: |
             diagnostics/
+            android-emulator-gradle.log
             android/**/build/reports/**
