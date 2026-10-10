@@ -23,11 +23,17 @@ jobs:
             grep -E '^(FAIL|ERROR|OK|Ran )|^(FAILED|OK)' python-tests.log | tail -40 || true
             echo '```'
             echo
+            echo "python: $(python -VV)"
+            echo
             echo '### Tracebacks'
             echo
             echo '```'
             grep -A 30 -E '^(FAIL|ERROR):' python-tests.log | head -200 || echo 'no FAIL/ERROR block matched'
             echo '```'
+            echo
+            # Inline on the run page, so the failing test is visible without
+            # opening job logs, which need repo admin.
+            grep -E '^(FAIL|ERROR):' python-tests.log | sed 's/^\(FAIL\|ERROR\): /::error title=unittest /; s/$//' || true
             echo
             # The full log goes in as well: the job-log endpoint needs admin, so
             # for anyone without it this summary is the only place the traceback
