@@ -67,7 +67,22 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    val sourceHost = remember { SourceHost().apply { register(MangaDexSource()) } }
+    // Shura's own repository is the only source of extensions. MangaDex stays as
+    // the built-in adapter; extensions loaded from the repository are added
+    // alongside it, never instead of it, and each load failure is reported.
+    var extensionNotice by remember { mutableStateOf<String?>(null) }
+    val sourceHost = remember {
+        SourceHost().apply {
+            register(MangaDexSource())
+            val outcomes = ShuraExtensions.load(context, java.io.File(context.filesDir, "repo"))
+            outcomes.forEach { outcome ->
+                val source = outcome.source
+                if (source != null) register(source)
+            }
+            val failures = outcomes.mapNotNull { it.error }
+            if (failures.isNotEmpty()) extensionNotice = failures.joinToString("\n")
+        }
+    }
     val appScope = rememberCoroutineScope()
     var readerTitle by remember { mutableStateOf("Local chapter") }
     var readerMangaTitle by remember { mutableStateOf("") }
@@ -153,7 +168,7 @@ class MainActivity : ComponentActivity() {
                     sources = sourceHost.all(),
                     onOpenChapter = openChapter,
                     onDownloadChapter = downloadChapter,
-                    notice = downloadNotice,
+                    notice = extensionNotice ?: downloadNotice,
                     modifier = Modifier.padding(padding),
                 )
                 "Library" -> Column(Modifier.fillMaxSize().padding(padding).padding(20.dp)) {
