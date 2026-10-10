@@ -1,8 +1,5 @@
 name: CI
 on: [push, pull_request]
-permissions:
-  contents: write
-
 jobs:
   python:
     runs-on: ubuntu-latest
@@ -44,25 +41,6 @@ jobs:
             echo '</details>'
           } >> "$GITHUB_STEP_SUMMARY"
           exit $status
-      - name: Publish the python test log
-        if: always()
-        run: |
-          # GitHub gates job logs and artifact downloads behind admin access, which
-          # leaves a failing run unreadable to anyone else. Pushing the log to a
-          # diagnostics branch makes the evidence inspectable with a plain git
-          # fetch. It never touches main.
-          mkdir -p diagnostics
-          cp python-tests.log diagnostics/ 2>/dev/null || true
-          cd diagnostics
-          git init -q .
-          git config user.email 'ci@shura.invalid'
-          git config user.name 'Shura CI'
-          git add -A
-          git commit -q -m "python test log for run ${GITHUB_RUN_ID}" || exit 0
-          git push -q --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
-            "HEAD:refs/heads/ci-diagnostics/python"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: git diff --check
   android:
     runs-on: ubuntu-latest
@@ -165,41 +143,21 @@ jobs:
               if find diagnostics -name 'TEST-*.xml' | grep -q .; then
                 echo '#### Per-test results'
                 echo '```'
-                for f in $(find diagnostics -name 'TEST-*.xml'); do
-                  echo "-- $f"
-                  python3 - "$f" <<'PYEOF'
-          import sys, xml.etree.ElementTree as ET
-          try:
-              root = ET.parse(sys.argv[1]).getroot()
-          except Exception as exc:
-              print(f"unreadable: {exc}")
-              raise SystemExit(0)
-          for case in root.iter("testcase"):
-              name = case.get("name", "?")
-              bad = [c for c in case if c.tag in ("failure", "error")]
-              if bad:
-                  print(f"FAIL {name}")
-                  for c in bad:
-                      print(f"  {c.tag}: {c.get('message','')}")
-                      print("  " + "\n  ".join((c.text or "").strip().splitlines()[:25]))
-                      print(f"  at {c.get('classname','')}")
-              elif any(c.tag == "skipped" for c in case):
-                  print(f"SKIP {name}")
-              else:
-                  print(f"PASS {name}")
-          PYEOF
-                done
+                python3 scripts/junit_summary.py $(find diagnostics -name 'TEST-*.xml') || true
                 echo '```'
+                # Annotations render inline on the run page, so the failure is
+                # visible without opening logs or downloading artifacts.
+                for f in $(find diagnostics -name 'TEST-*.xml'); do
+                  python3 scripts/junit_summary.py "$f" | grep -E '^   (FAIL|ERROR)' \
+                    | sed 's/^   //' | while read -r line; do
+                        echo "::error title=Instrumentation test failed::${line}"
+                      done
+                done
               else
                 echo '#### No JUnit XML'
                 echo 'The instrumentation produced no XML, so no test ever reported.'
                 echo 'See the Gradle tail and logcat above.'
               fi
-              echo
-              echo '#### logcat (class-loading and failures)'
-              echo '```'
-              grep -iE 'shura|dexclassloader|ClassNotFound|NoSuchMethod|NoClassDef|AndroidRuntime|TestRunner|INSTRUMENTATION' diagnostics/logcat.txt | tail -80 || echo 'nothing matched'
-              echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
             exit $status
       - name: Upload the diagnostics
@@ -211,19 +169,3 @@ jobs:
             diagnostics/
             android-emulator-gradle.log
             android/**/build/reports/**
-      - name: Publish the emulator diagnostics
-        if: always()
-        run: |
-          mkdir -p diagnostics/published
-          cp -r diagnostics/. diagnostics/published/ 2>/dev/null || true
-          cp android-emulator-gradle.log diagnostics/published/ 2>/dev/null || true
-          cd diagnostics
-          git init -q .
-          git config user.email 'ci@shura.invalid'
-          git config user.name 'Shura CI'
-          git add -A
-          git commit -q -m "emulator diagnostics for run ${GITHUB_RUN_ID}" || exit 0
-          git push -q --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
-            "HEAD:refs/heads/ci-diagnostics/emulator"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
