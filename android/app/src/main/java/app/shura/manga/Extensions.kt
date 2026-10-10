@@ -1,6 +1,7 @@
 package app.shura.manga
 
 import android.content.Context
+import app.shura.runtime.ApkSignatureVerifier
 import app.shura.runtime.ExtensionLoader
 import app.shura.runtime.ExtensionSourceAdapter
 import app.shura.runtime.ShuraRepositoryClient
@@ -39,7 +40,7 @@ object ShuraExtensions {
 
     /** Verified, loaded sources from the repository, plus the reasons for any that failed. */
     fun load(context: Context, repositoryDir: File, anchor: TrustAnchor = TrustAnchor(TRUSTED_REPOSITORY_ANCHOR)): List<ExtensionLoadOutcome> {
-        val client = ShuraRepositoryClient(repositoryDir, anchor)
+        val client = ShuraRepositoryClient(repositoryDir, ApkSignatureVerifier(context), anchor)
         val loader = ExtensionLoader(context)
         val outcomes = mutableListOf<ExtensionLoadOutcome>()
         for (entry in client.entries()) {

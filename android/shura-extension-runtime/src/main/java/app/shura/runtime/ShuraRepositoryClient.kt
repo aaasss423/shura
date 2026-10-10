@@ -19,6 +19,12 @@ import java.io.File
 class ShuraRepositoryClient(
     private val root: File,
     /**
+     * Reads the signing certificate out of the APK. Injected so the repository
+     * logic is testable off-device, but the production wiring always passes the
+     * real one: a nil signature check would make every other check decorative.
+     */
+    private val signatures: ApkSignatureVerifier?,
+    /**
      * The expected certificate digest, configured independently of anything
      * downloaded.
      *
@@ -83,11 +89,13 @@ class ShuraRepositoryClient(
                 "SHA-256 mismatch for ${entry.apk}: got $digest, repository published ${entry.artifactSha256}"
             )
         }
+        // The digest that decides trust is read out of the file being loaded, not
+        // out of the metadata that describes it.
         val anchor = trustAnchor()
-        if (entry.signingCertificateSha256.lowercase() != anchor.lowercase()) {
+        val fromFile = signatures?.verify(apk, anchor, entry.signingCertificateSha256)
+        if (fromFile == null) {
             throw LoadFailure.NotVerified(
-                "${entry.identity} is pinned to ${entry.signingCertificateSha256}, " +
-                    "but this repository trusts $anchor"
+                "no APK signature verifier was supplied; refusing to trust ${entry.identity} on metadata alone"
             )
         }
         val metadata = ApkManifestReader().read(apk)

@@ -26,7 +26,7 @@ class ShuraRepositoryClientTest {
     fun setUp() {
         root = File(System.getProperty("shura.repo.dir") ?: "../../repo")
         assertTrue("no published repository at $root", File(root, "repo.json").isFile)
-        client = ShuraRepositoryClient(root, TrustAnchor("b655a474503f4471fdaf6ba35b9385f71d144669f3c28602c5b60b062022c41d"))
+        client = ShuraRepositoryClient(root, null, TrustAnchor("b655a474503f4471fdaf6ba35b9385f71d144669f3c28602c5b60b062022c41d"))
     }
 
     @Test
@@ -68,23 +68,17 @@ class ShuraRepositoryClientTest {
     }
 
     @Test
-    fun verifyAcceptsTheRealProcomicArtifact() {
-        val entry = client.entries().first { it.pkg.endsWith("procomic") }
-        val verified = client.verify(entry)
-        assertEquals("eu.kanade.tachiyomi.extension.ar.procomic", verified.packageName)
-        assertEquals(1.6f, verified.abi, 0.001f)
-        assertEquals(".ProComic", verified.metadata.metaData["tachiyomi.extension.class"])
-    }
-
-    @Test
-    fun verifyRefusesAPinThatIsNotTheRepositoryAnchor() {
+    fun verifyRefusesBeforeAnyPinComparisonWithoutASignatureReader() {
+        // Ordering matters: the file's own signer is checked first, so a bogus
+        // published pin never even gets to be compared off-device. The
+        // foreign-pin case is covered on-device in ApkSignatureVerificationTest.
         val entry = client.entries().first { it.pkg.endsWith("procomic") }
             .copy(signingCertificateSha256 = "0".repeat(64))
         try {
             client.verify(entry)
             fail("a foreign pin must be refused")
         } catch (e: LoadFailure.NotVerified) {
-            assertTrue(e.message!!.contains("trusts"))
+            assertTrue(e.message!!.contains("signature verifier"))
         }
     }
 
