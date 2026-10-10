@@ -19,6 +19,17 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: Install the Android command-line tools
+      - name: Install the Android command-line tools
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}"
+          mkdir -p "$SDK/cmdline-tools"
+          curl -sSLo /tmp/cmdline-tools.zip \
+            https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q -o /tmp/cmdline-tools.zip -d "$SDK/cmdline-tools"
+          mv -f "$SDK/cmdline-tools/cmdline-tools" "$SDK/cmdline-tools/latest"
+          echo "$SDK/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
       - name: Set up the Android SDK
         run: |
           yes | sdkmanager --licenses > /dev/null
@@ -42,6 +53,17 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: Install the Android command-line tools
+      - name: Install the Android command-line tools
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}"
+          mkdir -p "$SDK/cmdline-tools"
+          curl -sSLo /tmp/cmdline-tools.zip \
+            https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q -o /tmp/cmdline-tools.zip -d "$SDK/cmdline-tools"
+          mv -f "$SDK/cmdline-tools/cmdline-tools" "$SDK/cmdline-tools/latest"
+          echo "$SDK/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
       - name: Set up the Android SDK
         run: |
           yes | sdkmanager --licenses > /dev/null
