@@ -21,6 +21,10 @@ from shura_core.crawler.arabic import (ArabicSiteDiscovery, SeedFileFinder, eval
                                           pending_proposals, SearchFinder,
                                           configured_search_finder, DEFAULT_ARABIC_QUERIES,
                                           SiteCandidate)
+from shura_core.crawler.review import (ACCEPTED,PENDING,REJECTED,ReviewError,
+    candidate_records,candidate_status,decided_candidates,deferred_candidates,
+    pending_candidates,record_review,reopen)
+from shura_core.content.fetcher import load_source_config, upsert_source_entry
 from shura_core.content import fetchable_sources, open_store, sync_source_policy
 from shura_core.sources.registry import SourceRegistry
 from shura_core.discovery.service import SourceDiscovery
@@ -373,8 +377,11 @@ class SiteFixture:
             host = url.split("/")[2]
             if host in fixture.blocked:
                 raise HTTPError(url, 403, "Forbidden", {}, None)
-            body = fixture.pages.get(host, "").encode()
-            return FakeResponse(url, body)
+            page = fixture.pages.get(host, "")
+            path = url.split(host, 1)[-1] if host in url else "/"
+            if isinstance(page, dict):
+                page = page.get(path, page.get(path.rstrip("/") or "/", ""))
+            return FakeResponse(url, (page or "").encode())
 
         opener = original(redirect_handler)
         opener.open = open_
@@ -800,3 +807,241 @@ class SiteSearchDiscoveryTests(Case):
         rows = self._events(event)
         self.assertTrue(rows, f"expected a {event} event")
         return rows[-1]
+
+SPA_PAGE = """<!doctype html><html lang="ar" dir="rtl"><head><title>مانهوا</title></head>
+<body><a href="/manhwa/">فهرس الأعمال</a><a href="/login">دخول</a>
+<a href="https://elsewhere.example/x">خارجي</a></body></html>"""
+
+#: Arabic, public, and honest about it - but the catalogue only exists once
+#: JavaScript has run, so nothing in the served HTML can prove it.
+JS_ONLY_PAGE = """<!doctype html><html lang="ar" dir="rtl"><head><title>قارئ المانجا</title>
+<script src="/app.js"></script></head><body><div id="root"></div></body></html>"""
+
+
+class ReviewLifecycleTests(Case):
+    """An operator decides about a candidate; nothing decides for them."""
+
+    def propose(self, site="arab.example"):
+        seed_file(self.root / "seeds.json", [f"https://{site}/"])
+        with SiteFixture({site: ARABIC_PAGE}):
+            ArabicSiteDiscovery(self.store, SafeHTTP([site])).discover(
+                [SeedFileFinder(self.root / "seeds.json")])
+        return f"site:{site}"
+
+    # a new candidate appears in the review queue
+    def test_a_new_candidate_appears_in_the_review_queue(self):
+        sid = self.propose()
+        pending = pending_candidates(self.store)
+        self.assertEqual([r["source_id"] for r in pending], [sid])
+        self.assertEqual(pending[0]["status"], PENDING)
+        self.assertEqual(pending[0]["verdict"], "CANDIDATE")
+        self.assertIn("Arabic characters in content",
+                      " ".join(pending[0]["evidenceReasons"]))
+
+    # waiting -> accepted / rejected, with the decision recorded
+    def test_a_candidate_moves_from_waiting_to_accepted(self):
+        sid = self.propose()
+        record = record_review(self.store, sid, ACCEPTED, operator="ops", reason="checked")
+        self.assertEqual(record["status"], ACCEPTED)
+        self.assertEqual(candidate_status(self.store, sid), ACCEPTED)
+        self.assertEqual(pending_candidates(self.store), [])
+        self.assertEqual([r["source_id"] for r in decided_candidates(self.store)], [sid])
+
+    def test_a_candidate_moves_from_waiting_to_rejected_with_a_reason(self):
+        sid = self.propose()
+        record_review(self.store, sid, REJECTED, operator="ops", reason="pirated site")
+        row = self.store.db.execute(
+            "SELECT detail FROM history WHERE event='site_reviewed'").fetchone()[0]
+        self.assertIn("pirated site", row)
+        self.assertEqual(candidate_status(self.store, sid), REJECTED)
+
+    def test_a_rejection_without_a_reason_is_refused_and_recorded_nowhere(self):
+        sid = self.propose()
+        with self.assertRaises(ReviewError):
+            record_review(self.store, sid, REJECTED, operator="ops", reason="   ")
+        self.assertEqual(candidate_status(self.store, sid), PENDING)
+        self.assertEqual(self.store.db.execute(
+            "SELECT COUNT(*) FROM history WHERE event='site_reviewed'").fetchone()[0], 0)
+
+    def test_an_unknown_or_undecided_decision_is_refused(self):
+        with self.assertRaises(ReviewError):
+            record_review(self.store, "site:nope.example", ACCEPTED, operator="ops")
+
+    # no duplicate candidate or decision on a rerun
+    def test_rerunning_the_cycle_does_not_repeat_the_candidate_or_the_decision(self):
+        sid = self.propose()
+        record_review(self.store, sid, ACCEPTED, operator="ops", reason="checked")
+        self.propose()                                   # same site discovered again
+        with self.assertRaises(ReviewError):
+            record_review(self.store, sid, ACCEPTED, operator="someone-else", reason="again")
+        self.assertEqual(len(self.store.db.execute(
+            "SELECT 1 FROM history WHERE event='site_reviewed'").fetchall()), 1)
+        self.assertEqual(len(self.store.db.execute(
+            "SELECT 1 FROM history WHERE event='site_proposed'").fetchall()), 1)
+        self.assertEqual(candidate_status(self.store, sid), ACCEPTED)
+
+    def test_a_decided_candidate_does_not_return_to_the_waiting_list(self):
+        sid = self.propose()
+        record_review(self.store, sid, REJECTED, operator="ops", reason="no good")
+        self.assertEqual(pending_candidates(self.store), [])
+        self.propose()
+        self.assertEqual(pending_candidates(self.store), [])
+
+    def test_reopening_keeps_the_old_decision_and_supersedes_it(self):
+        sid = self.propose()
+        record_review(self.store, sid, REJECTED, operator="ops", reason="misjudged")
+        reopen(self.store, sid, operator="ops2", reason="looked again")
+        self.assertEqual(candidate_status(self.store, sid), PENDING)
+        rows = [json.loads(d) for (d,) in self.store.db.execute(
+            "SELECT detail FROM history WHERE event='site_reviewed' ORDER BY id")]
+        self.assertEqual(len(rows), 2, "the earlier decision is still on the record")
+        self.assertEqual(rows[0]["status"], REJECTED)
+        self.assertEqual(rows[1]["supersedes"]["status"], REJECTED)
+
+    # acceptance never enables fetching
+    def test_acceptance_alone_configures_and_enables_nothing(self):
+        sid = self.propose()
+        config = self.root / "content-sources.json"
+        record_review(self.store, sid, ACCEPTED, operator="ops", reason="checked")
+        self.assertFalse(config.exists(),
+                         "acceptance must not create or edit the content config")
+        conn = open_store(self.root / "content.db")
+        self.addCleanup(conn.close)
+        self.assertEqual(fetchable_sources(conn), [])
+
+    def test_a_site_is_not_fetchable_until_configured_and_explicitly_enabled(self):
+        sid = self.propose()
+        config = self.root / "content-sources.json"
+        conn = open_store(self.root / "content.db")
+        self.addCleanup(conn.close)
+        record_review(self.store, sid, ACCEPTED, operator="ops", reason="checked")
+        sync_source_policy(conn, load_source_config(config))
+        self.assertEqual(fetchable_sources(conn), [], "not configured yet")
+        upsert_source_entry(config, {"source_id": sid, "kind": "html",
+                                     "allowed_hosts": ["arab.example"],
+                                     "fetch_enabled": False, "quota_bytes": 0,
+                                     "retention_days": 7})
+        sync_source_policy(conn, load_source_config(config))
+        self.assertEqual(fetchable_sources(conn), [],
+                         "configured, but fetching stays off until it is switched on")
+        upsert_source_entry(config, {"source_id": sid, "kind": "html",
+                                     "allowed_hosts": ["arab.example"], "fetch_enabled": True,
+                                     "allow_enable": True, "quota_bytes": 0,
+                                     "retention_days": 7})
+        sync_source_policy(conn, load_source_config(config))
+        self.assertEqual([r[0] for r in fetchable_sources(conn)], [sid],
+                         "only the deliberate enablement makes it fetchable")
+
+    # sync does not silently drop or activate
+    def test_a_config_sync_leaves_decided_candidates_alone(self):
+        sid = self.propose()
+        config = self.root / "content-sources.json"
+        conn = open_store(self.root / "content.db")
+        self.addCleanup(conn.close)
+        upsert_source_entry(config, {"source_id": sid, "kind": "html",
+                                     "allowed_hosts": ["arab.example"],
+                                     "fetch_enabled": False, "quota_bytes": 0,
+                                     "retention_days": 7})
+        record_review(self.store, sid, ACCEPTED, operator="ops", reason="checked")
+        for _ in range(3):
+            sync_source_policy(conn, load_source_config(config))
+        self.assertEqual([r["source_id"] for r in load_source_config(config)], [sid],
+                         "the config is the source of truth and keeps the entry")
+        self.assertEqual(fetchable_sources(conn), [], "and repeated syncs never enable it")
+        self.assertEqual(candidate_status(self.store, sid), ACCEPTED)
+
+    def test_the_config_writer_refuses_to_enable_or_corrupt(self):
+        config = self.root / "content-sources.json"
+        with self.assertRaises(ValueError):
+            upsert_source_entry(config, {"source_id": "s", "kind": "html",
+                                         "allowed_hosts": ["h"], "fetch_enabled": True,
+                                         "quota_bytes": 0, "retention_days": 1})
+        config.write_text('{"version": 9, "sources": []}', encoding="utf-8")
+        with self.assertRaises(ValueError):
+            upsert_source_entry(config, {"source_id": "s", "kind": "html",
+                                         "allowed_hosts": ["h"], "fetch_enabled": False,
+                                         "quota_bytes": 0, "retention_days": 1})
+        self.assertEqual(config.read_text(encoding="utf-8"), '{"version": 9, "sources": []}',
+                         "a refused write leaves the file exactly as it was")
+
+    def test_the_config_writer_preserves_other_entries(self):
+        config = self.root / "content-sources.json"
+        upsert_source_entry(config, {"source_id": "mangadex", "kind": "api",
+                                     "allowed_hosts": ["mangadex.org"], "fetch_enabled": True,
+                                     "allow_enable": True, "quota_bytes": 5,
+                                     "retention_days": 3})
+        upsert_source_entry(config, {"source_id": "site:x.example", "kind": "html",
+                                     "allowed_hosts": ["x.example"], "fetch_enabled": False,
+                                     "quota_bytes": 0, "retention_days": 7})
+        ids = [e["source_id"] for e in load_source_config(config)]
+        self.assertEqual(ids, ["mangadex", "site:x.example"])
+        self.assertEqual([p.name for p in self.root.iterdir() if p.suffix == ".tmp"], [],
+                         "the atomic write leaves no temp file behind")
+
+
+class SiteEvaluationDepthTests(Case):
+    """Evaluation follows a few same-host links, and stops there."""
+
+    def test_a_catalogue_buried_behind_a_link_is_found(self):
+        catalogue = ("<!doctype html><html lang=\"ar\"><body>"
+                     "<h1>فهرس الأعمال</h1><a href=\"/manga/one/\">عمل</a>"
+                     "<a href=\"/manga/one/chapter-3/\">فصل 3</a></body></html>")
+        landing = ("<!doctype html><html><head><title>Reader</title></head><body>"
+                   "<a href=\"/catalogue\">الفهرس</a></body></html>")
+        with SiteFixture({"deep.example": {"/": landing, "/catalogue": catalogue}}):
+            discovery = ArabicSiteDiscovery(self.store, SafeHTTP(["deep.example"]))
+            proposals = discovery.discover([SeedFileFinder(self._seed("https://deep.example/"))])
+        self.assertEqual([p["domain"] for p in proposals], ["deep.example"],
+                         "the catalogue page supplied the work and chapter evidence")
+        self.assertGreaterEqual(proposals[0]["pagesExamined"], 2)
+
+    def test_a_site_needing_javascript_is_deferred_with_a_reason_not_guessed(self):
+        with SiteFixture({"spa.example": JS_ONLY_PAGE}):
+            discovery = ArabicSiteDiscovery(self.store, SafeHTTP(["spa.example"]))
+            proposals = discovery.discover([SeedFileFinder(self._seed("https://spa.example/"))])
+        self.assertEqual(proposals, [], "nothing was proved, so nothing is proposed")
+        verdict = self._events("site_candidate")[-1]
+        self.assertEqual(verdict["verdict"], "DEFERRED")
+        self.assertTrue(verdict["reasons"])
+
+    def test_evaluation_never_leaves_the_candidate_host(self):
+        with SiteFixture({"home.example": SPA_PAGE}):
+            before = SafeHTTP(["home.example"])
+            ArabicSiteDiscovery(self.store, before).discover(
+                [SeedFileFinder(self._seed("https://home.example/"))])
+        evidence = self._events("site_candidate")[-1]["evidence"]
+        for page in evidence:
+            self.assertEqual(_host(page["url"]), "home.example",
+                             "an off-host or credential-bearing link was followed")
+
+    def test_the_number_of_requests_per_candidate_stays_bounded(self):
+        with SiteFixture({"many.example": many_links_page()}):
+            discovery = ArabicSiteDiscovery(self.store, SafeHTTP(["many.example"]))
+            discovery.discover([SeedFileFinder(self._seed("https://many.example/"))])
+        verdict = self._events("site_candidate")[-1]
+        self.assertLessEqual(verdict["pagesExamined"], 4,
+                             "homepage plus at most three follow-ups")
+
+    def _seed(self, url):
+        seed_file(self.root / "seeds.json", [url])
+        return self.root / "seeds.json"
+
+    def _events(self, event):
+        return [json.loads(d) for (d,) in self.store.db.execute(
+            "SELECT detail FROM history WHERE event=? ORDER BY id", (event,))]
+
+
+def many_links_page(n=60):
+    links = "".join(f'<a href="/page-{i}/">صفحة {i}</a>' for i in range(n))
+    return ('<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">'
+            '</head><body><p>\u0627\u0644\u0642\u0627\u0626\u0645 \u0627\u0644\u0645\u0627\u0646\u062c\u0627 '
+            '\u0648\u0627\u0644\u0645\u0627\u0646\u0647\u0648\u0627</p>' + links + '</body></html>')
+
+
+def _host(url):
+    from urllib.parse import urlparse
+    return (urlparse(url).hostname or "").lower()
+
+
+def Fixture_pages_miss(site):
+    return False

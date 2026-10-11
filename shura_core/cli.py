@@ -19,6 +19,14 @@ def main(argv=None):
  q=sub.add_parser("publish");q.add_argument("--repo",default=os.getenv("SHURA_REPO_DIR","repo"));q.add_argument("--stage",action="store_true");q.add_argument("--release",action="store_true")
  q=sub.add_parser("discover");q.add_argument("--limit",type=int,default=250)
  q=sub.add_parser("discover-sites");q.add_argument("--seeds",default=os.getenv("SHURA_SITE_SEEDS","content-source-seeds.json"));q.add_argument("--limit",type=int,default=250)
+ q=sub.add_parser("candidates",help="review discovered manga/manhwa sites");csub=q.add_subparsers(dest="action",required=True)
+ csub.add_parser("list",help="every candidate with its review state")
+ csub.add_parser("deferred",help="sites the evaluator could not confirm")
+ cs=csub.add_parser("show");cs.add_argument("source_id")
+ cs=csub.add_parser("accept");cs.add_argument("source_id");cs.add_argument("--operator",required=True);cs.add_argument("--reason",default="")
+ cs=csub.add_parser("reject");cs.add_argument("source_id");cs.add_argument("--operator",required=True);cs.add_argument("--reason",required=True)
+ cs=csub.add_parser("reopen");cs.add_argument("source_id");cs.add_argument("--operator",required=True);cs.add_argument("--reason",required=True)
+ cs=csub.add_parser("add-to-config");cs.add_argument("source_id");cs.add_argument("--config",default=os.getenv("SHURA_CONTENT_SOURCES","content-sources.json"));cs.add_argument("--operator",required=True);cs.add_argument("--allow-host",action="store_true",help="required: this step names the host in the fetch trust list");cs.add_argument("--quota-bytes",type=int,default=0);cs.add_argument("--retention-days",type=int,default=7)
  q=sub.add_parser("content-status");q.add_argument("--source-id")
  q=sub.add_parser("content-fetch");q.add_argument("--config",default=os.getenv("SHURA_CONTENT_SOURCES","content-sources.json"));q.add_argument("--content-dir",default=os.getenv("SHURA_CONTENT_DIR",".shura-content"));q.add_argument("--max-pages",type=int,default=50);q.add_argument("--refresh-links",action="store_true",help="re-resolve expiring page links (MangaDex@Home) before each attempt")
  q=sub.add_parser("content-import");q.add_argument("manifest");q.add_argument("--content-dir",default=os.getenv("SHURA_CONTENT_DIR",".shura-content"));q.add_argument("--config",default=os.getenv("SHURA_CONTENT_SOURCES","content-sources.json"));q.add_argument("--dry-run",action="store_true")
@@ -111,6 +119,59 @@ def main(argv=None):
     row=store.content_work(w["source_id"],w["work_id"]);chapters=store.content_chapters(w["source_id"],w["work_id"])
     out.append({**row,"source_id":w["source_id"],"chapters":chapters})
    print(json.dumps(out,ensure_ascii=False));return 0
+  elif args.command=="candidates":
+   from pathlib import Path
+   from shura_core.crawler.review import (ReviewError,candidate_records,
+    candidate_status,deferred_candidates,pending_candidates,record_review,reopen)
+   from shura_core.content.fetcher import upsert_source_entry
+   action=args.action
+   if action=="list":
+    print(json.dumps({"candidates":[
+     {"source_id":r["source_id"],"status":r["status"],"verdict":r["verdict"],
+      "score":r["score"],"domain":r["domain"],"origin":r["origin"]}
+     for r in candidate_records(store)],
+     "pending":len(pending_candidates(store))},ensure_ascii=False));return 0
+   if action=="deferred":
+    print(json.dumps({"deferred":[
+     {"source_id":r["source_id"],"domain":r.get("domain"),"reasons":r.get("reasons",[])}
+     for r in deferred_candidates(store)]},ensure_ascii=False));return 0
+   if action=="show":
+    rows=[r for r in candidate_records(store) if r["source_id"]==args.source_id]
+    if not rows:print("candidate not found: "+args.source_id,file=sys.stderr);return 2
+    print(json.dumps(rows[0],ensure_ascii=False));return 0
+   if action in ("accept","reject"):
+    decision="accepted" if action=="accept" else "rejected"
+    try:rec=record_review(store,args.source_id,decision,operator=args.operator,reason=args.reason)
+    except ReviewError as e:print(str(e),file=sys.stderr);return 2
+    # Approval is a decision and nothing more: it writes no config, names no
+    # host in any allowlist and enables nothing. Those are separate steps.
+    print(json.dumps({**rec,"configured":False,"fetch_enabled":False,
+     "next_step":"shura candidates add-to-config "+args.source_id+" --allow-host"},
+     ensure_ascii=False));return 0
+   if action=="reopen":
+    try:rec=reopen(store,args.source_id,operator=args.operator,reason=args.reason)
+    except ReviewError as e:print(str(e),file=sys.stderr);return 2
+    print(json.dumps(rec,ensure_ascii=False));return 0
+   if action=="add-to-config":
+    if candidate_status(store,args.source_id)!="accepted":
+     print("candidate has not been accepted; run: shura candidates accept "+args.source_id,
+      file=sys.stderr);return 2
+    if not args.allow_host:
+     print("refusing to name a host in the fetch trust list without --allow-host",
+      file=sys.stderr);return 2
+    rows=[r for r in candidate_records(store) if r["source_id"]==args.source_id]
+    if not rows:print("candidate not found: "+args.source_id,file=sys.stderr);return 2
+    domain=rows[0]["domain"]
+    entry={"source_id":args.source_id,"kind":"html","allowed_hosts":[domain],
+     "fetch_enabled":False,"quota_bytes":max(0,args.quota_bytes),
+     "retention_days":max(0,args.retention_days)}
+    try:written=upsert_source_entry(Path(args.config),entry)
+    except ValueError as e:print(str(e),file=sys.stderr);return 2
+    store.event(args.source_id,"site_configured",{"config":str(args.config),
+     "operator":args.operator,"host":domain,"fetch_enabled":False})
+    print(json.dumps({**written,"config":str(args.config),"fetch_enabled":False,
+     "note":"fetching stays off until an operator sets fetch_enabled true"},
+     ensure_ascii=False));return 0
   elif args.command=="discover-sites":
    from shura_core.crawler.arabic import (ArabicSiteDiscovery,SeedFileFinder,
     configured_search_finder)

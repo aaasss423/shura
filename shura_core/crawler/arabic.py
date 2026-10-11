@@ -37,7 +37,7 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 __all__ = ["SiteCandidate", "SiteVerdict", "evaluate_site", "ArabicSiteDiscovery",
            "SeedFileFinder", "SearchFinder", "SearchProvider",
@@ -92,6 +92,9 @@ class SiteVerdict:
     has_chapters: bool = False
     blocked: bool = False             # 401/403 or an access control of some kind
     reasons: list[str] = field(default_factory=list)
+    evidence_reasons: list[str] = field(default_factory=list)   # what produced the signals
+    evidence: list[dict] = field(default_factory=list)          # per-page evidence
+    pages_examined: int = 0
     score: float = 0.0
 
     @property
@@ -113,6 +116,9 @@ class SiteVerdict:
                 "reachable": self.reachable, "https": self.https,
                 "arabicSignals": self.arabic_signals, "hasIndex": self.has_index,
                 "hasChapters": self.has_chapters, "blocked": self.blocked,
+                "pagesExamined": self.pages_examined,
+                "evidence": list(self.evidence),
+                "evidenceReasons": list(self.evidence_reasons),
                 "reasons": list(self.reasons)}
 
 
@@ -155,16 +161,29 @@ class SeedFileFinder:
         return out
 
 
-def evaluate_site(http, candidate: SiteCandidate, *, max_bytes: int = 2_000_000) -> SiteVerdict:
+def evaluate_site(http, candidate: SiteCandidate, *, max_bytes: int = 2_000_000,
+                  max_follow: int = 3) -> SiteVerdict:
     """Probe a candidate over the project's guarded HTTP client.
 
-    Only a public GET of the site's own page. A refusal is a recorded reason,
-    never a puzzle to work around.
+    The homepage alone is weak evidence: plenty of Arabic sites render their
+    catalogue with JavaScript, and plenty of catalogues hide behind a link that
+    does not look like a catalogue. So the homepage is fetched first, and only
+    if it does not already settle the question are a *few* same-host pages
+    followed.
+
+    The bounds are deliberate and small: at most ``max_follow`` extra requests,
+    each capped by ``max_bytes``, all through :class:`SafeHTTP`, and every
+    follow-up must resolve to the candidate's own host. This is a probe, not a
+    crawl.
+
+    A refusal is a recorded reason, never a puzzle to work around.
     """
     verdict = SiteVerdict(candidate=candidate)
     if not candidate.domain:
         verdict.reasons.append("no resolvable domain")
         return verdict
+
+    pages: list[tuple[str, str]] = []          # (url, text) for evidence
     try:
         body, headers, final = http.get(candidate.url, max_bytes=max_bytes)
     except Exception as exc:                                  # noqa: BLE001
@@ -182,27 +201,35 @@ def evaluate_site(http, candidate: SiteCandidate, *, max_bytes: int = 2_000_000)
     if not verdict.https:
         verdict.reasons.append("did not serve over HTTPS")
 
-    text = body.decode(headers.get_content_charset() or "utf-8", errors="replace") \
-        if hasattr(headers, "get_content_charset") else body.decode("utf-8", "replace")
-    head = text[:200_000].lower()
+    text = _decode(body, headers)
+    pages.append((final, text))
+    _judge(verdict, text, final)
 
-    signals = 0
-    for attr in _ARABIC_ATTRS:
-        match = re.search(rf'{attr}\s*=\s*["\']?\s*([a-z\-]+)', head)
-        if match and (match.group(1).startswith("ar") or attr == "dir" and match.group(1) == "rtl"):
-            signals += 1
-    arabic_chars = len(_ARABIC.findall(text[:50_000]))
-    if arabic_chars >= 20:
-        signals += 1
-    verdict.arabic_signals = signals
-    if not signals:
-        verdict.reasons.append("no Arabic language signal found in the public page")
+    if verdict.reachable and verdict.https and not verdict.blocked \
+            and verdict.verdict != "CANDIDATE":
+        # Still undecided: follow a small number of same-host links that look
+        # like an index or a chapter listing. Each is a public GET on the same
+        # host the candidate already claimed, under the same size and timeout
+        # policy as the first request.
+        for link in _followups(text, final, candidate.domain)[:max(0, max_follow)]:
+            try:
+                body2, headers2, final2 = http.get(link, max_bytes=max_bytes)
+            except Exception:                                 # noqa: BLE001
+                continue                    # one bad link is not a verdict
+            text2 = _decode(body2, headers2)
+            pages.append((final2, text2))
+            before = verdict.verdict
+            _judge(verdict, text2, final2)
+            if verdict.verdict != before:
+                break
 
-    verdict.has_index = any(hint in head for hint in _INDEX_HINTS)
-    verdict.has_chapters = any(hint in head for hint in _CHAPTER_HINTS)
-    if not (verdict.has_index or verdict.has_chapters):
-        verdict.reasons.append("no verifiable work index or chapter listing in the public page")
-
+    verdict.pages_examined = len(pages)
+    verdict.evidence = [{"url": u, "arabicChars": len(_ARABIC.findall(t[:50_000])),
+                         "hasIndex": any(h in t[:200_000].lower() for h in _INDEX_HINTS),
+                         "hasChapters": any(h in t[:200_000].lower() for h in _CHAPTER_HINTS)}
+                        for u, t in pages[:5]]
+    if verdict.verdict == "DEFERRED" and not verdict.evidence:
+        verdict.reasons.append("no page could be examined")
     # Score explains itself: reachability and HTTPS are prerequisites, then the
     # Arabic evidence and the structural evidence, each weighted.
     verdict.score = round(
@@ -213,6 +240,115 @@ def evaluate_site(http, candidate: SiteCandidate, *, max_bytes: int = 2_000_000)
     if verdict.verdict != "CANDIDATE":
         verdict.score = 0.0
     return verdict
+
+
+def _decode(body: bytes, headers) -> str:
+    charset = headers.get_content_charset() if hasattr(headers, "get_content_charset") else None
+    return body.decode(charset or "utf-8", errors="replace")
+
+
+def _judge(verdict: SiteVerdict, text: str, url: str) -> None:
+    """Fold one page's evidence into the verdict. Additive across pages."""
+    head = text[:200_000].lower()
+
+    # Language signals, and where they were found. An Arabic *name* proves
+    # nothing, so the domain itself is never counted as evidence.
+    for attr in _ARABIC_ATTRS:
+        match = re.search(rf'{attr}\s*=\s*["\']?\s*([a-z\-]+)', head)
+        if match and (match.group(1).startswith("ar")
+                      or attr == "dir" and match.group(1) == "rtl"):
+            verdict.arabic_signals += 1
+            verdict.evidence_reasons.append(f"{url}: {attr}={match.group(1)}")
+    arabic_chars = len(_ARABIC.findall(text[:50_000]))
+    if arabic_chars >= 20:
+        verdict.arabic_signals += 1
+        verdict.evidence_reasons.append(f"{url}: {arabic_chars} Arabic characters in content")
+    if not verdict.arabic_signals:
+        verdict.reasons.append("no Arabic language signal found in the public content")
+
+    # Structure, not wording. A site whose <title> merely says "مانجا" is not
+    # thereby a catalogue, so the words alone prove nothing; what counts is a set
+    # of links shaped like works and chapters.
+    works = _links_matching(text, _WORK_LINK)
+    chapters = _links_matching(text, _CHAPTER_LINK)
+    if not verdict.has_index and len(works) >= 2:
+        verdict.has_index = True
+        verdict.evidence_reasons.append(f"{url}: {len(works)} links shaped like works")
+    if not verdict.has_chapters and chapters:
+        verdict.has_chapters = True
+        verdict.evidence_reasons.append(
+            f"{url}: {len(chapters)} links shaped like chapters")
+    if not (verdict.has_index or verdict.has_chapters):
+        if any(h in head for h in _INDEX_HINTS) or any(h in head for h in _CHAPTER_HINTS):
+            verdict.reasons.append(
+                "the page mentions a catalogue but links to no works or chapters, "
+                "which a JavaScript-rendered site would do")
+        else:
+            verdict.reasons.append(
+                "no verifiable work index or chapter listing in the public content")
+
+
+#: Links worth one extra request: same host, and a path that reads like a
+#: catalogue rather than a login or a social link.
+_LINK_HREF = re.compile(r'href\s*=\s*["\']([^"\']+)["\']', re.I)
+_SKIP_PATH = re.compile(r"(login|signin|sign-in|register|account|captcha|privacy|"
+                        r"terms|contact|about|facebook|twitter|telegram|discord|"
+                        r"\.(?:jpg|jpeg|png|gif|svg|css|js|ico|pdf|zip|apk)$)", re.I)
+
+
+#: Link shapes that mean "this is a work" and "this is a chapter". Deliberately
+#: about structure: these are URL paths, not page wording.
+_WORK_LINK = re.compile(r"/(?:manga|manhwa|series|work|works|book|books|novel|"
+                        r"title|titles|story|stories)[-/]", re.I)
+_CHAPTER_LINK = re.compile(r"/(?:chapter|chapters|ch|chap|episode|episodes|ep|vol|volume)[-/\d]",
+                           re.I)
+
+
+def _links_matching(text: str, pattern: "re.Pattern[str]") -> list[str]:
+    """Distinct same-page hrefs whose path matches ``pattern``."""
+    out: set[str] = set()
+    for raw in _LINK_HREF.findall(text[:400_000]):
+        href = raw.strip()
+        if not href or href.startswith(("mailto:", "javascript:", "#")):
+            continue
+        try:
+            path = urlparse(href).path or ""
+        except ValueError:
+            continue
+        if pattern.search(path):
+            out.add(href)
+    return sorted(out)
+
+
+def _followups(text: str, base_url: str, host: str, *, limit: int = 12) -> list[str]:
+    """Resolve a handful of same-host catalogue-looking links.
+
+    Relative hrefs are resolved against the page they were found on. Anything
+    resolving off-host, off-https, or looking like a login or a binary is
+    dropped: this probe never leaves the site it was given.
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in _LINK_HREF.findall(text[:400_000]):
+        href = raw.strip()
+        if not href or href.startswith("#") or href.startswith(("mailto:", "javascript:")):
+            continue
+        try:
+            absolute = urljoin(base_url, href)
+            parsed = urlparse(absolute)
+        except ValueError:
+            continue
+        if parsed.scheme != "https" or (parsed.hostname or "").lower() != host:
+            continue
+        if _SKIP_PATH.search(parsed.path or "") or not (parsed.path or "").strip("/"):
+            continue
+        if absolute in seen:
+            continue
+        seen.add(absolute)
+        out.append(absolute)
+        if len(out) >= limit:
+            break
+    return out
 
 
 class ArabicSiteDiscovery:
@@ -388,6 +524,12 @@ class JsonHttpSearchProvider(SearchProvider):
         self.headers = dict(headers or {})
         self.link_field = link_field
 
+    #: Requests a pass may make before it stops. Bounded on purpose: discovery
+    #: is a sample, not an exhaustive sweep.
+    max_queries = 12
+    #: Seconds to wait after the provider reports a rate limit.
+    backoff_seconds = 2.0
+
     def search(self, query: str, limit: int = 20) -> list[str]:
         url = self.endpoint.replace("{query}", _quote(query))
         body, _headers, _final = self.http.get(url, max_bytes=2_000_000,
@@ -395,7 +537,9 @@ class JsonHttpSearchProvider(SearchProvider):
         payload = json.loads(body.decode("utf-8", "replace"))
         results = _dig(payload, self.result_path)
         if not isinstance(results, list):
-            raise ValueError(f"search response has no list at {self.result_path!r}")
+            # The shape is validated before anything is read out of it: a
+            # changed or hostile response must not be walked blindly.
+            raise ValueError("search response has no usable result list")
         urls: list[str] = []
         for item in results[:limit]:
             link = item.get(self.link_field) if isinstance(item, dict) else None
@@ -422,13 +566,15 @@ class SearchFinder:
         seen: set[str] = set()
         if limit <= 0:
             return []
-        for query in self.queries:
-            if len(out) >= limit:
+        max_queries = max(1, int(getattr(self.provider, "max_queries", 12)))
+        for index, query in enumerate(self.queries):
+            if len(out) >= limit or index >= max_queries:
                 break
             try:
                 links = self.provider.search(query, limit=max(1, limit - len(out)))
             except Exception:                                # noqa: BLE001
-                # A failed query loses that query, never the ones already done.
+                # A failed query loses that query, never the ones already done,
+                # and never the error text: it can carry the request headers.
                 continue
             for link in links:
                 if len(out) >= limit:
@@ -476,9 +622,16 @@ def configured_search_finder(*, endpoint=None, headers=None, result_path=None,
         headers = json.loads(raw) if raw else {}
     if not endpoint:
         return None
+    parsed = urlparse(endpoint)
     host = _domain(endpoint)
     if not host:
         raise ValueError("SHURA_SEARCH_ENDPOINT must be an absolute http(s) URL")
+    if parsed.scheme != "https":
+        # An API key in a query string or an auth header must never be sent in
+        # the clear, so plain http is refused outright rather than warned about.
+        raise ValueError("SHURA_SEARCH_ENDPOINT must use https")
+    if parsed.username or parsed.password or "@" in (parsed.netloc or ""):
+        raise ValueError("put search credentials in SHURA_SEARCH_HEADERS, not the URL")
     from ..security.network import SafeHTTP
     # The guarded client is scoped to the search host alone. A candidate site
     # never inherits the provider's permissions, and vice versa.

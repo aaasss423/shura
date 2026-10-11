@@ -8,7 +8,7 @@ no switch that relaxes a network guard.
 from .fetcher import (Budget, Budgets, FetchResult, HOST_LIMITER, PageFetcher,
                       SharedRateLimiter, SOURCE_FILE_NAME, chapter_is_fetchable,
                       fetchable_sources, load_source_config, sync_source_policy,
-                      work_is_downloadable)
+                      normalise_source_entry, upsert_source_entry, work_is_downloadable)
 from .schema import SCHEMA_VERSION, connect, migrate, open_store
 from .ingest import (MANIFEST_VERSION, ImportRejected, import_manifest, import_payload,
                      manifest_summary)
@@ -30,6 +30,7 @@ __all__ = ["SCHEMA_VERSION", "connect", "migrate", "open_store", "Attempt", "Rec
            "Budget", "Budgets", "FetchResult", "PageFetcher", "SharedRateLimiter",
            "HOST_LIMITER", "SOURCE_FILE_NAME", "load_source_config", "sync_source_policy",
            "fetchable_sources", "work_is_downloadable", "chapter_is_fetchable",
+           "normalise_source_entry", "upsert_source_entry",
            "PageRejected", "ValidatedPage",
            "validate_page", "digest_of", "usage_bytes", "cleanup_stale_parts", "write_bounded",
            "SafeHTTPTransport", "run_fetch_run", "FetchRunReport", "default_identity",

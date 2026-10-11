@@ -15,6 +15,7 @@ to the next page. Nothing here can take the work down with it.
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -471,15 +472,107 @@ def load_source_config(path: Path) -> list[dict]:
         if not isinstance(entry["retention_days"], int) or entry["retention_days"] < 0:
             continue
         # Default-deny: a source is only fetchable when the file says so.
-        usable.append({
-            "source_id": source_id,
-            "kind": str(entry.get("kind", "index")),
-            "allowed_hosts": hosts,
-            "fetch_enabled": entry["fetch_enabled"],
-            "quota_bytes": entry["quota_bytes"],
-            "retention_days": entry["retention_days"],
-        })
+        normalised = normalise_source_entry(entry)
+        if normalised is not None:
+            usable.append(normalised)
     return usable
+
+
+def normalise_source_entry(entry) -> dict | None:
+    """Validate one source entry against the same rules the loader applies.
+
+    Returned so the config writer cannot accept a shape the loader would later
+    silently drop: if this returns ``None`` the file is malformed, and writing
+    it would create a source that looks configured and is not.
+    """
+    if not isinstance(entry, dict):
+        return None
+    if any(field not in entry for field in _REQUIRED):
+        return None
+    source_id = entry["source_id"]
+    hosts = entry["allowed_hosts"]
+    if not isinstance(source_id, str) or not source_id:
+        return None
+    if not isinstance(hosts, list) or not hosts or any(not isinstance(h, str) or not h for h in hosts):
+        return None
+    if not isinstance(entry["fetch_enabled"], bool):
+        return None
+    if not isinstance(entry["quota_bytes"], int) or entry["quota_bytes"] < 0:
+        return None
+    if not isinstance(entry["retention_days"], int) or entry["retention_days"] < 0:
+        return None
+    return {
+        "source_id": source_id,
+        "kind": str(entry.get("kind", "index")),
+        "allowed_hosts": hosts,
+        "fetch_enabled": entry["fetch_enabled"],
+        "quota_bytes": entry["quota_bytes"],
+        "retention_days": entry["retention_days"],
+    }
+
+
+def upsert_source_entry(path: Path, entry: dict) -> dict:
+    """Add or replace one source entry in ``content-sources.json``, safely.
+
+    This is the *configuration* stage, deliberately separate from operator
+    approval. It writes exactly one entry and leaves every other entry, and the
+    file's shape, alone. Fetching is not enabled here: ``fetch_enabled`` is
+    taken from the caller and this function refuses to invent ``true``, because
+    enabling fetch is its own reviewed decision.
+
+    The write is atomic - a temporary file in the same directory, then
+    ``os.replace`` - so a crash cannot leave a half-written config that the
+    loader would read as "no sources at all". The result is re-read through
+    ``load_source_config`` before returning, so a caller can trust that what is
+    on disk is what the fetcher will see.
+    """
+    from .fetcher import load_source_config as _load  # self-check, same rules
+    normalised = normalise_source_entry(entry)
+    if normalised is None:
+        raise ValueError("refusing to write a source entry the loader would reject")
+    if normalised["fetch_enabled"] and not entry.get("allow_enable"):
+        raise ValueError(
+            "this writer does not enable fetching; pass allow_enable=True to set "
+            "fetch_enabled=true deliberately")
+
+    path = Path(path)
+    document: dict = {"version": 1, "sources": []}
+    if path.exists():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"refusing to edit an unreadable config: {exc}") from exc
+        if not isinstance(existing, dict) or existing.get("version") != 1 \
+                or not isinstance(existing.get("sources"), list):
+            raise ValueError("existing config is not a version 1 source document")
+        document = existing
+
+    sources = [e for e in document["sources"]
+               if not (isinstance(e, dict) and e.get("source_id") == normalised["source_id"])]
+    sources.append({k: v for k, v in normalised.items()})
+    document["sources"] = sources
+
+    # Validate the whole document before it can replace a working config.
+    candidate = dict(document)
+    if not _load_documents_ok(candidate):
+        raise ValueError("the resulting config would not load; nothing was written")
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(candidate, ensure_ascii=False, indent=2) + "\n",
+                   encoding="utf-8")
+    os.replace(tmp, path)
+    _load(path)          # re-read through the real loader; raises if unusable
+    return normalised
+
+
+def _load_documents_ok(document: dict) -> bool:
+    """Would ``load_source_config`` accept every entry in this document?"""
+    if not isinstance(document, dict) or document.get("version") != 1:
+        return False
+    if not isinstance(document.get("sources"), list):
+        return False
+    return all(normalise_source_entry(e) is not None for e in document["sources"])
 
 
 def sync_source_policy(conn, entries: list[dict], *, now: str = "") -> int:
