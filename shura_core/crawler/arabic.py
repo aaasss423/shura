@@ -94,6 +94,7 @@ class SiteVerdict:
     reasons: list[str] = field(default_factory=list)
     evidence_reasons: list[str] = field(default_factory=list)   # what produced the signals
     evidence: list[dict] = field(default_factory=list)          # per-page evidence
+    locale_links: list[str] = field(default_factory=list)       # Arabic editions the page declares
     pages_examined: int = 0
     score: float = 0.0
 
@@ -105,8 +106,8 @@ class SiteVerdict:
             return "REJECTED"
         if not self.arabic_signals:
             return "REJECTED"
-        if not (self.has_index or self.has_chapters):
-            return "DEFERRED"         # public, but nothing verifiable yet
+        if not (self.has_index and self.has_chapters):
+            return "DEFERRED"
         return "CANDIDATE"
 
     def to_dict(self) -> dict:
@@ -117,9 +118,13 @@ class SiteVerdict:
                 "arabicSignals": self.arabic_signals, "hasIndex": self.has_index,
                 "hasChapters": self.has_chapters, "blocked": self.blocked,
                 "pagesExamined": self.pages_examined,
+                "localeLinks": sorted(set(self.locale_links)),
+                "offsiteLocaleLinks": sorted(set(getattr(self, "offsite_locale_links", []))),
                 "evidence": list(self.evidence),
                 "evidenceReasons": list(self.evidence_reasons),
-                "reasons": list(self.reasons)}
+                # Pages are judged one by one and can reach the same conclusion,
+                # so a reason is recorded once however many pages produced it.
+                "reasons": list(dict.fromkeys(self.reasons))}
 
 
 class SeedFileFinder:
@@ -222,6 +227,26 @@ def evaluate_site(http, candidate: SiteCandidate, *, max_bytes: int = 2_000_000,
     pages.append((final, text))
     _judge(verdict, text, final)
 
+    # A page that declares an Arabic edition gets that edition judged in its
+    # own right. The edition is recorded separately from the site it was found
+    # on: if it lives on another host it is a *different* candidate that needs
+    # its own evaluation and its own allowlist decision, so it is recorded and
+    # not fetched.
+    locale, offsite = _split_locale_links(verdict.locale_links, final, candidate.domain)
+    verdict.offsite_locale_links = offsite
+    for link in locale[:max(0, max_follow)]:
+        if verdict.verdict == "CANDIDATE":
+            break
+        try:
+            body_l, headers_l, final_l = http.get(link, max_bytes=max_bytes)
+        except Exception:                                    # noqa: BLE001
+            continue
+        if not _is_html(_content_type(headers_l)):
+            continue
+        text_l = _decode(body_l, headers_l)
+        pages.append((final_l, text_l))
+        _judge(verdict, text_l, final_l)
+
     if verdict.reachable and verdict.https and not verdict.blocked \
             and verdict.verdict != "CANDIDATE":
         # Still undecided: follow a small number of same-host links that look
@@ -259,6 +284,33 @@ def evaluate_site(http, candidate: SiteCandidate, *, max_bytes: int = 2_000_000,
     return verdict
 
 
+def _split_locale_links(links, base_url: str, host: str) -> tuple[list[str], list[str]]:
+    """Separate declared Arabic editions we may fetch from ones we may not.
+
+    A link to the same host is in scope. A link to another host is recorded as
+    an off-site edition and left alone: a site's Arabic edition being on a
+    different domain does not make that domain an allowed host, and following
+    it would be exactly the kind of quiet widening this project refuses.
+    """
+    same_host: list[str] = []
+    off_host: list[str] = []
+    for raw in links:
+        if raw.startswith("__og_locale__"):
+            continue
+        try:
+            absolute = urljoin(base_url, raw)
+            parsed = urlparse(absolute)
+        except ValueError:
+            continue
+        if parsed.scheme != "https":
+            off_host.append(absolute)
+        elif (parsed.hostname or "").lower() == host:
+            same_host.append(absolute)
+        else:
+            off_host.append(absolute)
+    return same_host, off_host
+
+
 def _decode(body: bytes, headers) -> str:
     charset = headers.get_content_charset() if hasattr(headers, "get_content_charset") else None
     return body.decode(charset or "utf-8", errors="replace")
@@ -276,6 +328,18 @@ def _judge(verdict: SiteVerdict, text: str, url: str) -> None:
                       or attr == "dir" and match.group(1) == "rtl"):
             verdict.arabic_signals += 1
             verdict.evidence_reasons.append(f"{url}: {attr}={match.group(1)}")
+    # An alternate-language link the page itself declares. This is how a
+    # multilingual site points at its Arabic edition without anyone guessing a
+    # path: the page states it, so we read it.
+    for href, lang in _ALTERNATE_LINK.findall(text[:400_000]):
+        if lang.lower().startswith("ar"):
+            verdict.locale_links.append(href.strip())
+    for href in _ARABIC_NAV_HREF.findall(text[:400_000]):
+        verdict.locale_links.append(href.strip())
+    for value in re.findall(r'property\s*=\s*["\']og:locale["\']\s+content\s*=\s*["\']([a-zA-Z-]+)', text[:400_000]):
+        if value.lower().startswith("ar"):
+            verdict.locale_links.append("__og_locale__" + value)
+
     arabic_chars = len(_ARABIC.findall(text[:50_000]))
     if arabic_chars >= 20:
         verdict.arabic_signals += 1
@@ -295,7 +359,14 @@ def _judge(verdict: SiteVerdict, text: str, url: str) -> None:
         verdict.has_chapters = True
         verdict.evidence_reasons.append(
             f"{url}: {len(chapters)} links shaped like chapters")
-    if not (verdict.has_index or verdict.has_chapters):
+    if verdict.has_index and not verdict.has_chapters:
+        # A work index is not a chapter source. Without evidence that chapters
+        # are served as public pages there is nothing here that can be fetched,
+        # so this is deferred rather than called a source.
+        verdict.reasons.append(
+            "a work index is present but no chapter pages are served; the reading "
+            "may be app-only or behind a policy this project will not bypass")
+    elif not (verdict.has_index or verdict.has_chapters):
         if any(h in head for h in _INDEX_HINTS) or any(h in head for h in _CHAPTER_HINTS):
             verdict.reasons.append(
                 "the page mentions a catalogue but links to no works or chapters, "
@@ -309,7 +380,8 @@ def _judge(verdict: SiteVerdict, text: str, url: str) -> None:
 #: catalogue rather than a login or a social link.
 #: Files that are never a catalogue page. Following them costs a request and
 #: proves nothing; a live run showed a manifest and a search feed being fetched.
-_NON_HTML_PATH = re.compile(r"\.(?:webmanifest|xml|json|rss|atom|txt|pdf|zip|css|js)$", re.I)
+_NON_HTML_PATH = re.compile(
+    r"\.(?:webmanifest|xml|json|rss|atom|txt|pdf|zip|css|js|woff2?|ttf|otf|eot|mp4|m3u8)$", re.I)
 _HTML_TYPES = ("text/html", "application/xhtml+xml", "application/xml")
 
 
@@ -325,6 +397,16 @@ def _content_type(headers) -> str:
 def _is_html(content_type: str) -> bool:
     return (not content_type) or any(content_type.startswith(t) for t in _HTML_TYPES)
 
+
+#: Links a page uses to declare another language edition of itself.
+_ALTERNATE_LINK = re.compile(
+    r'<link[^>]+href\s*=\s*["\']([^"\']+)["\'][^>]*hreflang\s*=\s*["\']([a-zA-Z-]+)["\']',
+    re.I)
+#: Navigation that plainly points at an Arabic edition. Matched on declared
+#: language tokens only, never on a guessed path.
+_ARABIC_NAV_HREF = re.compile(
+    r'href\s*=\s*["\']([^"\']*(?:[?&](?:lang|locale|hl)=ar\b|/ar(?:[/\-?#]|$)'
+    r'|/(?:ar-SA|arabic|العربية)(?:[/\-?#]|$))[^"\']*)["\']', re.I)
 
 _LINK_HREF = re.compile(r'href\s*=\s*["\']([^"\']+)["\']', re.I)
 _SKIP_PATH = re.compile(r"(login|signin|sign-in|register|account|captcha|privacy|"

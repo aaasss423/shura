@@ -28,6 +28,8 @@ from shura_core.crawler.review import (ACCEPTED,PENDING,REJECTED,ReviewError,
 from shura_core.crawler.arabic import (latest_verdict, recheck_site, SearchProvider,
                                           JsonHttpSearchProvider)
 from shura_core.content.fetcher import load_source_config, upsert_source_entry
+from shura_core.content.runner import run_fetch_run
+from shura_core.content.store import grant_clearance
 from shura_core.content import fetchable_sources, open_store, sync_source_policy
 from shura_core.sources.registry import SourceRegistry
 from shura_core.discovery.service import SourceDiscovery
@@ -1404,3 +1406,246 @@ class SearchProviderProbe(SearchProvider):
 
     def search(self, query, limit=20):
         raise RuntimeError("provider said: header X-Subscription-Token=secret-value")
+
+
+HREFLANG_SITE = {
+    "/": ('<!doctype html><html lang="en"><head>'
+          '<link rel="alternate" hreflang="ar" href="/arabic-edition/">'
+          '<link rel="alternate" hreflang="en" href="/">'
+          '<meta property="og:locale" content="ar_AR">'
+          '</head><body><a href="/catalogue">Catalogue</a></body></html>'),
+    "/arabic-edition/": ('<!doctype html><html lang="ar" dir="rtl"><body>'
+                         '<h1>فهرس الأعمال</h1><a href="/ar/manga/one/">عمل</a>'
+                         '<a href="/ar/manga/two/">عمل</a>'
+                         '<a href="/ar/manga/one/ch-2/">فصل ٢</a></body></html>'),
+}
+
+OFFSITE_LOCALE_SITE = {
+    "/": ('<!doctype html><html lang="en"><head>'
+          '<link rel="alternate" hreflang="ar" href="https://arab.other-domain.example/ar/">'
+          '</head><body><p>English landing</p></body></html>'),
+}
+
+
+INDEX_ONLY_SITE = """<!doctype html><html lang="ar" dir="rtl"><head><title>مانجا</title></head>
+<body><h1>فهرس الأعمال</h1><a href="/manga/one/">عمل</a><a href="/manga/two/">عمل</a>
+<p>اقرأ من التطبيق</p></body></html>"""
+
+
+class IndexIsNotAChapterSourceTests(Case):
+    """A catalogue is not the same thing as fetchable chapters."""
+
+    def test_an_index_with_no_chapter_pages_is_deferred_with_that_reason(self):
+        seed_file(self.root / "seeds.json", ["https://app-only.example/"])
+        with SiteFixture({"app-only.example": INDEX_ONLY_SITE}):
+            proposals = ArabicSiteDiscovery(
+                self.store, SafeHTTP(["app-only.example"])).discover(
+                [SeedFileFinder(self.root / "seeds.json")])
+        self.assertEqual(proposals, [], "no chapter evidence, so no source is proposed")
+        verdict = self._events("site_candidate")[-1]
+        self.assertTrue(verdict["hasIndex"], "the index was seen")
+        self.assertFalse(verdict["hasChapters"], "but no chapter pages were")
+        self.assertEqual(verdict["verdict"], "DEFERRED")
+        self.assertTrue(any("chapter pages are served" in r for r in verdict["reasons"]))
+
+    def test_a_site_serving_both_index_and_chapters_is_a_candidate(self):
+        seed_file(self.root / "seeds.json", ["https://both.example/"])
+        with SiteFixture({"both.example": ARABIC_PAGE}):
+            proposals = ArabicSiteDiscovery(
+                self.store, SafeHTTP(["both.example"])).discover(
+                [SeedFileFinder(self.root / "seeds.json")])
+        self.assertEqual([p["verdict"] for p in proposals], ["CANDIDATE"])
+        self.assertTrue(proposals[0]["hasIndex"])
+        self.assertTrue(proposals[0]["hasChapters"])
+
+    def _events(self, event):
+        return [json.loads(d) for (d,) in self.store.db.execute(
+            "SELECT detail FROM history WHERE event=? ORDER BY id", (event,))]
+
+
+class LocaleDiscoveryTests(Case):
+    """An Arabic edition is found because the page says so, not because we guessed."""
+
+    def seed(self, url):
+        seed_file(self.root / "seeds.json", [url])
+        return SeedFileFinder(self.root / "seeds.json")
+
+    def test_an_arabic_edition_is_found_from_the_pages_own_link(self):
+        with SiteFixture({"multi.example": HREFLANG_SITE}):
+            proposals = ArabicSiteDiscovery(
+                self.store, SafeHTTP(["multi.example"])).discover(
+                [self.seed("https://multi.example/")])
+        self.assertEqual(len(proposals), 1, "the declared Arabic edition carried the evidence")
+        verdict = proposals[0]
+        self.assertTrue(any("/arabic-edition/" in u for u in [e["url"] for e in verdict["evidence"]]),
+                        "the evidence must name the page that carried it")
+        self.assertTrue(any("arabic-edition" in r for r in verdict["evidenceReasons"]))
+
+    def test_an_off_host_arabic_edition_is_recorded_but_never_fetched(self):
+        with SiteFixture({"multi.example": OFFSITE_LOCALE_SITE}):
+            proposals = ArabicSiteDiscovery(
+                self.store, SafeHTTP(["multi.example"])).discover(
+                [self.seed("https://multi.example/")])
+        self.assertEqual(proposals, [], "an off-host edition is not evidence")
+        verdict = self._events("site_candidate")[-1]
+        self.assertTrue(verdict["offsiteLocaleLinks"],
+                        "it is recorded so an operator can consider it as its own candidate")
+        self.assertFalse(any("other-domain" in u for u in [e["url"] for e in verdict["evidence"]]),
+                         "and it was never fetched")
+
+    def test_a_guessed_path_is_never_constructed(self):
+        with SiteFixture({"multi.example": HREFLANG_SITE}):
+            proposals = ArabicSiteDiscovery(
+                self.store, SafeHTTP(["multi.example"])).discover(
+                [self.seed("https://multi.example/")])
+        urls = {u for p in proposals for u in [e["url"] for e in p["evidence"]]}
+        urls |= set(self._events("site_candidate")[-1]["offsiteLocaleLinks"])
+        self.assertFalse(any(u.endswith("/ar/") for u in urls),
+                         "no /ar/ path was invented; only declared links are used")
+
+    def _events(self, event):
+        return [json.loads(d) for (d,) in self.store.db.execute(
+            "SELECT detail FROM history WHERE event=? ORDER BY id", (event,))]
+
+
+class RecordingTransport:
+    """A local stand-in for the fetcher's transport. Records every attempt."""
+
+    def __init__(self):
+        self.urls = []
+
+    def stream(self, url, *, max_bytes, headers=None):
+        self.urls.append(url)
+        raise RuntimeError("no network in this test")
+
+    def get(self, url, *, headers=None):
+        self.urls.append(url)
+        raise RuntimeError("no network in this test")
+
+
+class FetchCycleIntegrationTests(Case):
+    """Enablement must change what the real fetch run does, not just a query."""
+
+    def setUp(self):
+        super().setUp()
+        import shura_core.content.runner as runner
+        self.runner = runner
+        self.conn = open_store(self.root / "content.db")
+        self.addCleanup(self.conn.close)
+        self.config = self.root / "content-sources.json"
+        self.source_id = "site:arab.example"
+
+    def seed_a_startable_page(self, source_id):
+        stamp = "2026-01-01T00:00:00+00:00"
+        self.conn.execute(
+            "INSERT INTO works(source_id,ext_work_id,title,content_classification,"
+            "content_policy_version,classified_at,discovered_at,updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            (source_id, "w1", "عمل", "SAFE", "test-v1", stamp, stamp, stamp))
+        self.conn.execute(
+            "INSERT INTO work_chapters(source_id,ext_chapter_id,ext_work_id,source_chapter_id,"
+            "ordinal,first_seen,updated_at) VALUES(?,?,?,?,?,?,?)",
+            (source_id, "c1", "w1", "c1", 1, stamp, stamp))
+        self.conn.execute(
+            "INSERT INTO chapter_pages(source_id,ext_chapter_id,page_index,ordinal,"
+            "source_page_url,created_at) VALUES(?,?,?,?,?,?)",
+            (source_id, "c1", 0, 0, "https://arab.example/chapter-1/1.jpg", stamp))
+        self.conn.commit()
+        grant_clearance(self.conn, source_id=source_id, ext_work_id="w1",
+                        ext_chapter_id="c1", decision="CLEARED", basis="operator-approval",
+                        decided_by="test", evidence="local fixture",
+                        policy_version="test-v1")
+
+    def run_cycle(self, transport):
+        # run_fetch_run imports SafeHTTPTransport inside the function body, so
+        # the patch has to land on the module that defines it.
+        import shura_core.content.transport as transport_module
+        with mock.patch.object(transport_module, "SafeHTTPTransport",
+                               lambda http: transport):
+            return self.runner.run_fetch_run(
+                self.conn, self.root / "downloads", config_path=self.config,
+                instance_id="test", host="test-host", max_pages=5)
+
+    def entry(self, fetch_enabled):
+        return {"source_id": self.source_id, "kind": "html",
+                "allowed_hosts": ["arab.example"], "fetch_enabled": fetch_enabled,
+                "quota_bytes": 4096, "retention_days": 7}
+
+    def test_the_fetch_cycle_follows_the_operator_decision_end_to_end(self):
+        # 1-3. discover, accept, configure - with fetching still off.
+        seed_file(self.root / "seeds.json", ["https://arab.example/"])
+        with SiteFixture({"arab.example": ARABIC_PAGE}):
+            proposals = ArabicSiteDiscovery(
+                self.store, SafeHTTP(["arab.example"])).discover(
+                [SeedFileFinder(self.root / "seeds.json")])
+        self.assertEqual(len(proposals), 1)
+        record_review(self.store, self.source_id, ACCEPTED, operator="ops", reason="ok")
+        upsert_source_entry(self.config, self.entry(False))
+        sync_source_policy(self.conn, load_source_config(self.config))
+        self.seed_a_startable_page(self.source_id)
+
+        # 4. a run while disabled must not even look at the source.
+        disabled = RecordingTransport()
+        report = self.run_cycle(disabled)
+        self.assertEqual(report.sources_fetched, [])
+        self.assertEqual(disabled.urls, [], "a disabled source receives no request")
+
+        # 5. explicit enablement through the CLI.
+        _enable(self.config, self.source_id, "arab.example", confirmed=True,
+                status=ACCEPTED)
+        sync_source_policy(self.conn, load_source_config(self.config))
+
+        # 6. the same run now reaches the source and attempts its page.
+        enabled = RecordingTransport()
+        report = self.run_cycle(enabled)
+        self.assertEqual(report.sources_fetched, [self.source_id])
+        self.assertEqual(enabled.urls, ["https://arab.example/chapter-1/1.jpg"],
+                         "the enabled source was actually asked for its page")
+
+        # 7. disable again.
+        _disable(self.config, self.source_id, "arab.example")
+        sync_source_policy(self.conn, load_source_config(self.config))
+
+        # 8. and the cycle refuses it once more.
+        off = RecordingTransport()
+        report = self.run_cycle(off)
+        self.assertEqual(report.sources_fetched, [])
+        self.assertEqual(off.urls, [], "a re-disabled source receives no new request")
+
+    def test_an_enabled_source_cannot_reach_a_host_outside_its_allowlist(self):
+        seed_file(self.root / "seeds.json", ["https://arab.example/"])
+        with SiteFixture({"arab.example": ARABIC_PAGE}):
+            ArabicSiteDiscovery(self.store, SafeHTTP(["arab.example"])).discover(
+                [SeedFileFinder(self.root / "seeds.json")])
+        record_review(self.store, self.source_id, ACCEPTED, operator="ops", reason="ok")
+        upsert_source_entry(self.config, self.entry(False))
+        _enable(self.config, self.source_id, "arab.example", confirmed=True, status=ACCEPTED)
+        sync_source_policy(self.conn, load_source_config(self.config))
+        stamp = "2026-01-01T00:00:00+00:00"
+        self.conn.execute(
+            "INSERT INTO works(source_id,ext_work_id,title,content_classification,"
+            "content_policy_version,classified_at,discovered_at,updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            (self.source_id, "w1", "عمل", "SAFE", "test-v1", stamp, stamp, stamp))
+        self.conn.execute(
+            "INSERT INTO work_chapters(source_id,ext_chapter_id,ext_work_id,source_chapter_id,"
+            "ordinal,first_seen,updated_at) VALUES(?,?,?,?,?,?,?)",
+            (self.source_id, "c1", "w1", "c1", 1, stamp, stamp))
+        # The page URL points at a host the config does not allow.
+        self.conn.execute(
+            "INSERT INTO chapter_pages(source_id,ext_chapter_id,page_index,ordinal,"
+            "source_page_url,created_at) VALUES(?,?,?,?,?,?)",
+            (self.source_id, "c1", 0, 0, "https://elsewhere.example/1.jpg", stamp))
+        self.conn.commit()
+        grant_clearance(self.conn, source_id=self.source_id, ext_work_id="w1",
+                        ext_chapter_id="c1", decision="CLEARED", basis="operator-approval",
+                        decided_by="test", evidence="local fixture", policy_version="test-v1")
+        transport = RecordingTransport()
+        self.run_cycle(transport)
+        for url in transport.urls:
+            self.assertIn("elsewhere.example", url)
+        # Whatever the safety gate decided, it was a refusal, not a download.
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM chapter_pages WHERE state='DONE'"
+                              ).fetchone()[0], 0,
+            "enabling a source does not let it fetch outside its own allowed hosts")
