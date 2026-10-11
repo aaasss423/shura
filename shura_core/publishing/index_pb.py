@@ -50,6 +50,16 @@ def _source_message(source: dict) -> bytes:
     return b"".join(parts)
 
 
+def extension_lib_for_version(version: str) -> str:
+    """The extensionLib Shura publishes for a version.
+
+    One rule, used by both the protobuf index and ``index.shura.json``, so the
+    two formats cannot drift and disagree about the same artifact.
+    """
+    parts = str(version or "").split(".")
+    return ".".join(parts[:-1]) if len(parts) >= 2 else str(version or "")
+
+
 def _extension_message(entry: dict) -> bytes:
     apk_url = str(entry.get("apk_url") or ("apk/" + str(entry.get("apk", ""))))
     icon_url = str(entry.get("icon_url") or "")
@@ -57,8 +67,7 @@ def _extension_message(entry: dict) -> bytes:
         3, pb.string_field(1, apk_url) + pb.string_field(2, icon_url)
     )
     version = str(entry.get("version", ""))
-    lib_parts = version.split(".")
-    extension_lib = ".".join(lib_parts[:-1]) if len(lib_parts) >= 2 else version
+    extension_lib = extension_lib_for_version(version)
     content_warning = CONTENT_WARNING_NSFW if entry.get("nsfw") else CONTENT_WARNING_SAFE
     parts = [
         pb.string_field(1, str(entry.get("name", ""))),

@@ -144,6 +144,13 @@ class RepositoryPublisher:
             "artifact_sha256": security.get("sha256", ""),
             "signing_certificate_sha256": security.get("certificate", ""),
             "malware": security.get("malware", {}),
+            # Shura Core's own derivations, published so the Android reader has
+            # something real to compare the artifact against. These were
+            # absent, so the reader silently fell back to null and 0 and every
+            # comparison it makes was against a value that was never published.
+            "index_version_code": _version_code(str(item.get("version", ""))),
+            "index_extension_lib": index_pb.extension_lib_for_version(
+                str(item.get("version", ""))),
         }
 
     def _signing_fingerprint(self, items: list[dict]) -> str:
