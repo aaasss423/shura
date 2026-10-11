@@ -203,5 +203,109 @@ class PreflightTests(unittest.TestCase):
             self.assertEqual(scanner.scan(artifact).verdict, ScanVerdict.UNAVAILABLE)
 
 
+class GitHubAssetTrustScopeTests(unittest.TestCase):
+    """A GitHub asset is reachable only for a source that was told about it.
+
+    GitHub serves release assets from ``release-assets.githubusercontent.com``,
+    reached by a redirect from ``github.com``. Every hop is checked against the
+    source's own allowlist, so granting that host to one trusted source grants
+    nothing to any other - and a freshly discovered source, whose allowlist is
+    still just the API host, cannot fetch an artifact at all.
+
+    Live: with the hosts configured the redirect is followed and the bytes
+    arrive; without them the request is refused at the first hop.
+    """
+
+    def setUp(self):
+        import tempfile
+        from shura_core.state import StateStore
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.store = StateStore(f"{self.tmp.name}/s.db")
+        self.addCleanup(self.store.close)
+
+    def test_a_discovered_source_cannot_reach_a_release_asset(self):
+        from shura_core.discovery.service import SourceDiscovery
+        import inspect
+        source = inspect.getsource(SourceDiscovery.discover)
+        self.assertIn('"allowed_hosts":["api.github.com"]', source,
+                      "discovery must not widen an untrusted source's reach")
+        self.assertNotIn("release-assets.githubusercontent.com", source,
+                         "the asset host must be granted by an operator, not by discovery")
+
+    def test_a_redirect_is_followed_only_to_a_host_the_source_allows(self):
+        import http.server
+        import threading
+        from shura_core.security.network import NetworkPolicyError, SafeHTTP
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path == "/start":
+                    self.send_response(302)
+                    self.send_header("Location", "http://127.0.0.1:%d/asset" % self.server.server_port)
+                    self.end_headers()
+                else:
+                    body = b"artifact-bytes"
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+        host = "127.0.0.1"
+        url = f"http://127.0.0.1:{server.server_port}/start"
+
+        allowed = SafeHTTP([host], https_only=False, allow_private_hosts=True,
+                           allow_nonstandard_ports=True)
+        body, _, final = allowed.get(url)
+        self.assertEqual(body, b"artifact-bytes",
+                         "a source that was told about the host gets the bytes")
+        self.assertIn("/asset", final)
+
+        refused = SafeHTTP(["api.github.com"], https_only=False, allow_private_hosts=True,
+                           allow_nonstandard_ports=True)
+        with self.assertRaises(NetworkPolicyError):
+            refused.get(url)
+
+    def test_granting_the_asset_host_to_one_source_does_not_grant_it_to_another(self):
+        from shura_core.discovery.service import SourceDiscovery
+        from shura_core.models import Source, SourceState
+        trusted = Source("github:trusted/ext", "Trusted",
+                         "https://api.github.com/repos/t/r/releases", "github-releases",
+                         "en", enabled=False, state=SourceState.PAUSED,
+                         configuration={"allowed_hosts": ["api.github.com", "github.com",
+                                                          "release-assets.githubusercontent.com"],
+                                        "package": "", "signing_key": ""})
+        untrusted = Source("github:found/ext", "Found",
+                           "https://api.github.com/repos/f/r/releases", "github-releases",
+                           "en", enabled=False, state=SourceState.PAUSED,
+                           configuration={"allowed_hosts": ["api.github.com"],
+                                          "package": "", "signing_key": ""})
+        self.assertIn("release-assets.githubusercontent.com",
+                      trusted.configuration["allowed_hosts"])
+        self.assertNotIn("release-assets.githubusercontent.com",
+                         untrusted.configuration["allowed_hosts"],
+                         "the second source gains nothing from the first")
+
+    def test_a_discovered_source_is_not_eligible_until_accepted_and_enabled(self):
+        from shura_core.models import Source, SourceState
+        from shura_core.scheduling import Scheduler
+        found = Source("github:found/ext", "Found",
+                       "https://api.github.com/repos/f/r/releases", "github-releases",
+                       "en", enabled=False, state=SourceState.PAUSED,
+                       configuration={"allowed_hosts": ["api.github.com"],
+                                      "package": "", "signing_key": ""})
+        self.store.add_source(found)
+        self.assertEqual(Scheduler(self.store).due(), [],
+                         "a discovered source is never crawled")
+        with self.assertRaises(ValueError):
+            self.store.enable_source("github:found/ext")
+
+
 if __name__ == "__main__":
     unittest.main()
