@@ -111,6 +111,12 @@ class CliCase(unittest.TestCase):
         self.tmp.cleanup()
 
     def run_cli(self, argv) -> tuple[int, str]:
+        """Run the CLI and return its exit code plus its own last output line.
+
+        ``redirect_stdout`` swaps the process-wide ``sys.stdout``, so output from
+        a thread another test left running can land in the buffer. Callers that
+        expect JSON use :meth:`last_json`, which takes the last JSON-looking line.
+        """
         out = io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
             try:
@@ -118,6 +124,14 @@ class CliCase(unittest.TestCase):
             except SystemExit as exc:      # argparse --help and argparse errors
                 code = int(exc.code or 0)
         return code, out.getvalue()
+
+    @staticmethod
+    def last_json(text: str) -> dict:
+        """The command's own JSON line, ignoring anything another thread printed."""
+        for line in reversed([l for l in text.splitlines() if l.strip()]):
+            if line.startswith("{"):
+                return json.loads(line)
+        raise AssertionError(f"no JSON in command output: {text!r}")
 
     def import_args(self, *extra):
         return ["--db", str(self.work / "unused-state.db"), "content-import",
@@ -145,7 +159,7 @@ class DryRunTests(CliCase):
         with NoExternalNetwork() as guard:
             code, out = self.run_cli(self.import_args("--dry-run"))
         self.assertEqual(code, 0)
-        self.assertTrue(json.loads(out)["dryRun"])
+        self.assertTrue(self.last_json(out)["dryRun"])
         self.assertEqual(guard.blocked, [])
         # No content directory, therefore no database, therefore no rows.
         self.assertFalse(self.content_dir.exists(),
@@ -173,7 +187,7 @@ class DryRunTests(CliCase):
         # test above is proving something rather than passing trivially.
         code, out = self.run_cli(self.import_args())
         self.assertEqual(code, 0)
-        self.assertEqual(json.loads(out)["chapter_pages"], 1)
+        self.assertEqual(self.last_json(out)["chapter_pages"], 1)
         self.assertEqual(self.all_counts(), (1, 1, 1, 1, 0))
         self.assertTrue((self.content_dir / "content.db").is_file())
 
@@ -224,7 +238,7 @@ class NetworkIsolationTests(CliCase):
             runner_module.SafeHTTP = real
 
         self.assertEqual(code, 0)
-        self.assertEqual(json.loads(out)["pagesDone"], 1)
+        self.assertEqual(self.last_json(out)["pagesDone"], 1)
         self.assertEqual(guard.blocked, [],
                          "no command in this flow may reach a non-loopback host")
 
@@ -246,7 +260,7 @@ class NetworkIsolationTests(CliCase):
             runner_module.SafeHTTP = real
 
         self.assertEqual(code, 0)
-        report = json.loads(out)
+        report = self.last_json(out)
         self.assertEqual(report["pagesDone"], 0)
         self.assertEqual(report["pagesRefused"], 1)
         self.assertEqual(StubHTTP.requests, [],
@@ -269,7 +283,7 @@ class ClearanceHelpTests(CliCase):
              "--work-id", "w1", "--chapter-id", "c1", "--decision", "CLEARED",
              "--decided-by", "local-operator", "--evidence", "review"])
         self.assertEqual(code, 0)
-        payload = json.loads(out)
+        payload = self.last_json(out)
         self.assertIn("none", payload["authentication"])
         self.assertIn("attributed label", payload["authentication"])
         self.assertEqual(payload["decidedBy"], "local-operator")

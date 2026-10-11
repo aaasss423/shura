@@ -1,5 +1,7 @@
 import argparse,os,signal,sys,threading
+from pathlib import Path
 from shura_core.coordinator import CrawlCoordinator
+from shura_core.crawler.arabic import ArabicSiteDiscovery,SeedFileFinder
 from shura_core.discovery.service import SourceDiscovery
 from shura_core.notifications.telegram import TelegramNotifier
 from shura_core.pipeline import CandidateProcessor
@@ -9,7 +11,7 @@ from shura_core.security.malware import MalwareScanner
 from shura_core.state import StateStore
 
 def main(argv=None):
-    p=argparse.ArgumentParser(prog="shura-daemon");p.add_argument("--db",default=os.getenv("SHURA_STATE_DB","shura.db"));p.add_argument("--interval-seconds",type=int,default=900);p.add_argument("--max-sources",type=int,default=250);p.add_argument("--max-downloads",type=int,default=250);p.add_argument("--artifact-dir",default=os.getenv("SHURA_ARTIFACT_DIR","artifacts"));p.add_argument("--discover-sources",action="store_true",help="propose new sources each pass; proposals land disabled and paused for operator review");p.add_argument("--require-malware-scanner",action="store_true",help="exit instead of crawling when the malware engine cannot scan");a=p.parse_args(argv)
+    p=argparse.ArgumentParser(prog="shura-daemon");p.add_argument("--db",default=os.getenv("SHURA_STATE_DB","shura.db"));p.add_argument("--interval-seconds",type=int,default=900);p.add_argument("--max-sources",type=int,default=250);p.add_argument("--max-downloads",type=int,default=250);p.add_argument("--artifact-dir",default=os.getenv("SHURA_ARTIFACT_DIR","artifacts"));p.add_argument("--discover-sources",action="store_true",help="propose new sources each pass; proposals land disabled and paused for operator review");p.add_argument("--discover-sites",action="store_true",help="propose Arabic manga sites from a local seed file; proposals land disabled and paused");p.add_argument("--require-malware-scanner",action="store_true",help="exit instead of crawling when the malware engine cannot scan");a=p.parse_args(argv)
     stop=threading.Event();signal.signal(signal.SIGTERM,lambda *_:stop.set());signal.signal(signal.SIGINT,lambda *_:stop.set())
     store=StateStore(a.db)
     try:
@@ -37,7 +39,16 @@ def main(argv=None):
             from shura_core.security.network import SafeHTTP
             discovery=SourceDiscovery(store,SafeHTTP(["api.github.com"],timeout=15,max_bytes=2_000_000),os.getenv("GITHUB_TOKEN"),daily_limit=a.max_sources)
             notifier.send("Shura source discovery enabled; proposals land paused and disabled.")
-        Scheduler(store).serve(coordinator,a.interval_seconds,stop,rechecker=rechecker,processor=processor,max_downloads=a.max_downloads,notifier=notifier,discovery=discovery)
+        # Arabic site discovery is also opt-in and also only proposes: every
+        # candidate lands disabled and paused, needing an operator's trust
+        # material before it can ever be crawled.
+        site_discovery=None;site_finders=()
+        if getattr(a,"discover_sites",False):
+            seeds=os.getenv("SHURA_SITE_SEEDS","content-source-seeds.json")
+            site_discovery=ArabicSiteDiscovery(store,SafeHTTP([]),daily_limit=a.max_sources)
+            site_finders=(SeedFileFinder(Path(seeds)),)
+            notifier.send("Shura Arabic site discovery enabled; proposals land paused and disabled.")
+        Scheduler(store).serve(coordinator,a.interval_seconds,stop,rechecker=rechecker,processor=processor,max_downloads=a.max_downloads,notifier=notifier,discovery=discovery,site_discovery=site_discovery,site_finders=site_finders)
     finally:store.close()
     return 0
 if __name__=="__main__":raise SystemExit(main() or 0)

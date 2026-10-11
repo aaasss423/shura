@@ -337,6 +337,58 @@ class DaemonPipelineTests(unittest.TestCase):
         self.run_pass(self.processor(), discovery=FakeDiscovery())
         self.assertEqual(len(calls), 1, "discovery must run once per pass")
 
+    def test_serve_proposes_sites_each_pass_when_site_discovery_is_supplied(self):
+        calls = []
+
+        class FakeSiteDiscovery:
+            errors = []
+
+            def discover(self, finders):
+                calls.append(tuple(finders))
+                return [{"domain": "arab.example"}]
+
+        class FakeFinder:
+            def find(self, limit=250):
+                return []
+
+        OneShot.calls = 0
+        self.add_source()
+        self.run_pass(self.processor(), site_discovery=FakeSiteDiscovery(),
+                      site_finders=[FakeFinder()])
+        self.assertEqual([len(c) for c in calls], [1], "site discovery runs once per pass")
+        self.assertTrue(all(isinstance(f, FakeFinder) for c in calls for f in c),
+                        "the configured finders are the ones the site pass receives")
+        self.assertEqual(self.stages()["org.example.ext|1.0"], "security-passed")
+
+    def test_a_failing_site_pass_does_not_stop_the_loop(self):
+        class ExplodingSiteDiscovery:
+            errors = []
+
+            def discover(self, finders):
+                raise RuntimeError("site discovery is down")
+
+        class FakeFinder:
+            def find(self, limit=250):
+                return []
+
+        OneShot.calls = 0
+        self.add_source()
+        self.run_pass(self.processor(), site_discovery=ExplodingSiteDiscovery(),
+                      site_finders=[FakeFinder()])
+        self.assertEqual(self.stages()["org.example.ext|1.0"], "security-passed",
+                         "a site pass failure must not stop the crawl")
+        self.assertTrue(self.store.db.execute(
+            "SELECT COUNT(*) FROM history WHERE event='site_pass_failed'").fetchone()[0],
+            "the failure is audited rather than swallowed")
+
+    def test_site_discovery_is_off_unless_supplied(self):
+        OneShot.calls = 0
+        self.add_source()
+        self.run_pass(self.processor())
+        self.assertFalse(self.store.db.execute(
+            "SELECT COUNT(*) FROM history WHERE event IN ('site_candidate','site_pass_failed')"
+        ).fetchone()[0], "no site pass runs unless one is wired in")
+
     def test_a_failing_discovery_pass_does_not_stop_the_loop(self):
         class ExplodingDiscovery:
             errors = []

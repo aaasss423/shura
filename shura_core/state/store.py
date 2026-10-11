@@ -57,12 +57,27 @@ class StateStore:
     def transition(self,sid,state,reason=""):
         s=self.get_source(sid)
         if not s:raise KeyError(sid)
-        allowed={SourceState.ACTIVE:{SourceState.RETRY_LATER,SourceState.PAUSED,SourceState.DEAD,SourceState.QUARANTINED,SourceState.ACCEPTED},SourceState.RETRY_LATER:{SourceState.ACTIVE,SourceState.DEAD,SourceState.PAUSED,SourceState.QUARANTINED,SourceState.ACCEPTED},SourceState.PAUSED:{SourceState.ACTIVE,SourceState.ACCEPTED},SourceState.DEAD:{SourceState.ACTIVE},SourceState.ACCEPTED:{SourceState.ACTIVE,SourceState.RETRY_LATER,SourceState.PAUSED,SourceState.QUARANTINED},SourceState.QUARANTINED:set()}
+        # QUARANTINED is reachable from every non-quarantined state: it is a
+        # durable security override, so no other state may lock a source out of
+        # it. PAUSED previously allowed only ACTIVE/ACCEPTED, which meant a
+        # paused (discovered) source could not be quarantined at all.
+        allowed={SourceState.ACTIVE:{SourceState.RETRY_LATER,SourceState.PAUSED,SourceState.DEAD,SourceState.QUARANTINED,SourceState.ACCEPTED},SourceState.RETRY_LATER:{SourceState.ACTIVE,SourceState.DEAD,SourceState.PAUSED,SourceState.QUARANTINED,SourceState.ACCEPTED},SourceState.PAUSED:{SourceState.ACTIVE,SourceState.ACCEPTED,SourceState.QUARANTINED},SourceState.DEAD:{SourceState.ACTIVE,SourceState.QUARANTINED},SourceState.ACCEPTED:{SourceState.ACTIVE,SourceState.RETRY_LATER,SourceState.PAUSED,SourceState.QUARANTINED},SourceState.QUARANTINED:set()}
         if state not in allowed[s.state]:raise ValueError(f"invalid transition {s.state} -> {state}")
         s.state=state;s.failure_reason=None if state==SourceState.ACTIVE else (reason or s.failure_reason);self.save_source(s);self.event(sid,"state_transition",{"state":state.value,"reason":reason})
     def accept_source(self,sid,operator="local-operator",reason=""):
         if self.is_source_quarantined(sid):raise ValueError("quarantined source cannot be accepted")
-        if not self.get_source(sid):raise KeyError(sid)
+        source=self.get_source(sid)
+        if not source:raise KeyError(sid)
+        # Acceptance is a trust decision, so it is gated on trust material. A
+        # proposal that discovery found has, by construction, no package and no
+        # signing key; accepting it would put an unreviewed source into the
+        # same state a configured one occupies. The refusal is recorded so the
+        # operator can see what was missing and why the switch did nothing.
+        from shura_core.sources.registry import SourceRegistry
+        missing=SourceRegistry.trust_material_missing(source)
+        if missing:
+            self.event(sid,"source_acceptance_refused",{"missing":missing,"operator":operator,"reason":reason})
+            raise ValueError("source cannot be accepted, missing trust material: "+"; ".join(missing))
         self.transition(sid,SourceState.ACCEPTED,reason or "operator accepted source")
         s=self.get_source(sid);s.failure_reason=None;s.next_retry=None;self.save_source(s)
         self.event(sid,"source_accepted",{"operator":operator,"reason":reason})

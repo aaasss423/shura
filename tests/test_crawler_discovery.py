@@ -17,8 +17,9 @@ import unittest
 from pathlib import Path
 
 from shura_core.coordinator import CrawlCoordinator
+from shura_core.crawler.arabic import (ArabicSiteDiscovery, SeedFileFinder, evaluate_site)
 from shura_core.discovery.service import SourceDiscovery
-from shura_core.models import Source, SourceState
+from shura_core.models import Candidate, Source, SourceState
 from shura_core.pipeline import CandidateProcessor
 from shura_core.publishing.repository import RepositoryPublisher
 from shura_core.security.artifacts import ScanVerdict
@@ -246,7 +247,13 @@ class TrustSetupTests(Case):
 
 
 class AcceptanceTests(Case):
-    """accept-source is the operator's switch - it must not be a free pass."""
+    """accept-source is a trust decision, not a rubber stamp.
+
+    A proposal found by discovery carries no package and no signing key by
+    construction. Accepting it would put it in the same state a configured,
+    reviewed source occupies, so acceptance is refused until the trust material
+    is present. Crawl enablement stays a separate switch.
+    """
 
     def setUp(self):
         super().setUp()
@@ -259,22 +266,298 @@ class AcceptanceTests(Case):
                                             "review_required": True})
         self.store.add_source(self.source)
 
-    def test_accepting_an_unconfigured_proposal_does_not_make_it_crawlable(self):
-        self.store.accept_source("github:arab/reader", reason="looks good")
+    def complete(self, **over):
+        source = self.store.get_source("github:arab/reader")
+        source.configuration.update({"package": "org.example.ext",
+                                     "signing_key": SIGNING_KEY})
+        source.configuration.update(over)
+        self.store.add_source(source)
+        return source
+
+    def test_an_incomplete_proposal_cannot_be_accepted(self):
+        with self.assertRaises(ValueError) as caught:
+            self.store.accept_source("github:arab/reader", reason="looks promising")
+        message = str(caught.exception)
+        self.assertIn("signing_key", message)
+        self.assertIn("package", message)
+        source = self.store.get_source("github:arab/reader")
+        self.assertIsNot(source.state, SourceState.ACCEPTED,
+                         "a source with no trust material must not reach the accepted state")
+        self.assertFalse(self.store.eligible(source))
+
+    def test_the_refusal_is_recorded_with_what_was_missing(self):
+        with self.assertRaises(ValueError):
+            self.store.accept_source("github:arab/reader")
+        row = self.store.db.execute(
+            "SELECT detail FROM history WHERE event='source_acceptance_refused'").fetchone()
+        self.assertIsNotNone(row, "a refused acceptance must leave an auditable trace")
+        detail = json.loads(row[0])
+        self.assertTrue(any("signing_key" in m for m in detail["missing"]))
+
+    def test_a_proposal_is_accepted_once_its_trust_material_is_complete(self):
+        self.complete()
+        self.store.accept_source("github:arab/reader", reason="signing key verified")
         source = self.store.get_source("github:arab/reader")
         self.assertIs(source.state, SourceState.ACCEPTED)
-        self.assertFalse(source.enabled)
         self.assertFalse(self.store.eligible(source),
-                         "accepting is not a substitute for configuring the trust material")
+                         "acceptance is trust, not crawl enablement: enabled is still false")
 
-    def test_an_accepted_source_without_trust_material_is_flagged(self):
-        # The operator accepted a proposal whose package/signing key are empty.
+    def test_acceptance_and_enablement_remain_separate_switches(self):
+        self.complete()
+        self.store.accept_source("github:arab/reader")
+        # accepted, but still not crawlable until the operator enables it
+        self.assertFalse(self.store.eligible(self.store.get_source("github:arab/reader")))
         source = self.store.get_source("github:arab/reader")
-        self.assertEqual(source.configuration["signing_key"], "")
-        self.assertEqual(source.configuration["package"], "")
-        self.assertTrue(source.configuration.get("review_required"),
-                        "the proposal must still be marked as needing trust review")
+        source.enabled = True
+        self.store.add_source(source, update_state=True)
+        self.assertTrue(self.store.eligible(self.store.get_source("github:arab/reader")))
+
+    def test_acceptance_does_not_lift_a_paused_source_by_itself(self):
+        self.complete()
+        self.store.accept_source("github:arab/reader")
+        self.assertFalse(self.store.eligible(self.store.get_source("github:arab/reader")))
+
+    def test_a_quarantined_source_is_still_refused(self):
+        self.complete()
+        candidate = Candidate("github:arab/reader", "org.example.ext", "1",
+                              "https://api.github.com/x.apk", provenance={"page": "p"})
+        self.store.quarantine_item(candidate, "signature mismatch")
+        with self.assertRaises(ValueError):
+            self.store.accept_source("github:arab/reader")
 
 
 if __name__ == "__main__":
     unittest.main()
+
+ARABIC_PAGE = """<!doctype html>
+<html lang="ar" dir="rtl"><head><title>مانجا ليك</title></head>
+<body><nav><a href="/manga/">فهرس المانجا</a></nav>
+<ul class="manga-list">
+ <li><a href="/manga/the-overly/">The Overly</a></li>
+</ul>
+<p><a href="/manga/the-overly/chapter-1/">فصل 1</a></p>
+</body></html>"""
+
+LATIN_PAGE = """<!doctype html>
+<html lang="en"><head><title>Reader</title></head>
+<body><a href="/manga/">Catalog</a></body></html>"""
+
+# Arabic language signals (lang/dir) but deliberately no work index and no
+# chapter listing: public and Arabic, yet nothing verifiable.
+THIN_PAGE = """<!doctype html>
+<html lang="ar" dir="rtl"><head><title>قارئ</title></head>
+<body><p>لا يوجد شيء بعد.</p></body></html>"""
+
+
+class SiteFixture:
+    """Serves candidate pages by host. Opens no socket."""
+
+    def __init__(self, pages, blocked=()):
+        self.pages = pages
+        self.blocked = set(blocked)
+        self.requested = []
+
+    def opener(self, redirect_handler):
+        fixture = self
+        original = self._original
+
+        def open_(req, **kw):
+            from urllib.error import HTTPError
+            url = req.full_url
+            fixture.requested.append(url)
+            host = url.split("/")[2]
+            if host in fixture.blocked:
+                raise HTTPError(url, 403, "Forbidden", {}, None)
+            body = fixture.pages.get(host, "").encode()
+            return FakeResponse(url, body)
+
+        opener = original(redirect_handler)
+        opener.open = open_
+        return opener
+
+    def __enter__(self):
+        from shura_core.security import network
+        self._original = network.build_opener
+        network.build_opener = self.opener
+        return self
+
+    def __exit__(self, *exc):
+        from shura_core.security import network
+        network.build_opener = self._original
+        return False
+
+
+def seed_file(path, urls):
+    path.write_text(json.dumps({"sites": [{"url": u, "language": "ar"} for u in urls]}),
+                    encoding="utf-8")
+
+
+class ArabicSiteDiscoveryTests(Case):
+    """An Arabic site that can be proven becomes a disabled, paused proposal."""
+
+    def finder(self, urls):
+        seed_file(self.root / "seeds.json", urls)
+        return SeedFileFinder(self.root / "seeds.json")
+
+    def test_a_verifiable_arabic_site_becomes_a_disabled_paused_proposal(self):
+        with SiteFixture({"arab.example": ARABIC_PAGE}):
+            finder = self.finder(["https://arab.example/"])
+            proposals = ArabicSiteDiscovery(self.store, SafeHTTP(["arab.example"])).discover([finder])
+        self.assertEqual(len(proposals), 1)
+        self.assertEqual(proposals[0]["verdict"], "CANDIDATE")
+        self.assertGreater(proposals[0]["score"], 0)
+        source = self.store.get_source("site:arab.example")
+        self.assertIsNotNone(source, "the proposal must land in the existing sources ledger")
+        self.assertFalse(source.enabled, "a discovered site is never enabled by discovery")
+        self.assertIs(source.state, SourceState.PAUSED)
+        self.assertTrue(source.configuration["review_required"])
+        self.assertEqual(source.configuration["signing_key"], "",
+                         "trust material stays empty until an operator supplies it")
+        self.assertFalse(self.store.eligible(source),
+                         "a proposal must be impossible to crawl")
+
+    def test_a_proposal_cannot_be_accepted_without_trust_material(self):
+        with SiteFixture({"arab.example": ARABIC_PAGE}):
+            ArabicSiteDiscovery(self.store, SafeHTTP(["arab.example"])).discover(
+                [self.finder(["https://arab.example/"])])
+        with self.assertRaises(ValueError):
+            self.store.accept_source("site:arab.example")
+
+    def test_a_non_arabic_site_is_rejected_with_a_reason(self):
+        with SiteFixture({"latin.example": LATIN_PAGE}):
+            proposals = ArabicSiteDiscovery(self.store, SafeHTTP(["latin.example"])).discover(
+                [self.finder(["https://latin.example/"])])
+        self.assertEqual(proposals, [])
+        detail = self._last_event("site_candidate")
+        self.assertEqual(detail["verdict"], "REJECTED")
+        self.assertTrue(any("Arabic" in r for r in detail["reasons"]))
+
+    def test_a_site_that_refuses_public_access_is_rejected_not_worked_around(self):
+        with SiteFixture({"walled.example": ARABIC_PAGE}, blocked={"walled.example"}):
+            proposals = ArabicSiteDiscovery(self.store, SafeHTTP(["walled.example"])).discover(
+                [self.finder(["https://walled.example/"])])
+        self.assertEqual(proposals, [])
+        detail = self._last_event("site_candidate")
+        self.assertEqual(detail["verdict"], "REJECTED")
+        self.assertTrue(detail["blocked"], "a 403 is recorded as a refusal, not a puzzle")
+
+    def test_a_site_with_no_verifiable_index_is_deferred_not_accepted(self):
+        with SiteFixture({"thin.example": THIN_PAGE}):
+            ArabicSiteDiscovery(self.store, SafeHTTP(["thin.example"])).discover(
+                [self.finder(["https://thin.example/"])])
+        detail = self._last_event("site_candidate")
+        self.assertEqual(detail["verdict"], "DEFERRED")
+        self.assertIsNone(self.store.get_source("site:thin.example"),
+                          "a deferred candidate is not proposed as a source")
+
+    def test_repeating_a_pass_adds_no_duplicates(self):
+        with SiteFixture({"arab.example": ARABIC_PAGE}):
+            finder = self.finder(["https://arab.example/"])
+            http = SafeHTTP(["arab.example"])
+            discovery = ArabicSiteDiscovery(self.store, http)
+            first = discovery.discover([finder])
+            second = discovery.discover([finder])
+        self.assertEqual(len(first), 1)
+        self.assertEqual(second, [], "a repeat pass must not re-propose a known site")
+        count = self.store.db.execute(
+            "SELECT COUNT(*) FROM sources WHERE source_id='site:arab.example'").fetchone()[0]
+        self.assertEqual(count, 1)
+
+    def test_one_broken_finder_does_not_cost_the_pass(self):
+        class ExplodingFinder:
+            def find(self, limit=250):
+                raise RuntimeError("finder is down")
+
+        with SiteFixture({"arab.example": ARABIC_PAGE}):
+            discovery = ArabicSiteDiscovery(self.store, SafeHTTP(["arab.example"]))
+            proposals = discovery.discover([ExplodingFinder(), self.finder(["https://arab.example/"])])
+        self.assertEqual(len(proposals), 1, "the good finder still produced its proposal")
+        self.assertTrue(discovery.errors, "the broken finder is recorded, not swallowed")
+
+    def test_the_daily_limit_is_respected(self):
+        hosts = {f"s{i}.example": ARABIC_PAGE for i in range(20)}
+        allowed = [f"s{i}.example" for i in range(20)]
+        with SiteFixture(hosts):
+            finder = self.finder([f"https://{h}/" for h in allowed])
+            discovery = ArabicSiteDiscovery(self.store, SafeHTTP(allowed), daily_limit=3)
+            proposals = discovery.discover([finder])
+        self.assertLessEqual(len(proposals), 3)
+
+    def test_a_plain_http_candidate_is_never_recorded(self):
+        with SiteFixture({}):
+            proposals = ArabicSiteDiscovery(self.store, SafeHTTP([])).discover(
+                [self.finder(["http://insecure.example/"])])
+        self.assertEqual(proposals, [])
+        self.assertIsNone(self.store.get_source("site:insecure.example"))
+
+    def test_nothing_is_published_or_written_to_the_repository(self):
+        repo = Path(__file__).resolve().parents[1] / "repo"
+        before = {p: p.stat().st_mtime for p in repo.rglob("*") if p.is_file()}
+        with SiteFixture({"arab.example": ARABIC_PAGE}):
+            ArabicSiteDiscovery(self.store, SafeHTTP(["arab.example"])).discover(
+                [self.finder(["https://arab.example/"])])
+        after = {p: p.stat().st_mtime for p in repo.rglob("*") if p.is_file()}
+        self.assertEqual(before, after, "discovery must never touch the published repository")
+
+    def _last_event(self, event):
+        row = self.store.db.execute(
+            "SELECT detail FROM history WHERE event=? ORDER BY id DESC LIMIT 1",
+            (event,)).fetchone()
+        self.assertIsNotNone(row, f"expected a {event} event")
+        return json.loads(row[0])
+
+
+class ArabicSiteDiscoveryCommandTests(Case):
+    """The CLI reports proposals without ever enabling one."""
+
+    def run_cli(self, argv):
+        import contextlib, io
+        from shura_core import cli
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            try:
+                code = cli.main(argv)
+            except SystemExit as exc:
+                code = int(exc.code or 0)
+        return code, out.getvalue()
+
+    @staticmethod
+    def last_json(text):
+        for line in reversed([l for l in text.splitlines() if l.strip()]):
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                continue
+        raise AssertionError(f"no JSON line in output: {text!r}")
+
+    def test_the_command_proposes_only_and_reports_its_candidates(self):
+        seed_file(self.root / "seeds.json", ["https://arab.example/"])
+        with SiteFixture({"arab.example": ARABIC_PAGE}):
+            # No --db: discover-sites must never open the operator's database.
+            code, out = self.run_cli(["discover-sites", "--seeds",
+                                      str(self.root / "seeds.json")])
+        self.assertEqual(code, 0)
+        report = self.last_json(out)
+        self.assertEqual(report["candidates"], 1)
+        self.assertEqual(len(report["proposed"]), 1)
+        self.assertEqual(report["proposed"][0]["verdict"], "CANDIDATE")
+        self.assertIsNone(self.store.get_source("site:arab.example"),
+                          "the CLI only reports; persisting a proposal is the service's job")
+
+    def test_the_reporting_command_never_opens_the_operator_database(self):
+        before = Path.cwd() / "shura.db"
+        existed = before.exists()
+        seed_file(self.root / "seeds.json", ["https://arab.example/"])
+        with SiteFixture({"arab.example": ARABIC_PAGE}):
+            code, _ = self.run_cli(["discover-sites", "--seeds",
+                                    str(self.root / "seeds.json")])
+        self.assertEqual(code, 0)
+        self.assertEqual(before.exists(), existed,
+                         "discover-sites must not create or open the operator's shura.db")
+
+    def test_the_command_survives_an_empty_seed_file(self):
+        seed_file(self.root / "seeds.json", [])
+        code, out = self.run_cli(["discover-sites", "--seeds",
+                                  str(self.root / "seeds.json")])
+        self.assertEqual(code, 0)
+        self.assertEqual(self.last_json(out)["proposed"], [])

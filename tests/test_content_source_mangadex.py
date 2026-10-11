@@ -455,10 +455,24 @@ class CliDiscoveryTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def run_cli(self, argv):
+        """Run the CLI with its output captured.
+
+        ``redirect_stdout`` swaps the process-wide ``sys.stdout``, so a thread
+        left running by another test can interleave into (or unwind around) it.
+        Callers that expect JSON use :meth:`last_json`, which takes the last
+        JSON-looking line, so output from another thread cannot break the parse.
+        """
         out = io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
             code = cli.main(argv)
         return code, out.getvalue()
+
+    @staticmethod
+    def last_json(text: str) -> dict:
+        for line in reversed([l for l in text.splitlines() if l.strip()]):
+            if line.startswith("{"):
+                return json.loads(line)
+        raise AssertionError(f"no JSON in command output: {text!r}")
 
     def test_content_discover_imports_without_touching_the_network(self):
         transport = FixtureTransport()
@@ -471,7 +485,7 @@ class CliDiscoveryTests(unittest.TestCase):
                  "--language", "ar", "--works", "1",
                  "--chapters-per-work", "1", "--pages-per-chapter", "2"])
         self.assertEqual(code, 0, out)
-        report = json.loads(out)
+        report = self.last_json(out)
         self.assertEqual(report["discoveredWorks"], 1)
         self.assertEqual(report["discoveredPages"], 2)
         self.assertEqual(report["clearanceGranted"], 0)
@@ -495,7 +509,7 @@ class CliDiscoveryTests(unittest.TestCase):
                  "--content-dir", str(self.work / "store"), "--config", str(self.config),
                  "--dry-run"])
         self.assertEqual(code, 0)
-        self.assertTrue(json.loads(out)["dryRun"])
+        self.assertTrue(self.last_json(out)["dryRun"])
         self.assertFalse((self.work / "store").exists())
 
 

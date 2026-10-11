@@ -27,6 +27,37 @@ class SourceRegistry:
         if len(set(ids))!=len(ids):raise SourceConfigurationError("source_id values must be unique")
         return sources
     @classmethod
+    def trust_material_missing(cls,source):
+        """What a source must carry before an operator can accept it as trusted.
+
+        Deliberately independent of ``enabled``. Three decisions are kept apart:
+
+        * **state** - where the source sits in the operator's review queue;
+        * **enabled** - whether it may be crawled at all;
+        * **acceptance** - whether its trust material has been reviewed.
+
+        Acceptance is only about the third. Letting "enable the crawl" imply
+        "the trust material is fine" is how a discovered proposal - which by
+        construction carries no package and no signing key - would end up
+        looking like a vetted source.
+
+        Returns a list of human-readable problems; empty means acceptable.
+        """
+        missing=[]
+        cfg=source.configuration if isinstance(source.configuration,dict) else {}
+        hosts=cfg.get("allowed_hosts")
+        if not isinstance(hosts,list) or not hosts or any(not isinstance(h,str) or not h for h in hosts):
+            missing.append("configuration.allowed_hosts is missing or empty")
+        else:
+            try:validate_url(source.url,hosts)
+            except Exception as e:missing.append(f"source URL is refused by its own policy: {e}")
+        fingerprint=str(cfg.get("signing_key") or "").replace(":","")
+        if not re.fullmatch(r"[0-9a-fA-F]{64}",fingerprint):
+            missing.append("configuration.signing_key must be a 64 hex SHA-256 fingerprint")
+        if source.kind=="github-releases" and not cfg.get("package"):
+            missing.append("configuration.package is required for github-releases sources")
+        return missing
+    @classmethod
     def validate(cls,source):
         if source.kind not in cls.KINDS:raise SourceConfigurationError(f"unsupported source kind: {source.kind}")
         if not source.source_id or not re.fullmatch(r"[A-Za-z0-9_.:/-]{1,180}",source.source_id):raise SourceConfigurationError("invalid source_id")
@@ -40,9 +71,8 @@ class SourceRegistry:
         try:validate_url(source.url,hosts)
         except Exception as e:raise SourceConfigurationError(f"unsafe source URL: {e}") from e
         if source.enabled:
-            fingerprint=source.configuration.get("signing_key","").replace(":","")
-            if not re.fullmatch(r"[0-9a-fA-F]{64}",fingerprint):raise SourceConfigurationError("enabled sources require trusted signing_key SHA-256 fingerprint")
-            if source.kind=="github-releases" and not source.configuration.get("package"):raise SourceConfigurationError("enabled GitHub Releases sources require package")
+            missing=cls.trust_material_missing(source)
+            if missing:raise SourceConfigurationError("; ".join(missing))
         return source
     def load(self,path,update_state=False):
         sources=self.parse_file(path)

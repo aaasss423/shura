@@ -15,7 +15,7 @@ class Scheduler:
             self.store.transition(sid,SourceState.ACTIVE,"operator resumed dead source");self.store.event(sid,"retry_reset",{"reason":"operator resumed dead source"})
         elif s.state in (SourceState.PAUSED,SourceState.RETRY_LATER):self.store.transition(sid,SourceState.ACTIVE,"manual retry")
 
-    def serve(self,coordinator,interval_seconds=900,stop_event=None,rechecker=None,recheck_limit=250,processor=None,max_downloads=250,notifier=None,discovery=None,discover_limit=250):
+    def serve(self,coordinator,interval_seconds=900,stop_event=None,rechecker=None,recheck_limit=250,processor=None,max_downloads=250,notifier=None,discovery=None,discover_limit=250,site_discovery=None,site_finders=()):
         """Run due-source scans until stopped. Persistent timestamps prevent unnecessary polling.
 
         With a CandidateProcessor supplied, every candidate the crawl discovers is driven
@@ -38,6 +38,13 @@ class Scheduler:
                         if notifier:notifier.send("Shura discovery query failed: "+str(failure.get("error")))
                 except Exception as e:            # noqa: BLE001 - discovery must not stop the loop
                     self.store.event("discovery","discovery_pass_failed",{"reason":str(e)})
+            if site_discovery is not None and site_finders:
+                try:
+                    for proposal in site_discovery.discover(site_finders):
+                        if notifier:notifier.send("Shura Arabic site proposed for review: "
+                            +str(proposal.get("domain")))
+                except Exception as e:            # noqa: BLE001 - never stop the loop
+                    self.store.event("discovery","site_pass_failed",{"reason":str(e)})
             due=self.due(limit=coordinator.max_sources)
             candidates=[]
             if due:candidates,_=coordinator.run({s.source_id for s in due})

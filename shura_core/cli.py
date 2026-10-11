@@ -18,6 +18,7 @@ def main(argv=None):
  q=sub.add_parser("crawl");q.add_argument("--source-id",action="append");q.add_argument("--config",default="sources.json");q.add_argument("--max-sources",type=int,default=250);q.add_argument("--max-downloads",type=int,default=250)
  q=sub.add_parser("publish");q.add_argument("--repo",default=os.getenv("SHURA_REPO_DIR","repo"));q.add_argument("--stage",action="store_true");q.add_argument("--release",action="store_true")
  q=sub.add_parser("discover");q.add_argument("--limit",type=int,default=250)
+ q=sub.add_parser("discover-sites");q.add_argument("--seeds",default=os.getenv("SHURA_SITE_SEEDS","content-source-seeds.json"));q.add_argument("--limit",type=int,default=250)
  q=sub.add_parser("content-status");q.add_argument("--source-id")
  q=sub.add_parser("content-fetch");q.add_argument("--config",default=os.getenv("SHURA_CONTENT_SOURCES","content-sources.json"));q.add_argument("--content-dir",default=os.getenv("SHURA_CONTENT_DIR",".shura-content"));q.add_argument("--max-pages",type=int,default=50);q.add_argument("--refresh-links",action="store_true",help="re-resolve expiring page links (MangaDex@Home) before each attempt")
  q=sub.add_parser("content-import");q.add_argument("manifest");q.add_argument("--content-dir",default=os.getenv("SHURA_CONTENT_DIR",".shura-content"));q.add_argument("--config",default=os.getenv("SHURA_CONTENT_SOURCES","content-sources.json"));q.add_argument("--dry-run",action="store_true")
@@ -39,8 +40,13 @@ def main(argv=None):
  # read the state store, so it is opened lazily. Opening it here would create an
  # empty shura.db in the working directory as a side effect of even --dry-run.
  store=None
- if args.command not in ("content-fetch","content-import","content-clear"):
+ if args.command not in ("content-fetch","content-import","content-clear","discover-sites"):
   store=StateStore(args.db)
+ elif args.command=="discover-sites":
+  # discover-sites only reports: candidates and verdicts go to stdout and are
+  # never persisted, so it runs against an ephemeral store rather than the
+  # operator's shura.db. Persisting a proposal is the daemon's job.
+  store=StateStore(":memory:")
  if args.command in ("status","stop","retry","forget","accept","review-quarantine","accept-source"):
   args.source_id=args.source_id_option or args.source_id
   if not args.source_id and args.command!="pending":p.error(f"{args.command} requires SOURCE_ID or --source-id")
@@ -105,6 +111,20 @@ def main(argv=None):
     row=store.content_work(w["source_id"],w["work_id"]);chapters=store.content_chapters(w["source_id"],w["work_id"])
     out.append({**row,"source_id":w["source_id"],"chapters":chapters})
    print(json.dumps(out,ensure_ascii=False));return 0
+  elif args.command=="discover-sites":
+   from shura_core.crawler.arabic import ArabicSiteDiscovery,SeedFileFinder
+   from shura_core.security.network import SafeHTTP
+   from pathlib import Path
+   # Candidates are probed with an unconstrained client: the evaluator records
+   # why a host was refused, and nothing here can enable a source.
+   finder=SeedFileFinder(Path(args.seeds))
+   candidates=finder.find(limit=max(0,args.limit))
+   hosts=sorted({c.domain for c in candidates if c.domain})
+   discovery=ArabicSiteDiscovery(store,SafeHTTP(hosts),daily_limit=max(0,args.limit))
+   proposals=discovery.discover([finder])
+   print(json.dumps({"candidates":len(candidates),"proposed":proposals,
+    "finderErrors":discovery.errors,"cleared":0},ensure_ascii=False))
+   return 0
   elif args.command=="content-fetch":
    from shura_core.content import open_store,run_fetch_run
    from pathlib import Path
