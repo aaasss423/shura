@@ -81,6 +81,38 @@ class StateStore:
         self.transition(sid,SourceState.ACCEPTED,reason or "operator accepted source")
         s=self.get_source(sid);s.failure_reason=None;s.next_retry=None;self.save_source(s)
         self.event(sid,"source_accepted",{"operator":operator,"reason":reason})
+    def enable_source(self,sid,operator="local-operator",reason=""):
+        """Turn an accepted source on. This is the last gate before crawling.
+
+        Discovery registers proposals disabled, and acceptance records a trust
+        decision without touching that flag - deliberately, because "a person
+        reviewed this" and "this may be crawled" are different claims. Without
+        this step nothing in the system could ever make the second claim: an
+        accepted source stays ACCEPTED, is never eligible, and so is never
+        crawled, verified or published. The chain simply stopped here.
+
+        Acceptance is required first, and the trust material is checked again
+        rather than assumed from the earlier decision, so a source whose
+        configuration changed after acceptance cannot be switched on.
+        """
+        if self.is_source_quarantined(sid):raise ValueError("quarantined source cannot be enabled")
+        source=self.get_source(sid)
+        if not source:raise KeyError(sid)
+        if source.state!=SourceState.ACCEPTED:
+            raise ValueError("only an accepted source can be enabled; run: shura accept-source "+sid)
+        if source.enabled:
+            raise ValueError("source is already enabled")
+        from shura_core.sources.registry import SourceRegistry
+        missing=SourceRegistry.trust_material_missing(source)
+        if missing:
+            self.event(sid,"source_enable_refused",{"missing":missing,"operator":operator,"reason":reason})
+            raise ValueError("source cannot be enabled, missing trust material: "+"; ".join(missing))
+        source.enabled=True
+        self.save_source(source)
+        self.transition(sid,SourceState.ACTIVE,reason or "operator enabled source")
+        self.event(sid,"source_enabled",{"operator":operator,"reason":reason})
+        return self.get_source(sid)
+
     def record_attempt(self,sid,success,reason=""):
         s=self.get_source(sid)
         if not s:raise KeyError(sid)

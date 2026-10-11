@@ -129,3 +129,89 @@ class HardeningTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EnableSourceGateTests(unittest.TestCase):
+    """Enabling a source is a separate, gated step after acceptance."""
+
+    def make(self, **cfg):
+        from shura_core.models import Source, SourceState
+        configuration = {"allowed_hosts": ["ext.example"], "package": "org.example.ext",
+                         "signing_key": "a" * 64}
+        configuration.update(cfg)
+        self.store.add_source(Source(
+            "s1", "fixture", "https://ext.example/apk", "index", "ar",
+            enabled=False, state=SourceState.PAUSED, configuration=configuration))
+        return "s1"
+
+    def setUp(self):
+        import tempfile
+        from shura_core.state import StateStore
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = StateStore(Path(self.tmp.name) / "s.db")
+        self.addCleanup(self.store.close)
+        self.addCleanup(self.tmp.cleanup)
+
+    def test_a_discovered_source_cannot_be_enabled_before_it_is_accepted(self):
+        self.make()
+        with self.assertRaises(ValueError):
+            self.store.enable_source("s1")
+        self.assertFalse(self.store.get_source("s1").enabled)
+        self.assertEqual(self.store.db.execute(
+            "SELECT COUNT(*) FROM history WHERE event='source_enabled'").fetchone()[0], 0)
+
+    def test_acceptance_alone_does_not_enable(self):
+        self.make()
+        self.store.accept_source("s1", reason="reviewed")
+        self.assertFalse(self.store.get_source("s1").enabled,
+                         "acceptance is a trust decision, not permission to crawl")
+
+    def test_enabling_after_acceptance_works_and_is_recorded(self):
+        self.make()
+        self.store.accept_source("s1", reason="reviewed")
+        source = self.store.enable_source("s1", operator="ops", reason="approved")
+        self.assertTrue(source.enabled)
+        self.assertEqual(source.state.value, "ACTIVE")
+        self.assertEqual(self.store.db.execute(
+            "SELECT COUNT(*) FROM history WHERE event='source_enabled'").fetchone()[0], 1)
+
+    def test_trust_material_is_rechecked_at_enable_time(self):
+        self.make(signing_key="")
+        with self.assertRaises(ValueError):
+            self.store.accept_source("s1")
+        with self.assertRaises(ValueError):
+            self.store.enable_source("s1")
+        self.assertFalse(self.store.get_source("s1").enabled)
+
+    def test_a_source_that_lost_its_trust_material_after_acceptance_is_refused(self):
+        self.make()
+        self.store.accept_source("s1", reason="reviewed")
+        source = self.store.get_source("s1")
+        source.configuration["signing_key"] = ""
+        self.store.save_source(source)
+        with self.assertRaises(ValueError):
+            self.store.enable_source("s1")
+        self.assertFalse(self.store.get_source("s1").enabled,
+                         "the earlier decision does not survive a changed configuration")
+        self.assertEqual(self.store.db.execute(
+            "SELECT COUNT(*) FROM history WHERE event='source_enable_refused'").fetchone()[0],
+            1)
+
+    def test_a_quarantined_source_can_neither_be_accepted_nor_enabled(self):
+        sid = self.make()
+        from shura_core.models import Candidate
+        self.store.quarantine_item(
+            Candidate(sid, "org.example.ext", "1.0", "https://ext.example/a.apk"),
+            "malware detected", digest="sha256:deadbeef")
+        with self.assertRaises(ValueError):
+            self.store.accept_source(sid)
+        with self.assertRaises(ValueError):
+            self.store.enable_source(sid)
+        self.assertFalse(self.store.get_source(sid).enabled)
+
+    def test_enabling_twice_is_refused(self):
+        self.make()
+        self.store.accept_source("s1", reason="reviewed")
+        self.store.enable_source("s1")
+        with self.assertRaises(ValueError):
+            self.store.enable_source("s1")

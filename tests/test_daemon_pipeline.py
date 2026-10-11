@@ -22,7 +22,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from shura_core.models import Candidate, Source
+from shura_core.models import Candidate, Source, SourceState
 from shura_core.publishing.repository import RepositoryPublisher
 from shura_core.scheduling import Scheduler
 from shura_core.security.artifacts import ScanResult, ScanVerdict
@@ -435,3 +435,147 @@ class DaemonPipelineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class DiscoveredSourceToPublishTests(unittest.TestCase):
+    """A discovered proposal must be able to reach publication.
+
+    Discovery registers proposals *disabled*, and acceptance records a trust
+    decision without touching that flag. Those are two separate claims, which is
+    right - but it meant nothing in the system could ever make the second one,
+    so an accepted source stayed ineligible, was never crawled, and the chain
+    to verification and publication simply ended. This walks the whole chain.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        cls.port = cls.server.server_port
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+        cls.base = f"http://127.0.0.1:{cls.port}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.thread.join()
+
+    def setUp(self):
+        FakeCrawler.base = self.base
+        FakeCrawler.versions = ("1.0",)
+        OneShot.calls = 0
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.store = StateStore(self.root / "s.db")
+        self.addCleanup(self.store.close)
+        self.addCleanup(self.tmp.cleanup)
+
+    def http_factory(self):
+        kw = dict(https_only=False, allow_nonstandard_ports=True, allow_private_hosts=True)
+        return lambda hosts, *a, **k: SafeHTTP(hosts, *a, **k, **kw)
+
+    def processor(self):
+        from shura_core.pipeline import CandidateProcessor
+        return CandidateProcessor(
+            self.store, artifact_dir=str(self.root / "artifacts"),
+            scanner=CleanScanner(), malware_scanner=CleanScanner(),
+            expected_hosts={"127.0.0.1"}, http_factory=self.http_factory(),
+            url_validator=lambda url, hosts: validate_url(
+                url, hosts, https_only=False, allow_nonstandard_ports=True,
+                allow_private_hosts=True))
+
+    def register_discovered(self):
+        """A source exactly as discovery leaves it: disabled and untrusted."""
+        from shura_core.models import Source, SourceState
+        # The source URL is the public one an operator would really list, because
+        # acceptance re-validates it under the strict network policy (https, public
+        # host, standard port). The fixture server is only how the crawl is faked.
+        source = Source("s1", "fixture", "https://ext.example/apk", "index", "ar",
+                        enabled=False, state=SourceState.PAUSED,
+                        configuration={"allowed_hosts": ["ext.example", "127.0.0.1"],
+                                       "package": "org.example.ext", "signing_key": CERT})
+        self.store.add_source(source)
+        return source.source_id
+
+    def run_pass(self, processor):
+        from shura_core.coordinator import CrawlCoordinator
+        import shura_core.coordinator as C
+        saved = {n: getattr(C, n) for n in
+                 ("IndexCrawler", "GitHubReleasesCrawler", "HtmlListingCrawler")}
+        for n in saved:
+            setattr(C, n, FakeCrawler)
+        try:
+            # OneShot admits exactly one pass, so it is reset before each call:
+            # this test runs the cycle several times over.
+            OneShot.calls = 0
+            coord = CrawlCoordinator(self.store, max_sources=10)
+            Scheduler(self.store).serve(coord, 1, OneShot(), processor=processor,
+                                       max_downloads=10)
+        finally:
+            for n, v in saved.items():
+                setattr(C, n, v)
+
+    def stages(self):
+        return {c["identity"]: c["stage"] for c in self.store.pending()}
+
+    def test_a_discovered_source_reaches_verification_and_publication(self):
+        sid = self.register_discovered()
+
+        # 1. discovered: disabled, so nothing crawls it.
+        self.run_pass(self.processor())
+        self.assertEqual(self.stages(), {}, "a disabled source must not be crawled")
+        self.assertEqual(self.store.published(), [])
+
+        # 2. enablement is refused before acceptance.
+        with self.assertRaises(ValueError):
+            self.store.enable_source(sid)
+
+        # 3. acceptance records the trust decision but still does not enable.
+        self.store.accept_source(sid, reason="operator reviewed")
+        self.assertFalse(self.store.get_source(sid).enabled,
+                         "acceptance alone must not turn the crawl on")
+        self.run_pass(self.processor())
+        self.assertEqual(self.stages(), {}, "still not crawled, because still disabled")
+
+        # 4. the explicit enable is what makes it eligible.
+        source = self.store.enable_source(sid, reason="operator approved")
+        self.assertTrue(source.enabled)
+        self.assertIs(source.state, SourceState.ACTIVE)
+
+        # 5. now it is crawled and verified by the real pipeline.
+        self.run_pass(self.processor())
+        self.assertEqual(self.stages()["org.example.ext|1.0"], "security-passed")
+
+        # 6. and only the accepted candidate is published.
+        self.store.accept_pending(sid, "org.example.ext|1.0")
+        repo = self.root / "repo"
+        result = RepositoryPublisher(self.store, repo).publish(release=True)
+        self.assertEqual(result["published"], 1)
+        self.assertTrue((repo / "index.pb").is_file())
+
+    def test_a_discovered_source_without_trust_material_cannot_be_enabled(self):
+        from shura_core.models import Source, SourceState
+        self.store.add_source(Source("s2", "no-trust", "https://notrust.example/apk",
+                                     "index", "ar", enabled=False,
+                                     state=SourceState.PAUSED,
+                                     configuration={"allowed_hosts": ["notrust.example"]}))
+        with self.assertRaises(ValueError):
+            self.store.accept_source("s2")   # refused: there is no trust to accept
+        with self.assertRaises(ValueError):
+            self.store.enable_source("s2", reason="trying anyway")
+        self.assertFalse(self.store.get_source("s2").enabled)
+
+    def test_disabling_a_source_stops_it_being_crawled(self):
+        sid = self.register_discovered()
+        self.store.accept_source(sid, reason="ok")
+        self.store.enable_source(sid, reason="ok")
+        self.run_pass(self.processor())
+        self.assertIn("org.example.ext|1.0", self.stages())
+        self.store.pending()  # nothing else to do
+        source = self.store.get_source(sid)
+        source.enabled = False
+        self.store.save_source(source)
+        self.store.transition(sid, SourceState.PAUSED, "operator disabled")
+        self.store.db.execute("DELETE FROM pending")
+        self.store.db.commit()
+        self.run_pass(self.processor())
+        self.assertEqual(self.stages(), {}, "a disabled source is not crawled again")

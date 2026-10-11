@@ -46,6 +46,8 @@ def main(argv=None):
   if cmd=="review-quarantine":q.add_argument("--reason",default="");q.add_argument("--resolve",action="store_true")
   if cmd=="retry":q.add_argument("--resume-dead",action="store_true")
   if cmd=="accept-source":q.add_argument("--reason",default="")
+ if cmd=="enable-source":q.add_argument("--reason",default="")
+ if cmd=="disable-source":q.add_argument("--reason",default="")
  args=p.parse_args(argv)
  # The content commands own a separate database (content-dir/content.db) and never
  # read the state store, so it is opened lazily. Opening it here would create an
@@ -104,6 +106,22 @@ def main(argv=None):
    return 0
   elif args.command=="accept-source":
    store.accept_source(args.source_id,reason=args.reason);TelegramNotifier(os.getenv("SHURA_TELEGRAM_TOKEN"),os.getenv("SHURA_TELEGRAM_CHAT_ID")).send(f"Shura source accepted: {args.source_id}");return 0
+  elif args.command=="enable-source":
+   # Separate from acceptance on purpose: acceptance is a trust decision, this
+   # is the permission to crawl, and only an accepted source can reach it.
+   try:source=store.enable_source(args.source_id,reason=args.reason)
+   except (ValueError,KeyError) as e:print(str(e),file=sys.stderr);return 2
+   TelegramNotifier(os.getenv("SHURA_TELEGRAM_TOKEN"),os.getenv("SHURA_TELEGRAM_CHAT_ID")).send(f"Shura source enabled: {args.source_id}")
+   print(json.dumps({"source_id":source.source_id,"state":source.state.value,
+    "enabled":source.enabled}));return 0
+  elif args.command=="disable-source":
+   source=store.get_source(args.source_id)
+   if not source:print("source not found",file=sys.stderr);return 2
+   if not source.enabled:print("source is already disabled",file=sys.stderr);return 2
+   source.enabled=False;store.save_source(source)
+   if source.state==SourceState.ACTIVE:store.transition(args.source_id,SourceState.PAUSED,args.reason or "operator disabled source")
+   store.event(args.source_id,"source_disabled",{"reason":args.reason})
+   print(json.dumps({"source_id":args.source_id,"state":source.state.value,"enabled":False}));return 0
   elif args.command=="accept":store.accept_pending(args.source_id,args.identity);return 0
   elif args.command=="review-quarantine":store.review_quarantine(args.source_id,args.identity,reason=args.reason,resolve=args.resolve);return 0
   elif args.command=="pending":
