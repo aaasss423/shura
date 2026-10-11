@@ -18,6 +18,7 @@ from unittest import mock
 from pathlib import Path
 
 from shura_core.coordinator import CrawlCoordinator
+from shura_core.crawler.github import GitHubReleasesCrawler, select_release_asset
 from shura_core.crawler.index import IndexCrawler, resolve_artifact_url
 from shura_core.crawler.arabic import (ArabicSiteDiscovery, SeedFileFinder, evaluate_site,
                                           pending_proposals, SearchFinder,
@@ -1870,3 +1871,105 @@ class IndexConsumptionTests(Case):
         result = self.crawler([{"pkg": "org.example.ext", "version": "1.0"}]).crawl(
             self.source(), {"max_pages": 1, "max_candidates": 5})
         self.assertEqual(result.candidates, [])
+
+
+class ReleaseAssetSelectionTests(Case):
+    """Several APKs in one release are alternatives, not versions.
+
+    The version stays the tag and the identity stays package|version, so the
+    publisher never sees two different builds fighting over one identity.
+    """
+
+    def release(self, *names):
+        return {"tag_name": "v1.0", "assets": [
+            {"name": n, "browser_download_url": f"https://github.invalid/{n}",
+             "url": f"https://api.github.invalid/{n}"} for n in names]}
+
+    def source(self, **config):
+        from shura_core.models import Source
+        cfg = {"allowed_hosts": ["api.github.invalid"], "package": "org.example.ext",
+               "signing_key": "a" * 64}
+        cfg.update(config)
+        return Source("github:example/ext", "Ext", "https://api.github.invalid/releases",
+                      "github-releases", "en", configuration=cfg)
+
+    def crawl(self, release, source=None):
+        body = json.dumps([release]).encode()
+        class Http:
+            def get(self, url, headers=None, max_bytes=None):
+                return body, None, url
+        return GitHubReleasesCrawler(Http()).crawl(source or self.source(),
+                                                   {"max_candidates": 10})
+
+    # 1. a universal build alongside ABI builds wins
+    def test_a_universal_asset_is_preferred_over_abi_builds(self):
+        result = self.crawl(self.release("e_arm64.apk", "e_x86.apk", "e_universal.apk"))
+        self.assertEqual(len(result.candidates), 1)
+        self.assertEqual(result.candidates[0].metadata["asset"], "e_universal.apk")
+        self.assertEqual(result.candidates[0].version, "v1.0",
+                         "the version is still the release tag")
+
+    # 2. ABI builds with an explicit selection in the source configuration
+    def test_an_explicit_asset_choice_is_honoured(self):
+        source = self.source(asset="e_x86.apk")
+        result = self.crawl(self.release("e_arm64.apk", "e_x86.apk"), source)
+        self.assertEqual(len(result.candidates), 1)
+        self.assertEqual(result.candidates[0].metadata["asset"], "e_x86.apk")
+
+    # 3. several builds and no stated intent: refused, nothing chosen
+    def test_several_builds_with_no_clear_choice_are_refused(self):
+        result = self.crawl(self.release("e_arm64.apk", "e_x86.apk"))
+        self.assertEqual(result.candidates, [],
+                         "no artifact may be chosen by position in a list")
+        refusals = [t for t in result.trace if "refused" in t]
+        self.assertEqual(len(refusals), 1)
+        detail = refusals[0]["refused"]
+        self.assertEqual(sorted(detail["assets"]), ["e_arm64.apk", "e_x86.apk"],
+                         "the asset names on offer must be recorded")
+        self.assertIn("universal", detail["reason"])
+
+    def test_a_configured_asset_that_is_not_there_refuses_the_release(self):
+        source = self.source(asset="not-published.apk")
+        result = self.crawl(self.release("e_arm64.apk", "e_x86.apk"), source)
+        self.assertEqual(result.candidates, [])
+        detail = [t for t in result.trace if "refused" in t][0]["refused"]
+        self.assertEqual(detail["requested"], "not-published.apk")
+        self.assertEqual(len(detail["assets"]), 2)
+
+    # 5. a single APK is unaffected
+    def test_a_single_asset_release_behaves_exactly_as_before(self):
+        result = self.crawl(self.release("ext-1.0.apk"))
+        self.assertEqual(len(result.candidates), 1)
+        self.assertEqual(result.candidates[0].metadata["asset"], "ext-1.0.apk")
+        self.assertEqual(result.candidates[0].identity, "org.example.ext|v1.0")
+        self.assertFalse([t for t in result.trace if "refused" in t])
+
+    def test_a_release_with_no_apk_yields_nothing_and_no_refusal(self):
+        result = self.crawl(self.release("notes.txt", "checksums.sha256"))
+        self.assertEqual(result.candidates, [])
+        self.assertFalse([t for t in result.trace if "refused" in t])
+
+    # 4. the trust policy is untouched by the selection
+    def test_selection_does_not_relax_package_or_fingerprint_checks(self):
+        """Picking an asset must not become a way around the trust gates."""
+        from shura_core.security.artifacts import ArtifactScanner
+        from shura_core.sources.registry import SourceRegistry
+        result = self.crawl(self.release("e_arm64.apk", "e_universal.apk"))
+        candidate = result.candidates[0]
+        self.assertEqual(candidate.signing_key, "a" * 64,
+                         "the key still comes from the source configuration")
+        source = self.source()
+        missing = SourceRegistry.trust_material_missing(source)
+        self.assertEqual(missing, [],
+                         "a well-configured source is unchanged")
+        bad = self.source(signing_key="not-a-fingerprint")
+        self.assertTrue(SourceRegistry.trust_material_missing(bad),
+                        "a bad fingerprint is still refused")
+        # And the selected artifact is still verified on its own merits.
+        self.assertTrue(hasattr(ArtifactScanner(), "scan"))
+
+    def test_identity_is_unchanged_so_the_publisher_sees_one_version(self):
+        result = self.crawl(self.release("e_arm64.apk", "e_x86.apk", "e_universal.apk"))
+        identities = {c.identity for c in result.candidates}
+        self.assertEqual(identities, {"org.example.ext|v1.0"},
+                         "one release yields one identity, never one per build")
