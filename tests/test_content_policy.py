@@ -5,6 +5,7 @@ classification that never runs in `CandidateProcessor.process` cannot pass them.
 """
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -209,7 +210,8 @@ class PublisherContentGateTests(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.store = StateStore(Path(self.tmp.name) / "s.db")
+        self.db = Path(self.tmp.name) / "s.db"
+        self.store = StateStore(self.db)
         self.repo = Path(self.tmp.name) / "repo"
         self.store.add_source(Source("s1", "fixture", "https://example.org/index.json", "index", "ar",
                                      configuration={"allowed_hosts": ["example.org"],
@@ -274,15 +276,39 @@ class PublisherContentGateTests(unittest.TestCase):
             self._publish()
         self.assertIn("UNKNOWN", str(ctx.exception))
 
-    def test_mixed_is_refused_without_provable_protection(self):
+    def test_mixed_is_refused_without_any_protection(self):
         self._stage(dict(self._safe(), classification="MIXED"))
         with self.assertRaises(PublishRefused):
             self._publish()
 
-    def test_mixed_publishes_only_with_a_recorded_approval(self):
+    def test_mixed_is_refused_even_with_a_textual_approval(self):
+        """The approval escape hatch is gone.
+
+        A recorded operator approval is text in the metadata. It cannot show that
+        the forbidden items are excluded from what the client can discover, open
+        and download, so it must not buy publication.
+        """
         self._stage(dict(self._safe(), classification="MIXED",
                          review_approved_by="operator-2026-10-10"))
-        self.assertEqual(self._publish()["published"], 1)
+        with self.assertRaises(PublishRefused) as ctx:
+            self._publish()
+        self.assertIn("MIXED", str(ctx.exception))
+        self.assertFalse((self.repo / "index.json").exists())
+
+    def test_mixed_approval_cannot_be_reached_through_the_store(self):
+        """Writing the approval directly into the record does not help either."""
+        candidate = self._stage(dict(self._safe(), classification="MIXED"))
+        store = StateStore(self.db)
+        store.db.execute("UPDATE pending SET candidate=? WHERE identity=?",
+                         (json.dumps({**candidate.__dict__,
+                                      "metadata": {**candidate.metadata,
+                                                   "_content_policy": {"scope": "source",
+                                                                       "classification": "MIXED",
+                                                                       "review_approved_by": "root"}}}), candidate.identity))
+        store.db.commit()
+        store.close()
+        with self.assertRaises(PublishRefused):
+            self._publish()
 
     def test_policy_changed_after_approval_invalidates_it(self):
         decision = self._safe()

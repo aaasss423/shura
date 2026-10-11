@@ -1,2 +1,2 @@
-from .network import SafeHTTP, NetworkPolicyError, validate_url
+from .network import SafeHTTP, NetworkPolicyError, ResponseTooLarge, validate_url
 from .artifacts import ArtifactScanner, ScanVerdict

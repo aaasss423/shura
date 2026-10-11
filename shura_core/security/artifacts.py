@@ -57,7 +57,7 @@ class ArtifactScanner:
                 match=re.search(r"^package: name='([^']+)'",out.stdout,re.M)
                 package=match.group(1) if match else None
             except subprocess.TimeoutExpired:return ScanResult(ScanVerdict.SUSPICIOUS,digest,size,"manifest package parsing timed out")
-        if expected_package and not package:return ScanResult(ScanVerdict.SUSPICIOUS,digest,size,"aapt unavailable; APK package cannot be verified")
+        if expected_package and not package:return ScanResult(ScanVerdict.SUSPICIOUS,digest,size,"APK manifest package could not be read; package cannot be verified")
         if expected_package and package!=expected_package:return ScanResult(ScanVerdict.REJECTED,digest,size,"APK package mismatch",package=package)
         cert=None;tool=shutil.which("apksigner")
         if tool:

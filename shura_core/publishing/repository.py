@@ -184,13 +184,16 @@ class RepositoryPublisher:
         direct call to ``publish`` - or an item promoted by some other route -
         cannot put unclassified or explicit content into the public repository.
 
-        Refuses: no recorded decision, NSFW, QUARANTINED, MIXED/UNKNOWN without a
-        recorded operator approval, and any decision whose policy fingerprint no
-        longer matches the source's current configuration.
+        Refuses: no recorded decision, NSFW, QUARANTINED, MIXED, UNKNOWN, and any
+        decision whose policy fingerprint no longer matches the source's current
+        configuration. There is deliberately no approval escape hatch.
         """
         from shura_core.quality.adult import SourceClass
 
         publishable = {SourceClass.SAFE.value, SourceClass.MATURE.value}
+        # MIXED is absent from `publishable` and is never granted by an approval
+        # field: approval is text, not proof that forbidden items are excluded
+        # from what the client can reach.
         for item in items:
             identity = item.get("identity", "unknown")
             decision = (item.get("metadata", {}) or {}).get("_content_policy")
@@ -206,12 +209,9 @@ class RepositoryPublisher:
                     "explicit content is not admitted to the public repository"
                 )
             if classification not in publishable:
-                approved = str(decision.get("review_approved_by") or "")
-                if classification == SourceClass.MIXED.value and approved:
-                    continue
                 raise PublishRefused(
-                    f"refusing to publish: {identity} is classified {classification or 'UNKNOWN'} "
-                    "with no recorded operator review"
+                    f"refusing to publish: {identity} is classified {classification or 'UNKNOWN'}; "
+                    "only SAFE or MATURE may reach the public repository"
                 )
             recorded = decision.get("policy_fingerprint")
             source = self.store.get_source(item.get("source_id", ""))

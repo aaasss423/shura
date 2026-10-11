@@ -2,3 +2,14 @@
 # suite; without Pillow, tests/test_protected_tile_decode.py fails at import and
 # the whole run exits 1.
 Pillow>=10.0.0
+
+# Test-only, for tests/test_content_https.py. That suite generates a throwaway
+# self-signed certificate at runtime (SAN IP:127.0.0.1) so the HTTPS path can be
+# exercised with certificate and hostname verification left ON. Neither the
+# certificate nor its private key is ever written to the repository - they live
+# in a temp dir for the duration of the run.
+# Floor 46 is the first line with wheels for CPython 3.14 (aarch64-musl, the
+# device this suite is developed on); the ceiling keeps a future major from
+# changing verification behaviour under us. Production keeps `dependencies = []`
+# in pyproject.toml and never imports this.
+cryptography>=46,<51

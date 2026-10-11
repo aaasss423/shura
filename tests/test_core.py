@@ -21,6 +21,20 @@ from shura_core.security.artifacts import ArtifactScanner,ScanVerdict
 from unittest.mock import patch
 
 APK_BODY=b""
+def _sandbox(bin_dir):
+    """Explicit PATH for artifact-scanner tests.
+
+    ArtifactScanner finds aapt2/aapt/apksigner through shutil.which on the ambient
+    PATH. Installing a stub for one of them is not enough if a real Android SDK
+    build-tools directory is also reachable - the real binary wins by being found
+    too, and the fixture gets a verdict it was never written against. The tests
+    declare their tool implementations instead of hoping none else exist.
+    """
+    previous=os.environ.get("PATH","")
+    os.environ["PATH"]=os.pathsep.join([str(bin_dir),os.defpath])
+    return previous
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path=="/index-redirect":self.send_response(302);self.send_header("Location","/index");self.end_headers();return
@@ -136,7 +150,7 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(len(candidates),1);self.assertEqual(counters["sourcesAccounted"],1);self.assertTrue(any("crawl success" in x for x in recorder.messages))
         tool=Path(self.tmp.name)/"apksigner";tool.write_text("#!/bin/sh\nprintf 'Signer #1 certificate SHA-256 digest: "+"a"*64+"\n'\n") ;tool.chmod(tool.stat().st_mode|stat.S_IXUSR)
         aapt=Path(self.tmp.name)/"aapt";aapt.write_text("#!/bin/sh\nprintf '%s\\n' \"package: name='org.example.ext' versionCode=1\"\n");aapt.chmod(aapt.stat().st_mode|stat.S_IXUSR)
-        old_path=os.environ.get("PATH","");os.environ["PATH"]=str(self.tmp.name)+os.pathsep+old_path
+        old_path=_sandbox(self.tmp.name)
         try:
             processor=CandidateProcessor(self.store,Path(self.tmp.name)/"artifacts",expected_hosts={"127.0.0.1"},http_factory=http_factory,url_validator=lambda url,hosts: __import__("shura_core.security.network",fromlist=["validate_url"]).validate_url(url,hosts,https_only=False,allow_nonstandard_ports=True,allow_private_hosts=True))
             result=processor.process(candidates[0]);self.assertEqual(result["verdict"],"ACCEPTED",result);self.assertGreaterEqual(result["quality_score"],0);self.store.accept_pending(candidates[0].source_id,candidates[0].identity)
@@ -194,7 +208,7 @@ class CoreTests(unittest.TestCase):
         apk=Path(self.tmp.name)/"candidate.apk";apk.write_bytes(data.getvalue())
         aapt=Path(self.tmp.name)/"aapt";aapt.write_text("#!/bin/sh\nprintf '%s\\n' \"package: name='org.example.ext' versionCode=1\"\n");aapt.chmod(aapt.stat().st_mode|stat.S_IXUSR)
         signer=Path(self.tmp.name)/"apksigner";signer.write_text("#!/bin/sh\nprintf 'Signer #1 certificate SHA-256 digest: "+"b"*64+"\n'\n");signer.chmod(signer.stat().st_mode|stat.S_IXUSR)
-        old_path=os.environ.get("PATH","");os.environ["PATH"]=str(self.tmp.name)+os.pathsep+old_path
+        old_path=_sandbox(self.tmp.name)
         try:
             scanner=ArtifactScanner(expected_certificate="a"*64)
             self.assertEqual(scanner.scan(apk,expected_package="org.other.ext").verdict,ScanVerdict.REJECTED)

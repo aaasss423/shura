@@ -19,6 +19,11 @@ def main(argv=None):
  q=sub.add_parser("publish");q.add_argument("--repo",default=os.getenv("SHURA_REPO_DIR","repo"));q.add_argument("--stage",action="store_true");q.add_argument("--release",action="store_true")
  q=sub.add_parser("discover");q.add_argument("--limit",type=int,default=250)
  q=sub.add_parser("content-status");q.add_argument("--source-id")
+ q=sub.add_parser("content-fetch");q.add_argument("--config",default=os.getenv("SHURA_CONTENT_SOURCES","content-sources.json"));q.add_argument("--content-dir",default=os.getenv("SHURA_CONTENT_DIR",".shura-content"));q.add_argument("--max-pages",type=int,default=50);q.add_argument("--refresh-links",action="store_true",help="re-resolve expiring page links (MangaDex@Home) before each attempt")
+ q=sub.add_parser("content-import");q.add_argument("manifest");q.add_argument("--content-dir",default=os.getenv("SHURA_CONTENT_DIR",".shura-content"));q.add_argument("--config",default=os.getenv("SHURA_CONTENT_SOURCES","content-sources.json"));q.add_argument("--dry-run",action="store_true")
+ q=sub.add_parser("content-discover");q.add_argument("--content-dir",default=os.getenv("SHURA_CONTENT_DIR",".shura-content"));q.add_argument("--config",default=os.getenv("SHURA_CONTENT_SOURCES","content-sources.json"));q.add_argument("--language",default="ar");q.add_argument("--works",type=int,default=5);q.add_argument("--chapters-per-work",type=int,default=2);q.add_argument("--pages-per-chapter",type=int,default=5);q.add_argument("--dry-run",action="store_true")
+ q=sub.add_parser("content-cycle");q.add_argument("--content-dir",default=os.getenv("SHURA_CONTENT_DIR",".shura-content"));q.add_argument("--config",default=os.getenv("SHURA_CONTENT_SOURCES","content-sources.json"));q.add_argument("--language",default="ar");q.add_argument("--works",type=int,default=5);q.add_argument("--chapters-per-work",type=int,default=2);q.add_argument("--pages-per-chapter",type=int,default=5);q.add_argument("--max-pages",type=int,default=50);q.add_argument("--discover-only",action="store_true",help="stop after import; fetch nothing")
+ q=sub.add_parser("content-clear",description='Record an operator clearance decision. This command performs NO authentication: --decided-by is an attributed label written into the record, not a verified identity. Anyone who can run this command can record a decision.');q.add_argument("--content-dir",default=os.getenv("SHURA_CONTENT_DIR",".shura-content"));q.add_argument("--source-id",required=True);q.add_argument("--work-id",required=True);q.add_argument("--chapter-id",required=True);q.add_argument("--decision",required=True,choices=("CLEARED","WITHHELD","PENDING_REVIEW"));q.add_argument("--decided-by",required=True);q.add_argument("--evidence",default="");q.add_argument("--policy-version",default="manual")
  q=sub.add_parser("recheck-content");q.add_argument("--limit",type=int,default=250)
  q=sub.add_parser("security-preflight")
  for cmd in ("status","stop","retry","forget","accept","pending","review-quarantine","accept-source"):
@@ -29,7 +34,13 @@ def main(argv=None):
   if cmd=="review-quarantine":q.add_argument("--reason",default="");q.add_argument("--resolve",action="store_true")
   if cmd=="retry":q.add_argument("--resume-dead",action="store_true")
   if cmd=="accept-source":q.add_argument("--reason",default="")
- args=p.parse_args(argv);store=StateStore(args.db)
+ args=p.parse_args(argv)
+ # The content commands own a separate database (content-dir/content.db) and never
+ # read the state store, so it is opened lazily. Opening it here would create an
+ # empty shura.db in the working directory as a side effect of even --dry-run.
+ store=None
+ if args.command not in ("content-fetch","content-import","content-clear"):
+  store=StateStore(args.db)
  if args.command in ("status","stop","retry","forget","accept","review-quarantine","accept-source"):
   args.source_id=args.source_id_option or args.source_id
   if not args.source_id and args.command!="pending":p.error(f"{args.command} requires SOURCE_ID or --source-id")
@@ -94,6 +105,115 @@ def main(argv=None):
     row=store.content_work(w["source_id"],w["work_id"]);chapters=store.content_chapters(w["source_id"],w["work_id"])
     out.append({**row,"source_id":w["source_id"],"chapters":chapters})
    print(json.dumps(out,ensure_ascii=False));return 0
+  elif args.command=="content-fetch":
+   from shura_core.content import open_store,run_fetch_run
+   from pathlib import Path
+   # The content store is its own database, opened read/write for the lock and the
+   # page ledger. Activation comes from the local JSON config only - nothing here
+   # consults the sources tables in shura.db to decide what may be fetched.
+   content_dir=Path(args.content_dir);content_dir.mkdir(parents=True,exist_ok=True)
+   cconn=open_store(content_dir/"content.db")
+   try:
+    resolver_factory=None
+    if getattr(args,"refresh_links",False):
+     from shura_core.content.mangadex import MangaDexLinkResolver,MangaDexSource
+     def resolver_factory(http,source_id):
+      return MangaDexLinkResolver(MangaDexSource(http,source_id=source_id),source_id=source_id)
+    report=run_fetch_run(cconn,content_dir,config_path=Path(args.config),max_pages=max(0,args.max_pages),
+     link_resolver_factory=resolver_factory)
+    print(json.dumps(report.as_dict(),ensure_ascii=False));return 0 if not report.locked_out else 5
+   finally:cconn.close()
+  elif args.command=="content-import":
+   from shura_core.content import ImportRejected,import_manifest,manifest_summary,open_store
+   from shura_core.content import load_source_config,sync_source_policy
+   from pathlib import Path
+   content_dir=Path(args.content_dir)
+   if args.dry_run:
+    # Read and report only. No directory, no database, no rows - the dry run
+    # returns before anything is created, including the content-dir itself.
+    print(json.dumps(manifest_summary(Path(args.manifest)),ensure_ascii=False));return 0
+   content_dir.mkdir(parents=True,exist_ok=True)
+   cconn=open_store(content_dir/"content.db")
+   try:
+    # Mirror content-sources.json into source_policy first. The file stays the
+    # only place activation is decided; source_policy is the local mirror the
+    # schema's foreign keys need, and sync_source_policy is its existing writer.
+    entries=load_source_config(Path(args.config))
+    synced=sync_source_policy(cconn,entries)
+    result=import_manifest(cconn,Path(args.manifest))
+    print(json.dumps({**result,"sourcesMirrored":synced},ensure_ascii=False));return 0
+   except ImportRejected as e:print(str(e),file=sys.stderr);return 2
+   finally:cconn.close()
+  elif args.command=="content-discover":
+   from shura_core.content import (DiscoveryRejected,ImportRejected,import_payload,
+    load_source_config,open_store,sync_source_policy)
+   from shura_core.content.mangadex import MangaDexSource,SOURCE_ID
+   from shura_core.security.network import SafeHTTP
+   from pathlib import Path
+   content_dir=Path(args.content_dir)
+   if args.dry_run:
+    print(json.dumps({"dryRun":True,"sourceId":SOURCE_ID,"language":args.language},ensure_ascii=False));return 0
+   content_dir.mkdir(parents=True,exist_ok=True)
+   cconn=open_store(content_dir/"content.db")
+   try:
+    entries=load_source_config(Path(args.config));sync_source_policy(cconn,entries)
+    row=cconn.execute("SELECT allowed_hosts FROM source_policy WHERE source_id=?",(SOURCE_ID,)).fetchone()
+    if row is None:
+     print(json.dumps({"error":"source not enabled in content-sources.json","sourceId":SOURCE_ID},ensure_ascii=False),file=sys.stderr);return 2
+    hosts=json.loads(row["allowed_hosts"])
+    # The API host is allowed on its own; the operator's list is for the page CDN.
+    if "api.mangadex.org" not in hosts:hosts=hosts+["api.mangadex.org"]
+    http=SafeHTTP(hosts)
+    source=MangaDexSource(http,source_id=SOURCE_ID,language_priority=(args.language,) if args.language else ())
+    manifest=source.manifest(language=args.language,works=max(0,args.works),
+     chapters_per_work=max(0,args.chapters_per_work),pages_per_chapter=max(0,args.pages_per_chapter))
+    # Discovery and import share one boundary. No clearance is written here.
+    result=import_payload(cconn,manifest)
+    print(json.dumps({**result,"discoveredWorks":len(manifest["works"]),
+     "discoveredChapters":len(manifest["chapters"]),"discoveredPages":len(manifest["pages"]),
+     "clearanceGranted":0},ensure_ascii=False));return 0
+   except (ImportRejected,DiscoveryRejected) as e:print(str(e),file=sys.stderr);return 2
+   except ValueError as e:print(str(e),file=sys.stderr);return 2
+   finally:cconn.close()
+  elif args.command=="content-cycle":
+   from shura_core.content import ImportRejected,open_store,run_content_cycle
+   from shura_core.content.mangadex import DiscoveryRejected
+   from shura_core.security.network import SafeHTTP
+   from pathlib import Path
+   content_dir=Path(args.content_dir);content_dir.mkdir(parents=True,exist_ok=True)
+   cconn=open_store(content_dir/"content.db")
+   try:
+    # The gate stays authoritative: this command cannot approve anything, so a
+    # cycle with no clearance decisions fetches nothing.
+    report=run_content_cycle(cconn,content_dir,http_factory=lambda hosts:SafeHTTP(hosts),
+     config_path=Path(args.config),language=args.language,works=max(0,args.works),
+     chapters_per_work=max(0,args.chapters_per_work),
+     pages_per_chapter=max(0,args.pages_per_chapter),max_pages=max(0,args.max_pages),
+     do_fetch=not args.discover_only,instance_id=f"pid-{os.getpid()}",host="local")
+    print(json.dumps(report.as_dict(),ensure_ascii=False))
+    return 0 if not (report.discovery_error or report.import_error) else 2
+   except (ImportRejected,DiscoveryRejected,ValueError) as e:print(str(e),file=sys.stderr);return 2
+   finally:cconn.close()
+  elif args.command=="content-clear":
+   from shura_core.content import open_store
+   from shura_core.content.store import grant_clearance
+   from pathlib import Path
+   # Clearance is an operator decision and is recorded exactly as supplied.
+   # There is no authentication on this command: --decided-by is an attributed
+   # label in the record, not a verified identity, and is required so the
+   # schema's decided_by column is never left blank.
+   content_dir=Path(args.content_dir);content_dir.mkdir(parents=True,exist_ok=True)
+   cconn=open_store(content_dir/"content.db")
+   try:
+    grant_clearance(cconn,source_id=args.source_id,ext_work_id=args.work_id,
+     ext_chapter_id=args.chapter_id,decision=args.decision,basis="operator-approval",
+     decided_by=args.decided_by,evidence=args.evidence,policy_version=args.policy_version)
+    print(json.dumps({"sourceId":args.source_id,"workId":args.work_id,
+     "chapterId":args.chapter_id,"decision":args.decision,"basis":"operator-approval",
+     "decidedBy":args.decided_by,"authentication":"none; decided_by is an attributed label"},
+     ensure_ascii=False));return 0
+   except ValueError as e:print(str(e),file=sys.stderr);return 2
+   finally:cconn.close()
   elif args.command=="recheck-content":
    from shura_core.pipeline.recheck import ManifestRechecker
    result=Scheduler(store).recheck_due_chapters(ManifestRechecker(store),limit=args.limit)
@@ -103,5 +223,6 @@ def main(argv=None):
   message=f"critical {type(e).__name__}: {e}";print(message,file=sys.stderr)
   TelegramNotifier(os.getenv("SHURA_TELEGRAM_TOKEN"),os.getenv("SHURA_TELEGRAM_CHAT_ID")).send("Shura critical error: "+message)
   return 1
- finally:store.close()
+ finally:
+  if store is not None:store.close()
 if __name__=="__main__":raise SystemExit(main())

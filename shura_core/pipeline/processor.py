@@ -79,13 +79,19 @@ class CandidateProcessor:
         if kind is SourceClass.QUARANTINED:
             return ("QUARANTINE","source is quarantined by content policy: "+"; ".join(assessment.reasons))
         if kind in (SourceClass.MIXED, SourceClass.UNKNOWN):
-            # Never an automatic accept. MIXED additionally needs a recorded,
-            # auditable review before it can ever reach the publisher.
+            # MIXED is never publishable to the public repository, and no
+            # operator field can make it so. A recorded approval is a piece of
+            # text; it cannot demonstrate that the forbidden items are excluded
+            # from what the client can discover, open and download. Until an
+            # element-level exclusion mechanism exists and is proven by an
+            # integration test, a mixed catalogue stays held for review.
             self.store.put_pending(c,"content-classification")
-            if kind is SourceClass.MIXED and policy.get("review_approved_by"):
-                c.metadata[CONTENT_DECISION_KEY]["review_approved_by"]=policy["review_approved_by"]
-                return ("ALLOW","mixed source accepted on recorded operator review by "+str(policy["review_approved_by"]))
-            return ("PENDING",f"source classified {kind.value}, operator review required: "+"; ".join(assessment.reasons))
+            reason=("source classified MIXED: a mixed catalogue is not publishable to the public "
+                    "repository until an element-level exclusion mechanism is proven; "
+                    +"; ".join(assessment.reasons))
+            if kind is SourceClass.MIXED:
+                reason="source classified MIXED: a mixed catalogue is not publishable to the public repository until an element-level exclusion mechanism is proven; "+"; ".join(assessment.reasons)
+            return ("PENDING",reason)
         return ("ALLOW","source classified "+kind.value)
 
     def _work_content_gate(self,c):
@@ -160,6 +166,11 @@ class CandidateProcessor:
             source=self.store.get_source(c.source_id)
             result=self.scanner.scan(path,expected_package=c.package,expected_certificate=source.configuration.get("signing_key"))
             if result.verdict!=ScanVerdict.CLEAN:
+                # Record the quarantine on the pending row too. Leaving it at
+                # "validated" made the ledger claim a quarantined artifact had
+                # only been validated, which is exactly the misreading that makes
+                # an operator trust a row that must never be accepted.
+                self.store.put_pending(c,"quarantined-artifact")
                 self.store.mark_processed(c.source_id,c.identity,self.store.get_source(c.source_id).configuration_fingerprint,"quarantined")
                 self.store.quarantine_item(c,result.reason,result.sha256,{"verdict":result.verdict.value,"scanner":type(self.scanner).__name__,"size":result.size});return {"verdict":"QUARANTINED","reason":result.reason,"sha256":result.sha256}
             malware=self.malware_scanner.scan(path)
@@ -173,6 +184,7 @@ class CandidateProcessor:
                     self.store.put_pending(c,"security-blocked")
                     self.store.event(c.source_id,"security_blocked",{"identity":c.identity,"reason":malware.reason,"scanner":type(self.malware_scanner).__name__})
                     return {"verdict":"PENDING","reason":"security scan unavailable: "+malware.reason,"sha256":result.sha256,"malware_verdict":malware.verdict.value}
+                self.store.put_pending(c,"quarantined-malware")
                 self.store.mark_processed(c.source_id,c.identity,fingerprint,"quarantined")
                 self.store.quarantine_item(c,malware.reason,result.sha256,{"verdict":malware.verdict.value,"scanner":type(self.malware_scanner).__name__,"size":malware.size,"artifact_sha256":result.sha256})
                 return {"verdict":"QUARANTINED","reason":malware.reason,"sha256":result.sha256,"malware_verdict":malware.verdict.value}
