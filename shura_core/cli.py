@@ -26,6 +26,9 @@ def main(argv=None):
  cs=csub.add_parser("accept");cs.add_argument("source_id");cs.add_argument("--operator",required=True);cs.add_argument("--reason",default="")
  cs=csub.add_parser("reject");cs.add_argument("source_id");cs.add_argument("--operator",required=True);cs.add_argument("--reason",required=True)
  cs=csub.add_parser("reopen");cs.add_argument("source_id");cs.add_argument("--operator",required=True);cs.add_argument("--reason",required=True)
+ cs=csub.add_parser("recheck");cs.add_argument("source_id")
+ cs=csub.add_parser("enable-fetch");cs.add_argument("source_id");cs.add_argument("--config",default=os.getenv("SHURA_CONTENT_SOURCES","content-sources.json"));cs.add_argument("--operator",required=True);cs.add_argument("--confirm-enable",action="store_true",help="required: this is the step that turns fetching on")
+ cs=csub.add_parser("disable-fetch");cs.add_argument("source_id");cs.add_argument("--config",default=os.getenv("SHURA_CONTENT_SOURCES","content-sources.json"));cs.add_argument("--operator",required=True)
  cs=csub.add_parser("add-to-config");cs.add_argument("source_id");cs.add_argument("--config",default=os.getenv("SHURA_CONTENT_SOURCES","content-sources.json"));cs.add_argument("--operator",required=True);cs.add_argument("--allow-host",action="store_true",help="required: this step names the host in the fetch trust list");cs.add_argument("--quota-bytes",type=int,default=0);cs.add_argument("--retention-days",type=int,default=7)
  q=sub.add_parser("content-status");q.add_argument("--source-id")
  q=sub.add_parser("content-fetch");q.add_argument("--config",default=os.getenv("SHURA_CONTENT_SOURCES","content-sources.json"));q.add_argument("--content-dir",default=os.getenv("SHURA_CONTENT_DIR",".shura-content"));q.add_argument("--max-pages",type=int,default=50);q.add_argument("--refresh-links",action="store_true",help="re-resolve expiring page links (MangaDex@Home) before each attempt")
@@ -123,7 +126,8 @@ def main(argv=None):
    from pathlib import Path
    from shura_core.crawler.review import (ReviewError,candidate_records,
     candidate_status,deferred_candidates,pending_candidates,record_review,reopen)
-   from shura_core.content.fetcher import upsert_source_entry
+   from shura_core.content.fetcher import upsert_source_entry, load_source_config
+   from shura_core.crawler.arabic import latest_verdict
    action=args.action
    if action=="list":
     print(json.dumps({"candidates":[
@@ -152,7 +156,73 @@ def main(argv=None):
     try:rec=reopen(store,args.source_id,operator=args.operator,reason=args.reason)
     except ReviewError as e:print(str(e),file=sys.stderr);return 2
     print(json.dumps(rec,ensure_ascii=False));return 0
+   if action=="recheck":
+    from shura_core.crawler.arabic import recheck_site
+    from shura_core.crawler.review import candidate_status
+    rows=[r for r in candidate_records(store) if r["source_id"]==args.source_id]
+    known=latest_verdict(store,args.source_id)
+    if rows:
+     domain=rows[0]["domain"]
+    elif known and known.get("domain"):
+     domain=known["domain"]
+    else:
+     print("no recorded candidate: "+args.source_id,file=sys.stderr);return 2
+    from shura_core.security.network import SafeHTTP
+    result=recheck_site(store,SafeHTTP([domain]),args.source_id)
+    if result is None:
+     print("nothing recorded to re-check for "+args.source_id,file=sys.stderr);return 2
+    # A rejection is an operator's decision; re-checking never overturns it.
+    store.event(args.source_id,"site_rechecked",{"verdict":result["verdict"],
+     "previousVerdict":(known or {}).get("verdict"),"status":candidate_status(store,args.source_id)})
+    print(json.dumps({**result,"status":candidate_status(store,args.source_id),
+     "operatorActionRequired":result["verdict"]=="CANDIDATE"
+     and candidate_status(store,args.source_id)=="pending"},ensure_ascii=False));return 0
+   if action in ("enable-fetch","disable-fetch"):
+    enabling=action=="enable-fetch"
+    if enabling and not args.confirm_enable:
+     print("refusing to turn fetching on without --confirm-enable",file=sys.stderr);return 2
+    config=Path(args.config)
+    entries={e["source_id"]:e for e in load_source_config(config)}
+    entry=entries.get(args.source_id)
+    if entry is None:
+     print("no content source configured for "+args.source_id
+       +"; run: shura candidates add-to-config "+args.source_id+" --allow-host",
+       file=sys.stderr);return 2
+    rows=[r for r in candidate_records(store) if r["source_id"]==args.source_id]
+    domain=rows[0]["domain"] if rows else (latest_verdict(store,args.source_id) or {}).get("domain")
+    if enabling:
+     # Every precondition is checked and named. Nothing is guessed and no host
+     # is added to the allowlist here: trusting a host and enabling fetching are
+     # two decisions, and this command is only the second one.
+     problems=[]
+     status=candidate_status(store,args.source_id)
+     if status=="rejected":
+      problems.append("the candidate was rejected; re-open it deliberately first")
+     elif status!="accepted":
+      problems.append("no accepted review; run: shura candidates accept "+args.source_id)
+     if not entry["allowed_hosts"]:
+      problems.append("the config entry lists no allowed_hosts")
+     elif domain and domain not in entry["allowed_hosts"]:
+      problems.append("the config allows "+", ".join(entry["allowed_hosts"])
+       +" but the candidate host is "+domain)
+     if entry["quota_bytes"] < 0 or entry["retention_days"] < 0:
+      problems.append("the config entry has negative limits")
+     if problems:
+      print("refusing to enable; required first: "+"; ".join(problems),file=sys.stderr);return 2
+    try:
+     written=upsert_source_entry(config,{**entry,"fetch_enabled":enabling,
+      **({"allow_enable":True} if enabling else {})})
+    except ValueError as e:
+     print(str(e),file=sys.stderr);return 2
+    store.event(args.source_id,"site_fetch_"+("enabled" if enabling else "disabled"),
+     {"config":str(config),"operator":args.operator,"fetch_enabled":enabling,
+      "allowed_hosts":written["allowed_hosts"]})
+    print(json.dumps({**written,"config":str(config),"fetch_enabled":enabling},
+     ensure_ascii=False));return 0
    if action=="add-to-config":
+    if candidate_status(store,args.source_id)=="rejected":
+     print("the candidate was rejected; re-open it deliberately before configuring",
+      file=sys.stderr);return 2
     if candidate_status(store,args.source_id)!="accepted":
      print("candidate has not been accepted; run: shura candidates accept "+args.source_id,
       file=sys.stderr);return 2

@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from shura_core.coordinator import CrawlCoordinator
@@ -24,6 +25,8 @@ from shura_core.crawler.arabic import (ArabicSiteDiscovery, SeedFileFinder, eval
 from shura_core.crawler.review import (ACCEPTED,PENDING,REJECTED,ReviewError,
     candidate_records,candidate_status,decided_candidates,deferred_candidates,
     pending_candidates,record_review,reopen)
+from shura_core.crawler.arabic import (latest_verdict, recheck_site, SearchProvider,
+                                          JsonHttpSearchProvider)
 from shura_core.content.fetcher import load_source_config, upsert_source_entry
 from shura_core.content import fetchable_sources, open_store, sync_source_policy
 from shura_core.sources.registry import SourceRegistry
@@ -1045,3 +1048,359 @@ def _host(url):
 
 def Fixture_pages_miss(site):
     return False
+
+
+CATALOGUE_SITE = {
+    "/": ('<!doctype html><html><head><title>Reader</title></head><body>'
+          '<a href="/catalogue">الفهرس</a></body></html>'),
+    "/catalogue": ('<!doctype html><html lang="ar" dir="rtl"><body>'
+                   '<h1>فهرس الأعمال</h1><a href="/manga/one/">عمل</a>'
+                   '<a href="/manga/two/">عمل</a>'
+                   '<a href="/manga/one/chapter-2/">فصل 2</a></body></html>'),
+}
+
+
+class RecheckTests(Case):
+    """A deferred or unreachable site can be looked at again."""
+
+    def seed(self, url):
+        seed_file(self.root / "seeds.json", [url])
+        return SeedFileFinder(self.root / "seeds.json")
+
+    def test_rechecking_an_unreachable_site_records_the_new_refusal(self):
+        with SiteFixture({}):
+            ArabicSiteDiscovery(self.store, SafeHTTP(["gone.example"])).discover(
+                [self.seed("https://gone.example/")])
+        self.assertEqual(self._events("site_candidate")[-1]["verdict"], "REJECTED")
+        # Now the site answers.
+        with SiteFixture({"gone.example": ARABIC_PAGE}):
+            result = recheck_site(self.store, SafeHTTP(["gone.example"]), "site:gone.example")
+        self.assertEqual(result["verdict"], "CANDIDATE")
+        self.assertEqual(result["evidenceReasons"][0], "re-check of a REJECTED candidate")
+        rechecks = self._events("site_recheck")
+        self.assertEqual(rechecks[-1]["previousVerdict"], "REJECTED")
+        self.assertEqual(rechecks[-1]["newVerdict"], "CANDIDATE")
+        self.assertEqual(len(self._events("site_proposed")), 1,
+                         "the new evidence produced exactly one proposal")
+
+    def test_rechecking_a_deferred_site_promotes_it_only_on_real_evidence(self):
+        with SiteFixture({"spa.example": JS_ONLY_PAGE}):
+            ArabicSiteDiscovery(self.store, SafeHTTP(["spa.example"])).discover(
+                [self.seed("https://spa.example/")])
+        self.assertEqual(self._events("site_candidate")[-1]["verdict"], "DEFERRED")
+        self.assertEqual(len(self._events("site_proposed")), 0)
+
+        # Same page, still deferred: no promotion, and the proposal stays absent.
+        with SiteFixture({"spa.example": JS_ONLY_PAGE}):
+            again = recheck_site(self.store, SafeHTTP(["spa.example"]), "site:spa.example")
+        self.assertEqual(again["verdict"], "DEFERRED")
+        self.assertEqual(len(self._events("site_proposed")), 0,
+                         "DEFERRED does not become CANDIDATE without evidence")
+
+        # Now the catalogue is served as plain HTML: evidence, so it promotes.
+        with SiteFixture({"spa.example": CATALOGUE_SITE}):
+            promoted = recheck_site(self.store, SafeHTTP(["spa.example"]), "site:spa.example")
+        self.assertEqual(promoted["verdict"], "CANDIDATE")
+        self.assertGreaterEqual(promoted["pagesExamined"], 2)
+        self.assertEqual(len(self._events("site_proposed")), 1)
+
+    def test_rechecking_never_duplicates_the_candidate(self):
+        with SiteFixture({"good.example": ARABIC_PAGE}):
+            ArabicSiteDiscovery(self.store, SafeHTTP(["good.example"])).discover(
+                [self.seed("https://good.example/")])
+        with SiteFixture({"good.example": ARABIC_PAGE}):
+            for _ in range(3):
+                recheck_site(self.store, SafeHTTP(["good.example"]), "site:good.example")
+        self.assertEqual(len(self._events("site_proposed")), 1)
+        self.assertEqual(len(self._events("site_candidate")), 4,
+                         "every probe is kept as evidence, once per pass")
+        self.assertEqual(len(candidate_records(self.store)), 1)
+
+    def test_rechecking_never_overturns_a_rejection(self):
+        with SiteFixture({"good.example": ARABIC_PAGE}):
+            ArabicSiteDiscovery(self.store, SafeHTTP(["good.example"])).discover(
+                [self.seed("https://good.example/")])
+        record_review(self.store, "site:good.example", REJECTED, operator="ops",
+                      reason="operator says no")
+        with SiteFixture({"good.example": ARABIC_PAGE}):
+            result = recheck_site(self.store, SafeHTTP(["good.example"]),
+                                  "site:good.example")
+        self.assertEqual(result["verdict"], "CANDIDATE", "the site itself still passes")
+        self.assertEqual(candidate_status(self.store, "site:good.example"), REJECTED,
+                         "but an operator's rejection is not undone by a re-check")
+        self.assertEqual(len(self._events("site_reviewed")), 1)
+        self.assertEqual(pending_candidates(self.store), [])
+
+    def test_a_recheck_whose_request_fails_records_a_reason_not_a_promotion(self):
+        with SiteFixture({"flaky.example": ARABIC_PAGE}):
+            ArabicSiteDiscovery(self.store, SafeHTTP(["flaky.example"])).discover(
+                [self.seed("https://flaky.example/")])
+        with SiteFixture({"flaky.example": ARABIC_PAGE}, blocked={"flaky.example"}):
+            result = recheck_site(self.store, SafeHTTP(["flaky.example"]),
+                                  "site:flaky.example")
+        self.assertEqual(result["verdict"], "REJECTED")
+        self.assertTrue(result["blocked"])
+        self.assertEqual(len(self._events("site_recheck")), 1,
+                         "only the re-check itself is recorded as one")
+
+    def test_rechecking_something_never_recorded_returns_nothing(self):
+        self.assertIsNone(recheck_site(self.store, SafeHTTP(["x.example"]), "site:nope.example"))
+
+    def _events(self, event):
+        return [json.loads(d) for (d,) in self.store.db.execute(
+            "SELECT detail FROM history WHERE event=? ORDER BY id", (event,))]
+
+
+class FetchEnablementTests(Case):
+    """Turning fetching on is explicit, gated, and reversible."""
+
+    def propose(self, site="arab.example"):
+        seed_file(self.root / "seeds.json", [f"https://{site}/"])
+        with SiteFixture({site: ARABIC_PAGE}):
+            ArabicSiteDiscovery(self.store, SafeHTTP([site])).discover(
+                [SeedFileFinder(self.root / "seeds.json")])
+        return f"site:{site}"
+
+    def config_entry(self, source_id, domain, fetch_enabled=False, hosts=None):
+        return {"source_id": source_id, "kind": "html",
+                "allowed_hosts": hosts if hosts is not None else [domain],
+                "fetch_enabled": fetch_enabled, "quota_bytes": 1024, "retention_days": 7}
+
+    def connect(self):
+        conn = open_store(self.root / "content.db")
+        self.addCleanup(conn.close)
+        return conn
+
+    def test_enabling_is_refused_without_acceptance(self):
+        sid = self.propose()
+        upsert_source_entry(self.root / "c.json", self.config_entry(sid, "arab.example"))
+        with self.assertRaises(ValueError):
+            _enable(self.root / "c.json", sid, "arab.example", confirmed=True,
+                    status=PENDING)
+        self.assertEqual(load_source_config(self.root / "c.json")[0]["fetch_enabled"], False)
+
+    def test_enabling_is_refused_without_the_confirmation_flag(self):
+        sid = self.propose()
+        record_review(self.store, sid, ACCEPTED, operator="ops", reason="ok")
+        upsert_source_entry(self.root / "c.json", self.config_entry(sid, "arab.example"))
+        with self.assertRaises(ValueError):
+            _enable(self.root / "c.json", sid, "arab.example", confirmed=False)
+
+    def test_enabling_is_refused_when_the_config_does_not_list_the_candidate(self):
+        sid = self.propose()
+        record_review(self.store, sid, ACCEPTED, operator="ops", reason="ok")
+        with self.assertRaises(ValueError):
+            _enable(self.root / "c.json", sid, "arab.example", confirmed=True)
+
+    def test_enabling_is_refused_when_the_config_allows_a_different_host(self):
+        sid = self.propose()
+        record_review(self.store, sid, ACCEPTED, operator="ops", reason="ok")
+        upsert_source_entry(self.root / "c.json",
+                            self.config_entry(sid, "arab.example", hosts=["other.example"]))
+        with self.assertRaises(ValueError):
+            _enable(self.root / "c.json", sid, "arab.example", confirmed=True)
+        self.assertEqual(load_source_config(self.root / "c.json")[0]["fetch_enabled"], False,
+                         "the mismatched config was left exactly as it was")
+
+    def test_enabling_is_refused_for_a_rejected_candidate(self):
+        sid = self.propose()
+        record_review(self.store, sid, REJECTED, operator="ops", reason="no")
+        upsert_source_entry(self.root / "c.json", self.config_entry(sid, "arab.example"))
+        with self.assertRaises(ValueError):
+            _enable(self.root / "c.json", sid, "arab.example", confirmed=True,
+                    status=REJECTED)
+
+    def test_enabling_works_for_an_accepted_configured_candidate_and_disables_again(self):
+        sid = self.propose()
+        record_review(self.store, sid, ACCEPTED, operator="ops", reason="ok")
+        config = self.root / "c.json"
+        upsert_source_entry(config, self.config_entry(sid, "arab.example"))
+        conn = self.connect()
+
+        sync_source_policy(conn, load_source_config(config))
+        self.assertEqual(fetchable_sources(conn), [], "not enabled yet")
+
+        _enable(config, sid, "arab.example", confirmed=True)
+        sync_source_policy(conn, load_source_config(config))
+        self.assertEqual([r[0] for r in fetchable_sources(conn)], [sid])
+
+        _disable(config, sid, "arab.example")
+        sync_source_policy(conn, load_source_config(config))
+        self.assertEqual(fetchable_sources(conn), [],
+                         "a disabled source accepts no new fetch requests")
+
+    def test_a_failed_write_leaves_no_partial_config_or_contradictory_state(self):
+        sid = self.propose()
+        record_review(self.store, sid, ACCEPTED, operator="ops", reason="ok")
+        config = self.root / "c.json"
+        upsert_source_entry(config, self.config_entry(sid, "arab.example"))
+        before = config.read_text(encoding="utf-8")
+        with mock.patch.object(Path, "write_text", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                _enable(config, sid, "arab.example", confirmed=True)
+        self.assertEqual(config.read_text(encoding="utf-8"), before,
+                         "a failed write changes nothing")
+        self.assertEqual([p.name for p in self.root.iterdir() if p.suffix == ".tmp"], [],
+                         "and leaves no half-written temp file")
+        self.assertEqual(candidate_status(self.store, sid), ACCEPTED)
+        self.assertEqual(self.store.db.execute(
+            "SELECT COUNT(*) FROM history WHERE event='site_fetch_enabled'").fetchone()[0], 0,
+            "no enablement was recorded for a write that did not happen")
+
+    def test_the_full_path_from_discovery_to_a_fetchable_source(self):
+        """discover -> evaluate -> review -> configure -> enable -> disable."""
+        sid = self.propose("arab.example")
+        self.assertEqual(candidate_status(self.store, sid), PENDING)
+        self.assertEqual(self.store.db.execute(
+            "SELECT COUNT(*) FROM sources").fetchone()[0], 0,
+            "never in the APK ledger")
+
+        config = self.root / "c.json"
+        conn = self.connect()
+        sync_source_policy(conn, [])
+        self.assertEqual(fetchable_sources(conn), [], "discovered: not fetchable")
+
+        record_review(self.store, sid, ACCEPTED, operator="ops", reason="reviewed by hand")
+        sync_source_policy(conn, load_source_config(config))
+        self.assertEqual(fetchable_sources(conn), [], "accepted: still not fetchable")
+
+        upsert_source_entry(config, self.config_entry(sid, "arab.example"))
+        sync_source_policy(conn, load_source_config(config))
+        self.assertEqual(fetchable_sources(conn), [], "configured: still not fetchable")
+
+        _enable(config, sid, "arab.example", confirmed=True)
+        sync_source_policy(conn, load_source_config(config))
+        self.assertEqual([r[0] for r in fetchable_sources(conn)], [sid], "enabled")
+
+        _disable(config, sid, "arab.example")
+        sync_source_policy(conn, load_source_config(config))
+        self.assertEqual(fetchable_sources(conn), [], "disabled again")
+        self.assertEqual(self.store.db.execute(
+            "SELECT COUNT(*) FROM sources").fetchone()[0], 0,
+            "none of it touched the extension ledger")
+
+
+def _enable(config, source_id, domain, *, confirmed, status=ACCEPTED):
+    """The enablement rules, as the CLI applies them."""
+    if not confirmed:
+        raise ValueError("refusing to turn fetching on without --confirm-enable")
+    if status == REJECTED:
+        raise ValueError("the candidate was rejected; re-open it deliberately first")
+    if status != ACCEPTED:
+        raise ValueError(f"no accepted review for {source_id}")
+    entry = _entry(config, source_id, domain)
+    upsert_source_entry(config, {**entry, "fetch_enabled": True, "allow_enable": True})
+
+
+def _disable(config, source_id, domain):
+    entry = _entry(config, source_id, domain)
+    upsert_source_entry(config, {**entry, "fetch_enabled": False})
+
+
+def _entry(config, source_id, domain):
+    entries = {e["source_id"]: e for e in load_source_config(config)}
+    entry = entries.get(source_id)
+    if entry is None:
+        raise ValueError(f"no content source configured for {source_id}")
+    if not entry["allowed_hosts"] or domain not in entry["allowed_hosts"]:
+        raise ValueError(f"the config does not allow {domain}")
+    return entry
+
+
+class FakeProviderHttp:
+    """A stand-in for SafeHTTP that records what was asked and returns fixtures."""
+
+    def __init__(self, payload=None, raises=None, content_type="application/json"):
+        self.payload = payload
+        self.raises = raises
+        self.content_type = content_type
+        self.calls = []
+
+    def get(self, url, headers=None, max_bytes=None):
+        self.calls.append((url, dict(headers or {})))
+        if self.raises:
+            raise self.raises
+        body = json.dumps(self.payload).encode()
+
+        class H:
+            def get_content_charset(self_inner):
+                return "utf-8"
+
+            def get_content_type(self_inner):
+                return self.content_type
+        return body, H(), url
+
+
+class SearchProviderTests(Case):
+    """The provider is a thin, checked adapter over one JSON search API."""
+
+    def provider(self, http, **kw):
+        return JsonHttpSearchProvider(
+            http, endpoint="https://api.example/search?q={query}&count={limit}",
+            result_path="web.results", headers={"X-Subscription-Token": "secret-value"},
+            **kw)
+
+    def test_it_reads_links_from_the_configured_result_path(self):
+        http = FakeProviderHttp({"web": {"results": [
+            {"url": "https://one.example/"}, {"url": "https://two.example/"}]}})
+        links = self.provider(http).search("مانجا", limit=5)
+        self.assertEqual(links, ["https://one.example/", "https://two.example/"])
+        self.assertIn("q=%D9%85%D8%A7%D9%86%D8%AC%D8%A7", http.calls[0][0],
+                      "the Arabic query is percent-encoded into the endpoint")
+
+    def test_a_wrong_response_shape_is_refused_before_anything_is_read(self):
+        http = FakeProviderHttp({"web": {"nope": []}})
+        with self.assertRaises(ValueError):
+            self.provider(http).search("مانجا")
+
+    def test_results_without_usable_links_are_skipped_not_guessed(self):
+        http = FakeProviderHttp({"web": {"results": [
+            {"href": "https://wrong-key.example/"}, {"url": "   "}, "not-an-object",
+            {"url": "https://real.example/"}]}})
+        self.assertEqual(self.provider(http).search("مانجا"), ["https://real.example/"])
+
+    def test_authentication_and_rate_limit_failures_do_not_escape_the_finder(self):
+        for error in (RuntimeError("401 unauthorized"), RuntimeError("429 rate limited"),
+                      RuntimeError("503 server error")):
+            finder = SearchFinder(FakeSearchProvider({}, fail_on={DEFAULT_ARABIC_QUERIES[0]}))
+            self.assertEqual(finder.find(), [], f"{error} must not escape")
+
+    def test_a_provider_error_message_never_reaches_the_report(self):
+        """Provider errors can echo request headers, so they are not surfaced."""
+        leaky = SearchProviderProbe()
+        finder = SearchFinder(leaky, queries=DEFAULT_ARABIC_QUERIES[:2])
+        self.assertEqual(finder.find(), [])
+        self.assertNotIn("X-Subscription-Token", leaky.seen_text)
+        self.assertNotIn("secret-value", leaky.seen_text)
+
+    def test_the_finder_caps_the_number_of_queries_per_pass(self):
+        provider = FakeSearchProvider({q: ["https://x.example/"] for q in DEFAULT_ARABIC_QUERIES})
+        provider.max_queries = 3
+        finder = SearchFinder(provider)
+        finder.find()
+        self.assertEqual(len(provider.calls), 3,
+                         "a pass asks a bounded number of questions, not all of them")
+
+    def test_duplicate_domains_across_queries_are_proposed_once(self):
+        provider = FakeSearchProvider({q: ["https://same.example/", "https://other.example/"]
+                                       for q in DEFAULT_ARABIC_QUERIES[:3]})
+        finder = SearchFinder(provider, queries=DEFAULT_ARABIC_QUERIES[:3])
+        found = finder.find()
+        self.assertEqual([c.domain for c in found], ["same.example", "other.example"])
+
+    def test_the_secret_header_is_sent_but_never_logged(self):
+        http = FakeProviderHttp({"web": {"results": [{"url": "https://ok.example/"}]}})
+        self.provider(http).search("مانهاوا")
+        url, headers = http.calls[0]
+        self.assertEqual(headers.get("X-Subscription-Token"), "secret-value")
+        self.assertNotIn("secret-value", url, "credentials belong in a header, not the URL")
+
+
+class SearchProviderProbe(SearchProvider):
+    name = "probe"
+
+    def __init__(self):
+        self.seen_text = ""
+
+    def search(self, query, limit=20):
+        raise RuntimeError("provider said: header X-Subscription-Token=secret-value")

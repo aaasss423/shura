@@ -189,9 +189,19 @@ def evaluate_site(http, candidate: SiteCandidate, *, max_bytes: int = 2_000_000,
     except Exception as exc:                                  # noqa: BLE001
         name = type(exc).__name__
         status = getattr(exc, "code", None)
+        detail = str(exc)
         if status in (401, 402, 403) or name in ("HTTPError",):
             verdict.blocked = True
             verdict.reasons.append(f"site refused public access ({status or name})")
+        elif "host is not allowed" in detail:
+            # A real case: some sites redirect to a different domain entirely.
+            # The redirect is not followed, because a candidate only ever gets
+            # to talk to the host it was evaluated for.
+            verdict.reasons.append(
+                "redirects to another host, which is outside this candidate's scope: "
+                + detail.split("host is not allowed")[-1].strip())
+        elif "only HTTPS URLs are allowed" in detail:
+            verdict.reasons.append("redirects off HTTPS; not followed")
         else:
             verdict.reasons.append(f"not publicly reachable: {exc}")
         return verdict
@@ -200,6 +210,13 @@ def evaluate_site(http, candidate: SiteCandidate, *, max_bytes: int = 2_000_000,
     verdict.https = (urlparse(final).scheme or "").lower() == "https"
     if not verdict.https:
         verdict.reasons.append("did not serve over HTTPS")
+
+    content_type = _content_type(headers)
+    if not _is_html(content_type):
+        verdict.reasons.append(f"served {content_type}, which is not an HTML page")
+        verdict.pages_examined = 1
+        verdict.score = 0.0
+        return verdict
 
     text = _decode(body, headers)
     pages.append((final, text))
@@ -290,6 +307,25 @@ def _judge(verdict: SiteVerdict, text: str, url: str) -> None:
 
 #: Links worth one extra request: same host, and a path that reads like a
 #: catalogue rather than a login or a social link.
+#: Files that are never a catalogue page. Following them costs a request and
+#: proves nothing; a live run showed a manifest and a search feed being fetched.
+_NON_HTML_PATH = re.compile(r"\.(?:webmanifest|xml|json|rss|atom|txt|pdf|zip|css|js)$", re.I)
+_HTML_TYPES = ("text/html", "application/xhtml+xml", "application/xml")
+
+
+def _content_type(headers) -> str:
+    if hasattr(headers, "get_content_type"):
+        try:
+            return (headers.get_content_type() or "").lower()
+        except Exception:                                    # noqa: BLE001
+            pass
+    return ""
+
+
+def _is_html(content_type: str) -> bool:
+    return (not content_type) or any(content_type.startswith(t) for t in _HTML_TYPES)
+
+
 _LINK_HREF = re.compile(r'href\s*=\s*["\']([^"\']+)["\']', re.I)
 _SKIP_PATH = re.compile(r"(login|signin|sign-in|register|account|captcha|privacy|"
                         r"terms|contact|about|facebook|twitter|telegram|discord|"
@@ -341,6 +377,9 @@ def _followups(text: str, base_url: str, host: str, *, limit: int = 12) -> list[
         if parsed.scheme != "https" or (parsed.hostname or "").lower() != host:
             continue
         if _SKIP_PATH.search(parsed.path or "") or not (parsed.path or "").strip("/"):
+            continue
+        if _NON_HTML_PATH.search(parsed.path or ""):
+            continue          # a manifest or a feed is not a catalogue page
             continue
         if absolute in seen:
             continue
@@ -422,15 +461,24 @@ class ArabicSiteDiscovery:
         Deliberately not a source row. Nothing here can make the site crawlable,
         and no operator decision is implied by a proposal being on the list.
         """
-        source_id = verdict.candidate.source_id()
-        if source_id in self.proposed:
-            return False                  # known already; a repeat pass adds nothing
-        self.proposed.add(source_id)
-        self.store.event(source_id, "site_proposed", {
-            **verdict.to_dict(),
-            "review": "awaiting operator review; not a crawlable source",
-            "activation": "operator must add the host to content-sources.json"})
-        return True
+        if _propose(self.store, verdict, self.proposed):
+            return True
+        return False
+
+
+def _propose(store, verdict: "SiteVerdict", known: set[str] | None = None) -> bool:
+    """Record one confirmed candidate as a review item, exactly once."""
+    source_id = verdict.candidate.source_id()
+    seen = proposed_source_ids(store) if known is None else known
+    if source_id in seen:
+        return False
+    if known is not None:
+        known.add(source_id)
+    store.event(source_id, "site_proposed", {
+        **verdict.to_dict(),
+        "review": "awaiting operator review; not a crawlable source",
+        "activation": "operator must add the host to content-sources.json"})
+    return True
 
 
 def proposed_source_ids(store) -> set[str]:
@@ -638,3 +686,73 @@ def configured_search_finder(*, endpoint=None, headers=None, result_path=None,
     provider = JsonHttpSearchProvider(SafeHTTP([host]), endpoint=endpoint,
                                       result_path=result_path, headers=headers)
     return SearchFinder(provider, queries)
+
+
+def latest_verdict(store, source_id: str) -> dict | None:
+    """The most recent recorded verdict for one candidate, from the ledger.
+
+    Matched on the verdict's own domain rather than the row's ``source_id``:
+    verdicts are recorded against the discovery ledger, not against the
+    candidate, so several candidates share one ``source_id`` and only the
+    payload says which site this is about.
+    """
+    wanted = source_id.split(":", 1)[1] if ":" in source_id else source_id
+    latest = None
+    try:
+        rows = store.db.execute(
+            "SELECT detail FROM history WHERE event='site_candidate' ORDER BY id").fetchall()
+    except Exception:                                        # noqa: BLE001
+        return None
+    for (detail,) in rows:
+        try:
+            record = json.loads(detail)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if (record.get("domain") or "").lower() == wanted.lower():
+            latest = record
+    return latest
+
+
+def recheck_site(store, http, source_id: str, *, max_bytes: int = 2_000_000) -> dict | None:
+    """Re-evaluate one candidate against what the site serves now.
+
+    A site that was deferred - JavaScript-rendered, or with its catalogue one
+    click away - may serve something different today. This re-probes exactly
+    that host and appends a fresh verdict to the ledger.
+
+    Three things it deliberately does not do:
+
+    * it does not duplicate the candidate. A site that is already proposed
+      stays proposed; only the evidence is appended.
+    * it does not overturn a rejection. A rejected candidate is an operator's
+      decision, and re-opening it is a separate explicit act.
+    * it does not promote DEFERRED to CANDIDATE without evidence. Promotion
+      happens only when :func:`evaluate_site` actually finds the evidence this
+      time, and the new record says which URL carried it.
+    """
+    record = latest_verdict(store, source_id)
+    if record is None:
+        return None
+    candidate = SiteCandidate(url=record.get("url") or "",
+                              origin=record.get("origin") or "recheck",
+                              language=record.get("language") or "ar")
+    if not candidate.domain:
+        return None
+
+    previous_verdict = record.get("verdict")
+    verdict = evaluate_site(http, candidate, max_bytes=max_bytes)
+    verdict.candidate.origin = f"recheck:{candidate.origin}"
+    verdict.evidence_reasons.insert(0, f"re-check of a {previous_verdict} candidate")
+
+    store.event("discovery", "site_recheck",
+                {"source_id": source_id, "domain": candidate.domain,
+                 "previousVerdict": previous_verdict, "newVerdict": verdict.verdict,
+                 "pagesExamined": verdict.pages_examined})
+    store.event("discovery", "site_candidate", verdict.to_dict())
+
+    from .review import candidate_status, PENDING
+    if (verdict.verdict == "CANDIDATE"
+            and candidate_status(store, source_id) == PENDING
+            and source_id not in proposed_source_ids(store)):
+        _propose(store, verdict)
+    return verdict.to_dict()
