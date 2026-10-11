@@ -18,7 +18,7 @@ from unittest import mock
 from pathlib import Path
 
 from shura_core.coordinator import CrawlCoordinator
-from shura_core.crawler.index import IndexCrawler
+from shura_core.crawler.index import IndexCrawler, resolve_artifact_url
 from shura_core.crawler.arabic import (ArabicSiteDiscovery, SeedFileFinder, evaluate_site,
                                           pending_proposals, SearchFinder,
                                           configured_search_finder, DEFAULT_ARABIC_QUERIES,
@@ -1793,13 +1793,45 @@ class IndexConsumptionTests(Case):
         return Source("s1", "repo", url or f"{self.BASE}/index.json", "index", "ar",
                       configuration={"allowed_hosts": ["repo.shura.example"]})
 
-    def test_a_relative_artifact_name_is_resolved_against_the_index(self):
+    def test_a_relative_artifact_name_resolves_to_where_the_file_really_is(self):
+        """Not merely an https URL: the file the publisher writes lives under apk/."""
         result = self.crawler(
             [{"pkg": "org.example.ext", "version": "1.0", "apk": "org_example_ext-1.0.apk"}]
         ).crawl(self.source(), {"max_pages": 1, "max_candidates": 5})
         self.assertEqual(len(result.candidates), 1)
         self.assertEqual(result.candidates[0].apk_url,
-                         f"{self.BASE}/org_example_ext-1.0.apk")
+                         f"{self.BASE}/apk/org_example_ext-1.0.apk",
+                         "resolving against the index root alone gives a 404: "
+                         "_materialize writes the artifact under apk/")
+
+    def test_the_resolved_url_matches_a_real_published_repository(self):
+        """The index and the file both come from the real publisher."""
+        import os
+        import tempfile
+        from tests.test_publisher_reader_contract import PublisherReaderContractTests
+        case = PublisherReaderContractTests(
+            "test_the_reader_can_tell_the_apk_from_the_index")
+        case.setUp()
+        try:
+            index = case.publish()
+            repo = Path(case.repo)
+            entry = index["packages"][0] if "packages" in index else index[0]
+            apk_name = entry["apk"]
+            # Where the publisher actually put it.
+            self.assertTrue((repo / "apk" / apk_name).is_file(),
+                            "the publisher should have written apk/%s" % apk_name)
+            self.assertFalse((repo / apk_name).is_file(),
+                             "and not at the repository root")
+            crawler = self.crawler([entry])
+            result = crawler.crawl(self.source(f"{self.BASE}/index.json"),
+                                   {"max_pages": 1, "max_candidates": 5})
+            self.assertEqual(len(result.candidates), 1)
+            self.assertEqual(result.candidates[0].apk_url,
+                             f"{self.BASE}/apk/{apk_name}",
+                             "the download URL must be the file that exists")
+        finally:
+            case.store.close()
+            case.tmp.cleanup()
 
     def test_the_shape_the_publisher_writes_is_now_usable(self):
         """Exactly the entry shape RepositoryPublisher emits."""
@@ -1810,7 +1842,7 @@ class IndexConsumptionTests(Case):
                                                                "max_candidates": 5})
         self.assertEqual(len(result.candidates), 1)
         candidate = result.candidates[0]
-        self.assertEqual(candidate.apk_url, f"{self.BASE}/eu_example_ext-v1.5.1.apk")
+        self.assertEqual(candidate.apk_url, f"{self.BASE}/apk/eu_example_ext-v1.5.1.apk")
         self.assertEqual(candidate.package, "eu.example.ext")
 
     def test_an_absolute_artifact_url_is_left_alone(self):
@@ -1824,7 +1856,8 @@ class IndexConsumptionTests(Case):
         result = self.crawler(
             [{"pkg": "org.example.ext", "version": "1.0", "apk": "apk/ext-1.0.apk"}]
         ).crawl(self.source(), {"max_pages": 1, "max_candidates": 5})
-        self.assertEqual(result.candidates[0].apk_url, f"{self.BASE}/apk/ext-1.0.apk")
+        self.assertEqual(result.candidates[0].apk_url, f"{self.BASE}/apk/ext-1.0.apk",
+                         "an entry that already says apk/ is not prefixed twice")
 
     def test_the_resolved_url_passes_the_network_policy(self):
         from shura_core.security.network import validate_url
