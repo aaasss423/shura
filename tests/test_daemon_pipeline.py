@@ -322,6 +322,57 @@ class DaemonPipelineTests(unittest.TestCase):
                              "daemon.main must pass a rechecker; the parameter is not dead")
         self.assertEqual(captured.get("max_downloads"), 7)
 
+    # -- source discovery in the periodic loop ---------------------------
+    def test_serve_proposes_sources_each_pass_when_discovery_is_supplied(self):
+        calls = []
+
+        class FakeDiscovery:
+            errors = []
+
+            def discover(self):
+                calls.append(1)
+                return []
+
+        OneShot.calls = 0
+        self.run_pass(self.processor(), discovery=FakeDiscovery())
+        self.assertEqual(len(calls), 1, "discovery must run once per pass")
+
+    def test_a_failing_discovery_pass_does_not_stop_the_loop(self):
+        class ExplodingDiscovery:
+            errors = []
+
+            def discover(self):
+                raise RuntimeError("discovery is down")
+
+        OneShot.calls = 0
+        self.add_source()
+        self.run_pass(self.processor(), discovery=ExplodingDiscovery())
+        stages = self.stages()
+        self.assertIn("org.example.ext|1.0", stages,
+                      "a discovery failure must not stop the crawl in the same pass")
+        self.assertEqual(stages["org.example.ext|1.0"], "security-passed")
+
+    def test_daemon_discovery_is_opt_in_and_never_crawls_proposals(self):
+        import shura_core.daemon as D
+        captured = {}
+
+        class SpyScheduler:
+            def __init__(self, store):
+                pass
+
+            def serve(self, coordinator, interval, stop, **kw):
+                captured.update(kw)
+
+        original = D.Scheduler
+        D.Scheduler = SpyScheduler
+        try:
+            D.main(["--db", str(self.root / "d2.db"), "--interval-seconds", "1",
+                    "--artifact-dir", str(self.root / "a")])
+        finally:
+            D.Scheduler = original
+        self.assertIsNone(captured.get("discovery"),
+                          "discovery must be off unless the operator asks for it")
+
     # -- explicit opt-in preserved ---------------------------------------
     def test_serve_without_processor_still_only_discovers(self):
         """Backwards compatibility: an operator who wants discover-only keeps it."""

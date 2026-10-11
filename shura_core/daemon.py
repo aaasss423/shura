@@ -1,5 +1,6 @@
 import argparse,os,signal,sys,threading
 from shura_core.coordinator import CrawlCoordinator
+from shura_core.discovery.service import SourceDiscovery
 from shura_core.notifications.telegram import TelegramNotifier
 from shura_core.pipeline import CandidateProcessor
 from shura_core.pipeline.recheck import ManifestRechecker
@@ -8,7 +9,7 @@ from shura_core.security.malware import MalwareScanner
 from shura_core.state import StateStore
 
 def main(argv=None):
-    p=argparse.ArgumentParser(prog="shura-daemon");p.add_argument("--db",default=os.getenv("SHURA_STATE_DB","shura.db"));p.add_argument("--interval-seconds",type=int,default=900);p.add_argument("--max-sources",type=int,default=250);p.add_argument("--max-downloads",type=int,default=250);p.add_argument("--artifact-dir",default=os.getenv("SHURA_ARTIFACT_DIR","artifacts"));p.add_argument("--require-malware-scanner",action="store_true",help="exit instead of crawling when the malware engine cannot scan");a=p.parse_args(argv)
+    p=argparse.ArgumentParser(prog="shura-daemon");p.add_argument("--db",default=os.getenv("SHURA_STATE_DB","shura.db"));p.add_argument("--interval-seconds",type=int,default=900);p.add_argument("--max-sources",type=int,default=250);p.add_argument("--max-downloads",type=int,default=250);p.add_argument("--artifact-dir",default=os.getenv("SHURA_ARTIFACT_DIR","artifacts"));p.add_argument("--discover-sources",action="store_true",help="propose new sources each pass; proposals land disabled and paused for operator review");p.add_argument("--require-malware-scanner",action="store_true",help="exit instead of crawling when the malware engine cannot scan");a=p.parse_args(argv)
     stop=threading.Event();signal.signal(signal.SIGTERM,lambda *_:stop.set());signal.signal(signal.SIGINT,lambda *_:stop.set())
     store=StateStore(a.db)
     try:
@@ -28,7 +29,15 @@ def main(argv=None):
         # downloaded, security/malware-scanned and content-reviewed in the same pass instead of
         # piling up in "discovered". Acceptance and publication stay explicit operator steps.
         processor=CandidateProcessor(store,artifact_dir=a.artifact_dir,malware_scanner=scanner);rechecker=ManifestRechecker(store)
-        Scheduler(store).serve(coordinator,a.interval_seconds,stop,rechecker=rechecker,processor=processor,max_downloads=a.max_downloads,notifier=notifier)
+        # Source discovery only runs when asked for and only ever proposes
+        # disabled, paused sources: it grows the operator's queue, it never
+        # widens what is crawled on its own.
+        discovery=None
+        if getattr(a,"discover_sources",False):
+            from shura_core.security.network import SafeHTTP
+            discovery=SourceDiscovery(store,SafeHTTP(["api.github.com"],timeout=15,max_bytes=2_000_000),os.getenv("GITHUB_TOKEN"),daily_limit=a.max_sources)
+            notifier.send("Shura source discovery enabled; proposals land paused and disabled.")
+        Scheduler(store).serve(coordinator,a.interval_seconds,stop,rechecker=rechecker,processor=processor,max_downloads=a.max_downloads,notifier=notifier,discovery=discovery)
     finally:store.close()
     return 0
 if __name__=="__main__":raise SystemExit(main() or 0)

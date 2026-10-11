@@ -15,15 +15,29 @@ class Scheduler:
             self.store.transition(sid,SourceState.ACTIVE,"operator resumed dead source");self.store.event(sid,"retry_reset",{"reason":"operator resumed dead source"})
         elif s.state in (SourceState.PAUSED,SourceState.RETRY_LATER):self.store.transition(sid,SourceState.ACTIVE,"manual retry")
 
-    def serve(self,coordinator,interval_seconds=900,stop_event=None,rechecker=None,recheck_limit=250,processor=None,max_downloads=250,notifier=None):
+    def serve(self,coordinator,interval_seconds=900,stop_event=None,rechecker=None,recheck_limit=250,processor=None,max_downloads=250,notifier=None,discovery=None,discover_limit=250):
         """Run due-source scans until stopped. Persistent timestamps prevent unnecessary polling.
 
         With a CandidateProcessor supplied, every candidate the crawl discovers is driven
         through validate -> artifact download -> security/malware -> quality/content checks in
         the same pass, so a long-running daemon no longer strands work in "discovered".
         Acceptance and publication remain explicit operator steps and are never taken here.
-        If a ContentRechecker is supplied, due retryable chapters are re-resolved on every pass."""
+        If a ContentRechecker is supplied, due retryable chapters are re-resolved on every pass.
+
+        With a SourceDiscovery supplied, unknown sources are proposed on every pass. Proposals
+        land disabled and paused, so discovery can never widen what is crawled on its own - it
+        only ever grows the queue an operator reviews. A discovery failure is contained to that
+        pass and never stops the loop."""
         while stop_event is None or not stop_event.is_set():
+            if discovery is not None:
+                try:
+                    found=discovery.discover()
+                    for source in found:
+                        self.store.event(source.source_id,"source_discovered",{"language":source.language,"enabled":source.enabled,"state":source.state.value})
+                    for failure in getattr(discovery,"errors",[]) or []:
+                        if notifier:notifier.send("Shura discovery query failed: "+str(failure.get("error")))
+                except Exception as e:            # noqa: BLE001 - discovery must not stop the loop
+                    self.store.event("discovery","discovery_pass_failed",{"reason":str(e)})
             due=self.due(limit=coordinator.max_sources)
             candidates=[]
             if due:candidates,_=coordinator.run({s.source_id for s in due})
