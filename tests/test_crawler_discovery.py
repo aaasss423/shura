@@ -18,6 +18,7 @@ from unittest import mock
 from pathlib import Path
 
 from shura_core.coordinator import CrawlCoordinator
+from shura_core.crawler.index import IndexCrawler
 from shura_core.crawler.arabic import (ArabicSiteDiscovery, SeedFileFinder, evaluate_site,
                                           pending_proposals, SearchFinder,
                                           configured_search_finder, DEFAULT_ARABIC_QUERIES,
@@ -1764,3 +1765,75 @@ class CmsListingDiscoveryTests(Case):
     def _events(self, event):
         return [json.loads(d) for (d,) in self.store.db.execute(
             "SELECT detail FROM history WHERE event=? ORDER BY id", (event,))]
+
+
+class IndexConsumptionTests(Case):
+    """Shura must be able to read a repository in the format it publishes.
+
+    `RepositoryPublisher` writes `index.json` entries whose `apk` is a bare
+    filename, because that is what the repositories it interoperates with carry.
+    `IndexCrawler` used to take that value verbatim, producing a hostless URL
+    that every later gate refused - so a source discovered from a repository
+    Shura itself publishes could never be crawled.
+    """
+
+    BASE = "https://repo.shura.example"
+
+    def crawler(self, index_body):
+        base = self.BASE
+
+        class Http:
+            def get(self, url, headers=None, max_bytes=None):
+                return json.dumps(index_body).encode(), None, f"{base}/index.json"
+
+        return IndexCrawler(Http())
+
+    def source(self, url=None):
+        from shura_core.models import Source
+        return Source("s1", "repo", url or f"{self.BASE}/index.json", "index", "ar",
+                      configuration={"allowed_hosts": ["repo.shura.example"]})
+
+    def test_a_relative_artifact_name_is_resolved_against_the_index(self):
+        result = self.crawler(
+            [{"pkg": "org.example.ext", "version": "1.0", "apk": "org_example_ext-1.0.apk"}]
+        ).crawl(self.source(), {"max_pages": 1, "max_candidates": 5})
+        self.assertEqual(len(result.candidates), 1)
+        self.assertEqual(result.candidates[0].apk_url,
+                         f"{self.BASE}/org_example_ext-1.0.apk")
+
+    def test_the_shape_the_publisher_writes_is_now_usable(self):
+        """Exactly the entry shape RepositoryPublisher emits."""
+        published = [{"name": "ProComic (AR)", "pkg": "eu.example.ext",
+                      "apk": "eu_example_ext-v1.5.1.apk", "lang": "ar",
+                      "code": 10501, "version": "1.5.1", "nsfw": 0, "sources": []}]
+        result = self.crawler(published).crawl(self.source(), {"max_pages": 1,
+                                                               "max_candidates": 5})
+        self.assertEqual(len(result.candidates), 1)
+        candidate = result.candidates[0]
+        self.assertEqual(candidate.apk_url, f"{self.BASE}/eu_example_ext-v1.5.1.apk")
+        self.assertEqual(candidate.package, "eu.example.ext")
+
+    def test_an_absolute_artifact_url_is_left_alone(self):
+        result = self.crawler(
+            [{"pkg": "org.example.ext", "version": "1.0",
+              "apk": "https://mirror.example/ext.apk"}]
+        ).crawl(self.source(), {"max_pages": 1, "max_candidates": 5})
+        self.assertEqual(result.candidates[0].apk_url, "https://mirror.example/ext.apk")
+
+    def test_an_apk_subdirectory_is_preserved(self):
+        result = self.crawler(
+            [{"pkg": "org.example.ext", "version": "1.0", "apk": "apk/ext-1.0.apk"}]
+        ).crawl(self.source(), {"max_pages": 1, "max_candidates": 5})
+        self.assertEqual(result.candidates[0].apk_url, f"{self.BASE}/apk/ext-1.0.apk")
+
+    def test_the_resolved_url_passes_the_network_policy(self):
+        from shura_core.security.network import validate_url
+        result = self.crawler(
+            [{"pkg": "org.example.ext", "version": "1.0", "apk": "org_example_ext-1.0.apk"}]
+        ).crawl(self.source(), {"max_pages": 1, "max_candidates": 5})
+        validate_url(result.candidates[0].apk_url, ["repo.shura.example"])
+
+    def test_an_entry_without_an_artifact_is_still_skipped(self):
+        result = self.crawler([{"pkg": "org.example.ext", "version": "1.0"}]).crawl(
+            self.source(), {"max_pages": 1, "max_candidates": 5})
+        self.assertEqual(result.candidates, [])

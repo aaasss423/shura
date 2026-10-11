@@ -1,5 +1,5 @@
 import json
-from urllib.parse import urlparse
+from urllib.parse import urljoin,urlparse
 from shura_core.crawler.base import Crawler,CrawlResult
 from shura_core.models import Candidate
 class IndexCrawler(Crawler):
@@ -9,7 +9,13 @@ class IndexCrawler(Crawler):
         out=CrawlResult(pages=1,trace=[{"url":source.url,"final_url":final,"type":"index"}])
         for i,item in enumerate(items):
             if budget and len(out.candidates)>=budget.get("max_candidates",100):break
-            url=item.get("apk",item.get("apk_url",item.get("download")))
+            named=item.get("apk",item.get("apk_url",item.get("download")))
+            # An index entry names its artifact relative to the index, and the
+            # repositories Shura publishes do exactly that. Taking it verbatim
+            # produced a hostless URL that every later gate refused, so Shura
+            # could not read back a repository in its own format. Resolved
+            # against the index it came from, nothing is guessed.
+            url=urljoin(final,named) if named and not urlparse(str(named)).scheme else named
             pkg=item.get("pkg",item.get("package"));version=str(item.get("version",""))
             if not url or not pkg or not version:continue
             out.candidates.append(Candidate(source.source_id,str(pkg),version,url,str(item.get("name",pkg)),str(item.get("lang",source.language)),str(item.get("lib","")),item.get("signingKey"),item,{"index_url":final,"item":i}))
