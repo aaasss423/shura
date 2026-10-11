@@ -17,7 +17,12 @@ import unittest
 from pathlib import Path
 
 from shura_core.coordinator import CrawlCoordinator
-from shura_core.crawler.arabic import (ArabicSiteDiscovery, SeedFileFinder, evaluate_site)
+from shura_core.crawler.arabic import (ArabicSiteDiscovery, SeedFileFinder, evaluate_site,
+                                          pending_proposals, SearchFinder,
+                                          configured_search_finder, DEFAULT_ARABIC_QUERIES,
+                                          SiteCandidate)
+from shura_core.content import fetchable_sources, open_store, sync_source_policy
+from shura_core.sources.registry import SourceRegistry
 from shura_core.discovery.service import SourceDiscovery
 from shura_core.models import Candidate, Source, SourceState
 from shura_core.pipeline import CandidateProcessor
@@ -399,29 +404,35 @@ class ArabicSiteDiscoveryTests(Case):
         seed_file(self.root / "seeds.json", urls)
         return SeedFileFinder(self.root / "seeds.json")
 
-    def test_a_verifiable_arabic_site_becomes_a_disabled_paused_proposal(self):
+    def test_a_verifiable_arabic_site_becomes_a_review_item_not_a_source(self):
         with SiteFixture({"arab.example": ARABIC_PAGE}):
             finder = self.finder(["https://arab.example/"])
             proposals = ArabicSiteDiscovery(self.store, SafeHTTP(["arab.example"])).discover([finder])
         self.assertEqual(len(proposals), 1)
         self.assertEqual(proposals[0]["verdict"], "CANDIDATE")
         self.assertGreater(proposals[0]["score"], 0)
-        source = self.store.get_source("site:arab.example")
-        self.assertIsNotNone(source, "the proposal must land in the existing sources ledger")
-        self.assertFalse(source.enabled, "a discovered site is never enabled by discovery")
-        self.assertIs(source.state, SourceState.PAUSED)
-        self.assertTrue(source.configuration["review_required"])
-        self.assertEqual(source.configuration["signing_key"], "",
-                         "trust material stays empty until an operator supplies it")
-        self.assertFalse(self.store.eligible(source),
-                         "a proposal must be impossible to crawl")
+        self.assertIsNone(self.store.get_source("site:arab.example"),
+                          "a website is not an APK extension and must not enter the "
+                          "extension sources ledger")
+        recorded = self._events("site_proposed")
+        self.assertEqual(len(recorded), 1, "the proposal is recorded in the event ledger")
+        self.assertEqual(recorded[0]["verdict"], "CANDIDATE")
+        self.assertIn("awaiting operator review", recorded[0]["review"])
 
-    def test_a_proposal_cannot_be_accepted_without_trust_material(self):
+    def test_a_discovered_site_cannot_be_accepted_or_crawled(self):
         with SiteFixture({"arab.example": ARABIC_PAGE}):
             ArabicSiteDiscovery(self.store, SafeHTTP(["arab.example"])).discover(
                 [self.finder(["https://arab.example/"])])
-        with self.assertRaises(ValueError):
+        with self.assertRaises(KeyError):
             self.store.accept_source("site:arab.example")
+        self.assertEqual([s for s in self.store.db.execute(
+            "SELECT data FROM sources").fetchall() if json.loads(s[0]).get("enabled")], [],
+                         "a discovered site must never become enabled")
+        conn = open_store(self.root / "content.db")
+        self.addCleanup(conn.close)
+        self.assertEqual(fetchable_sources(conn), [],
+                         "and must never be fetchable as a content source: only "
+                         "content-sources.json can set fetch_enabled")
 
     def test_a_non_arabic_site_is_rejected_with_a_reason(self):
         with SiteFixture({"latin.example": LATIN_PAGE}):
@@ -459,9 +470,9 @@ class ArabicSiteDiscoveryTests(Case):
             second = discovery.discover([finder])
         self.assertEqual(len(first), 1)
         self.assertEqual(second, [], "a repeat pass must not re-propose a known site")
-        count = self.store.db.execute(
-            "SELECT COUNT(*) FROM sources WHERE source_id='site:arab.example'").fetchone()[0]
-        self.assertEqual(count, 1)
+        count = len(self._events("site_proposed"))
+        self.assertEqual(count, 1, "a repeated pass must not duplicate the review item")
+        self.assertEqual(len(pending_proposals(self.store)), 1)
 
     def test_one_broken_finder_does_not_cost_the_pass(self):
         class ExplodingFinder:
@@ -499,12 +510,15 @@ class ArabicSiteDiscoveryTests(Case):
         after = {p: p.stat().st_mtime for p in repo.rglob("*") if p.is_file()}
         self.assertEqual(before, after, "discovery must never touch the published repository")
 
+    def _events(self, event):
+        """Every recorded detail for one event type, in ledger order."""
+        return [json.loads(d) for (d,) in self.store.db.execute(
+            "SELECT detail FROM history WHERE event=? ORDER BY id", (event,))]
+
     def _last_event(self, event):
-        row = self.store.db.execute(
-            "SELECT detail FROM history WHERE event=? ORDER BY id DESC LIMIT 1",
-            (event,)).fetchone()
-        self.assertIsNotNone(row, f"expected a {event} event")
-        return json.loads(row[0])
+        rows = self._events(event)
+        self.assertTrue(rows, f"expected a {event} event")
+        return rows[-1]
 
 
 class ArabicSiteDiscoveryCommandTests(Case):
@@ -561,3 +575,228 @@ class ArabicSiteDiscoveryCommandTests(Case):
                                   str(self.root / "seeds.json")])
         self.assertEqual(code, 0)
         self.assertEqual(self.last_json(out)["proposed"], [])
+
+
+class FakeSearchProvider:
+    """A stand-in search API. Returns links; judges nothing."""
+
+    name = "fake"
+
+    def __init__(self, links_by_query=None, fail_on=()):
+        self.links_by_query = links_by_query or {}
+        self.fail_on = set(fail_on)
+        self.calls = []
+
+    def search(self, query, limit=20):
+        self.calls.append(query)
+        if query in self.fail_on:
+            raise RuntimeError("search provider is rate limited")
+        return list(self.links_by_query.get(query, []))[:limit]
+
+
+class SiteSearchDiscoveryTests(Case):
+    """Search proposes domains; evaluation judges them; neither can fetch."""
+
+    NEW_SITE = "https://fresh-manga.example/"
+
+    def arabic_page(self, site="fresh-manga.example"):
+        return SiteFixture({site: ARABIC_PAGE})
+
+    # 1. the provider can propose a domain that was never in the seed file
+    def test_the_search_provider_proposes_a_domain_absent_from_the_seed_file(self):
+        seed_file(self.root / "seeds.json", ["https://seeded.example/"])
+        seeded = SeedFileFinder(self.root / "seeds.json").find()
+        provider = FakeSearchProvider({DEFAULT_ARABIC_QUERIES[0]: [self.NEW_SITE]})
+        found = SearchFinder(provider, queries=DEFAULT_ARABIC_QUERIES[:1]).find()
+        self.assertEqual([c.domain for c in seeded], ["seeded.example"])
+        self.assertEqual([c.domain for c in found], ["fresh-manga.example"])
+        self.assertNotIn("fresh-manga.example", [c.domain for c in seeded],
+                         "the point is a domain no seed file contained")
+        self.assertEqual(found[0].origin, "search:fake")
+        self.assertEqual(provider.calls, [DEFAULT_ARABIC_QUERIES[0]])
+
+    def test_arabic_queries_are_varied_and_not_one_repeated_phrase(self):
+        self.assertGreaterEqual(len(set(DEFAULT_ARABIC_QUERIES)), 5)
+        for query in DEFAULT_ARABIC_QUERIES:
+            self.assertTrue(any("\u0600" <= ch <= "\u06ff" for ch in query),
+                            f"query is not written in Arabic: {query!r}")
+
+    def test_no_search_finder_is_built_without_a_configured_endpoint(self):
+        import os
+        saved = {k: os.environ.pop(k, None)
+                 for k in ("SHURA_SEARCH_ENDPOINT", "SHURA_SEARCH_HEADERS",
+                           "SHURA_SEARCH_RESULT_PATH")}
+        try:
+            self.assertIsNone(configured_search_finder(),
+                              "search must be opt-in, never on by default")
+        finally:
+            for k, v in saved.items():
+                if v is not None:
+                    os.environ[k] = v
+
+    # 2. discovered -> evaluated -> the content review path, never the APK path
+    def test_a_discovered_candidate_is_evaluated_and_lands_in_the_content_review_path(self):
+        provider = FakeSearchProvider({DEFAULT_ARABIC_QUERIES[0]: [self.NEW_SITE]})
+        finder = SearchFinder(provider, queries=DEFAULT_ARABIC_QUERIES[:1])
+        with self.arabic_page():
+            proposals = ArabicSiteDiscovery(
+                self.store, SafeHTTP(["fresh-manga.example"])).discover([finder])
+        self.assertEqual(len(proposals), 1)
+        self.assertEqual(proposals[0]["verdict"], "CANDIDATE")
+        self.assertEqual(proposals[0]["origin"], "search:fake")
+        self.assertEqual(len(self._events("site_candidate")), 1,
+                         "the search hit was judged by evaluate_site, not trusted")
+
+    # 3. never enters the APK extension cycle
+    def test_a_discovered_site_is_never_registered_as_an_apk_extension_source(self):
+        provider = FakeSearchProvider({DEFAULT_ARABIC_QUERIES[0]: [self.NEW_SITE]})
+        finder = SearchFinder(provider, queries=DEFAULT_ARABIC_QUERIES[:1])
+        with self.arabic_page():
+            ArabicSiteDiscovery(
+                self.store, SafeHTTP(["fresh-manga.example"])).discover([finder])
+        self.assertEqual(self.store.db.execute("SELECT COUNT(*) FROM sources").fetchone()[0], 0)
+        self.assertIsNone(self.store.get_source("site:fresh-manga.example"))
+        for kind in ("github-releases", "index", "html"):
+            self.assertIn(kind, SourceRegistry.KINDS)
+
+    # 4. stays disabled; fetch stays impossible
+    def test_a_discovered_site_stays_unfetchable_until_policy_says_otherwise(self):
+        conn = open_store(self.root / "content.db")
+        self.addCleanup(conn.close)
+        provider = FakeSearchProvider({DEFAULT_ARABIC_QUERIES[0]: [self.NEW_SITE]})
+        finder = SearchFinder(provider, queries=DEFAULT_ARABIC_QUERIES[:1])
+        with self.arabic_page():
+            ArabicSiteDiscovery(
+                self.store, SafeHTTP(["fresh-manga.example"])).discover([finder])
+        sync_source_policy(conn, [])
+        self.assertEqual(fetchable_sources(conn), [],
+                         "discovery alone cannot make a site fetchable")
+        sync_source_policy(conn, [{"source_id": "site:fresh-manga.example",
+                                   "kind": "html", "allowed_hosts": ["fresh-manga.example"],
+                                   "fetch_enabled": False, "quota_bytes": 0,
+                                   "retention_days": 7}])
+        self.assertEqual(fetchable_sources(conn), [], "an operator can still say no")
+
+    # 5. one provider failure costs nothing and stops nothing
+    def test_a_failing_query_keeps_earlier_results_and_the_pass(self):
+        provider = FakeSearchProvider({DEFAULT_ARABIC_QUERIES[1]: ["https://kept.example/"]},
+                                      fail_on={DEFAULT_ARABIC_QUERIES[0]})
+        finder = SearchFinder(provider, queries=DEFAULT_ARABIC_QUERIES[:3])
+        pages = {"fresh-manga.example": ARABIC_PAGE, "kept.example": ARABIC_PAGE}
+        with SiteFixture(pages):
+            discovery = ArabicSiteDiscovery(
+                self.store, SafeHTTP(["fresh-manga.example", "kept.example"]))
+            proposals = discovery.discover([finder])
+        self.assertEqual([p["domain"] for p in proposals], ["kept.example"],
+                         "the query that did succeed still produced its candidate")
+        self.assertEqual(len(self._events("site_candidate")), 1)
+        self.assertEqual(len(discovery.errors), 0, "a per-query failure is swallowed only "
+                         "inside the finder, which keeps going")
+        self.assertEqual(len(provider.calls), 3, "later queries still ran")
+
+    def test_a_whole_finder_failure_is_recorded_and_previous_proposals_survive(self):
+        class ExplodingFinder:
+            def find(self, limit=250):
+                raise RuntimeError("provider is down")
+
+        provider = FakeSearchProvider({DEFAULT_ARABIC_QUERIES[0]: [self.NEW_SITE]})
+        good = SearchFinder(provider, queries=DEFAULT_ARABIC_QUERIES[:1])
+        with self.arabic_page():
+            discovery = ArabicSiteDiscovery(
+                self.store, SafeHTTP(["fresh-manga.example"]))
+            first = discovery.discover([good])
+            second = discovery.discover([ExplodingFinder(), good])
+        self.assertEqual(len(first), 1)
+        self.assertEqual(second, [], "the already-proposed site is not re-proposed")
+        self.assertTrue(discovery.errors)
+        self.assertEqual(len(self._events("site_proposed")), 1,
+                         "an earlier proposal is not deleted by a later failure")
+
+    # 6. repetition creates nothing new
+    def test_repeated_search_proposes_no_duplicate_review_items(self):
+        provider = FakeSearchProvider({DEFAULT_ARABIC_QUERIES[0]: [self.NEW_SITE]})
+        finder = SearchFinder(provider, queries=DEFAULT_ARABIC_QUERIES[:1])
+        with self.arabic_page():
+            discovery = ArabicSiteDiscovery(
+                self.store, SafeHTTP(["fresh-manga.example"]))
+            first = discovery.discover([finder])
+            second = discovery.discover([finder])
+        self.assertEqual(len(first), 1)
+        self.assertEqual(second, [])
+        self.assertEqual(len(self._events("site_proposed")), 1)
+        self.assertEqual(len(pending_proposals(self.store)), 1)
+        self.assertEqual(self.store.db.execute("SELECT COUNT(*) FROM sources").fetchone()[0], 0)
+
+    # 7. refusals are refusals
+    def test_a_refused_site_is_recorded_and_never_retried_by_bypass(self):
+        provider = FakeSearchProvider({DEFAULT_ARABIC_QUERIES[0]: ["https://walled.example/"]})
+        finder = SearchFinder(provider, queries=DEFAULT_ARABIC_QUERIES[:1])
+        with SiteFixture({"walled.example": ARABIC_PAGE}, blocked={"walled.example"}):
+            proposals = ArabicSiteDiscovery(
+                self.store, SafeHTTP(["walled.example"])).discover([finder])
+        self.assertEqual(proposals, [])
+        detail = self._last_event("site_candidate")
+        self.assertEqual(detail["verdict"], "REJECTED")
+        self.assertTrue(detail["blocked"])
+        self.assertEqual(len(self._events("site_proposed")), 0,
+                         "a refused site is never proposed, let alone fetched")
+
+    # 8. the config sync neither activates nor erases a discovered candidate
+    def test_syncing_content_sources_neither_activates_nor_erases_candidates(self):
+        conn = open_store(self.root / "content.db")
+        self.addCleanup(conn.close)
+        provider = FakeSearchProvider({DEFAULT_ARABIC_QUERIES[0]: [self.NEW_SITE]})
+        finder = SearchFinder(provider, queries=DEFAULT_ARABIC_QUERIES[:1])
+        with self.arabic_page():
+            ArabicSiteDiscovery(
+                self.store, SafeHTTP(["fresh-manga.example"])).discover([finder])
+        before = pending_proposals(self.store)
+        sync_source_policy(conn, [{"source_id": "mangadex", "kind": "api",
+                                  "allowed_hosts": ["mangadex.org"], "fetch_enabled": True,
+                                  "quota_bytes": 10, "retention_days": 7}])
+        self.assertEqual([r[0] for r in fetchable_sources(conn)], ["mangadex"],
+                         "the sync activates only what the operator configured")
+        self.assertNotIn("site:fresh-manga.example", [r[0] for r in fetchable_sources(conn)])
+        self.assertEqual(pending_proposals(self.store), before,
+                         "sync_source_policy deletes rows absent from the config, so a "
+                         "candidate must never have been written there to begin with")
+        self.assertEqual(len(self._events("site_proposed")), 1)
+
+    def test_a_candidate_written_to_the_policy_table_would_be_erased(self):
+        """Why candidates are kept out of ``source_policy``: this is what sync does."""
+        conn = open_store(self.root / "content.db")
+        self.addCleanup(conn.close)
+        sync_source_policy(conn, [{"source_id": "site:fresh-manga.example", "kind": "html",
+                                   "allowed_hosts": ["fresh-manga.example"],
+                                   "fetch_enabled": False, "quota_bytes": 0,
+                                   "retention_days": 7}])
+        sync_source_policy(conn, [])
+        self.assertEqual(conn.execute(
+            "SELECT COUNT(*) FROM source_policy WHERE source_id='site:fresh-manga.example'"
+        ).fetchone()[0], 0,
+            "sync erases any row the config does not list")
+
+    # 10. trust rules: APK rules unchanged, no APK cert anywhere on the site path
+    def test_apk_trust_requirements_are_unchanged_and_sites_need_no_apk_cert(self):
+        apk = Source("github:o/r", "r", "https://api.github.com/repos/o/r/releases",
+                     "github-releases", "ar",
+                     configuration={"allowed_hosts": ["api.github.com"], "package": ""})
+        missing = SourceRegistry.trust_material_missing(apk)
+        self.assertTrue(any("signing_key" in m for m in missing),
+                        "an APK source still needs its signing-certificate fingerprint")
+        self.assertTrue(any("package" in m for m in missing),
+                        "a github-releases source still needs its package name")
+        site = SiteCandidate(url=self.NEW_SITE, origin="search", language="ar")
+        self.assertEqual(site.source_id(), "site:fresh-manga.example")
+        self.assertFalse([m for m in missing if "site" in m],
+                         "no site-specific rule leaks into the APK trust check")
+
+    def _events(self, event):
+        return [json.loads(d) for (d,) in self.store.db.execute(
+            "SELECT detail FROM history WHERE event=? ORDER BY id", (event,))]
+
+
+    def _last_event(self, event):
+        rows = self._events(event)
+        self.assertTrue(rows, f"expected a {event} event")
+        return rows[-1]

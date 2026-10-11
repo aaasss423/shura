@@ -112,18 +112,26 @@ def main(argv=None):
     out.append({**row,"source_id":w["source_id"],"chapters":chapters})
    print(json.dumps(out,ensure_ascii=False));return 0
   elif args.command=="discover-sites":
-   from shura_core.crawler.arabic import ArabicSiteDiscovery,SeedFileFinder
+   from shura_core.crawler.arabic import (ArabicSiteDiscovery,SeedFileFinder,
+    configured_search_finder)
    from shura_core.security.network import SafeHTTP
    from pathlib import Path
    # Candidates are probed with an unconstrained client: the evaluator records
    # why a host was refused, and nothing here can enable a source.
-   finder=SeedFileFinder(Path(args.seeds))
-   candidates=finder.find(limit=max(0,args.limit))
-   hosts=sorted({c.domain for c in candidates if c.domain})
-   discovery=ArabicSiteDiscovery(store,SafeHTTP(hosts),daily_limit=max(0,args.limit))
-   proposals=discovery.discover([finder])
-   print(json.dumps({"candidates":len(candidates),"proposed":proposals,
-    "finderErrors":discovery.errors,"cleared":0},ensure_ascii=False))
+   finders=[SeedFileFinder(Path(args.seeds))]
+   search=configured_search_finder()
+   if search is not None:finders.append(search)
+   # Evaluated against the candidate hosts themselves: a candidate is never
+   # granted the search provider's reach, and the report store is ephemeral.
+   seen={};limit=max(0,args.limit)
+   for finder in finders:
+    for c in finder.find(limit=limit):seen.setdefault(c.domain,c)
+   hosts=sorted(seen)
+   discovery=ArabicSiteDiscovery(store,SafeHTTP(hosts),daily_limit=limit)
+   proposals=discovery.discover(finders)
+   print(json.dumps({"candidates":len(seen),"proposed":proposals,
+    "searchConfigured":search is not None,"finderErrors":discovery.errors,
+    "persisted":False},ensure_ascii=False))
    return 0
   elif args.command=="content-fetch":
    from shura_core.content import open_store,run_fetch_run

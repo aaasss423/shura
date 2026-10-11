@@ -1,7 +1,8 @@
 import argparse,os,signal,sys,threading
 from pathlib import Path
 from shura_core.coordinator import CrawlCoordinator
-from shura_core.crawler.arabic import ArabicSiteDiscovery,SeedFileFinder
+from shura_core.crawler.arabic import (ArabicSiteDiscovery,SeedFileFinder,
+    configured_search_finder)
 from shura_core.discovery.service import SourceDiscovery
 from shura_core.notifications.telegram import TelegramNotifier
 from shura_core.pipeline import CandidateProcessor
@@ -46,8 +47,14 @@ def main(argv=None):
         if getattr(a,"discover_sites",False):
             seeds=os.getenv("SHURA_SITE_SEEDS","content-source-seeds.json")
             site_discovery=ArabicSiteDiscovery(store,SafeHTTP([]),daily_limit=a.max_sources)
-            site_finders=(SeedFileFinder(Path(seeds)),)
-            notifier.send("Shura Arabic site discovery enabled; proposals land paused and disabled.")
+            finders=[SeedFileFinder(Path(seeds))]
+            search=configured_search_finder()
+            if search is not None:
+                finders.append(search)
+                notifier.send("Shura site search enabled via the configured endpoint.")
+            site_finders=tuple(finders)
+            notifier.send("Shura Arabic site discovery enabled; candidates are "
+                "recorded as review items only and are never crawlable.")
         Scheduler(store).serve(coordinator,a.interval_seconds,stop,rechecker=rechecker,processor=processor,max_downloads=a.max_downloads,notifier=notifier,discovery=discovery,site_discovery=site_discovery,site_finders=site_finders)
     finally:store.close()
     return 0
