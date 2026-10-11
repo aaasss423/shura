@@ -384,6 +384,7 @@ class SiteFixture:
                 raise HTTPError(url, 403, "Forbidden", {}, None)
             page = fixture.pages.get(host, "")
             path = url.split(host, 1)[-1] if host in url else "/"
+            path = path.split("?", 1)[0]
             if isinstance(page, dict):
                 page = page.get(path, page.get(path.rstrip("/") or "/", ""))
             return FakeResponse(url, (page or "").encode())
@@ -1649,3 +1650,117 @@ class FetchCycleIntegrationTests(Case):
             self.conn.execute("SELECT COUNT(*) FROM chapter_pages WHERE state='DONE'"
                               ).fetchone()[0], 0,
             "enabling a source does not let it fetch outside its own allowed hosts")
+
+
+#: A saved taxonomy page in the shape real CMS listings use: dozens of links
+#: sharing one shape with numbers in them, and nothing literally saying "manga".
+TAXONOMY_SITE = {
+    "/ar/tax": ('<!doctype html><html lang="ar" dir="rtl"><head><title>التصنيفات</title></head>'
+                '<body><h1>فهرس الأعمال</h1><ul>'
+                + "".join(f'<li><a href="/ar/node/{1000+i}?language_content_entity=ar">'
+                          f'الولد الضب {i}</a></li>' for i in range(12))
+                + "</ul></body></html>"),
+    # The work page carries no chapter links at all: the listing is rendered by
+    # JavaScript, which is what makes this deferred rather than a source.
+    "/ar/node/1000": ('<!doctype html><html lang="ar" dir="rtl"><head><title>الولد الضب</title>'
+                      '</head><body><div id="app"></div><script src="/app.js"></script>'
+                      '</body></html>'),
+}
+
+#: The same listing, but this time the work pages really do link to chapters.
+TAXONOMY_WITH_CHAPTERS = {
+    "/ar/tax": TAXONOMY_SITE["/ar/tax"],
+    "/ar/node/1000": ('<!doctype html><html lang="ar" dir="rtl"><body>'
+                      '<a href="/ar/node/1000/chapter-1/">فصل ١</a>'
+                      '<a href="/ar/node/1000/chapter-2/">فصل ٢</a></body></html>'),
+}
+
+
+class CmsListingDiscoveryTests(Case):
+    """A listing is recognised from its shape, not from a hard-coded route."""
+
+    def seed(self, url="https://cms.example/ar/tax"):
+        seed_file(self.root / "seeds.json", [url])
+        return SeedFileFinder(self.root / "seeds.json")
+
+    def test_a_cms_listing_is_recognised_without_known_routes(self):
+        with SiteFixture({"cms.example": TAXONOMY_SITE}):
+            proposals = ArabicSiteDiscovery(
+                self.store, SafeHTTP(["cms.example"])).discover([self.seed()])
+        self.assertEqual(proposals, [], "index but no chapters: deferred")
+        verdict = self._events("site_candidate")[-1]
+        self.assertTrue(verdict["hasIndex"])
+        self.assertFalse(verdict["hasChapters"])
+        self.assertEqual(verdict["verdict"], "DEFERRED")
+        self.assertTrue(any("repeating content shape" in r for r in verdict["evidenceReasons"]),
+                        "the listing shape is the evidence, named in the record")
+        self.assertLessEqual(verdict["pagesExamined"], 5, "navigation stays bounded")
+
+    def test_a_listing_whose_work_pages_link_to_chapters_is_a_candidate(self):
+        with SiteFixture({"cms.example": TAXONOMY_WITH_CHAPTERS}):
+            proposals = ArabicSiteDiscovery(
+                self.store, SafeHTTP(["cms.example"])).discover([self.seed()])
+        self.assertEqual([p["verdict"] for p in proposals], ["CANDIDATE"])
+        self.assertTrue(proposals[0]["hasIndex"])
+        self.assertTrue(proposals[0]["hasChapters"])
+
+    def test_a_small_scatter_of_links_is_not_mistaken_for_a_listing(self):
+        page = ('<!doctype html><html lang="ar"><body>'
+                '<a href="/about/1">من نحن</a><a href="/about/2">اتصل بنا</a>'
+                '<a href="/legal/3">الشروط</a></body></html>')
+        with SiteFixture({"sparse.example": {"/": page}}):
+            proposals = ArabicSiteDiscovery(
+                self.store, SafeHTTP(["sparse.example"])).discover(
+                [SeedFileFinder(self._seed("https://sparse.example/"))])
+        self.assertEqual(proposals, [])
+        self.assertFalse(self._events("site_candidate")[-1]["hasIndex"],
+                         "three footer links are not a catalogue")
+
+    def test_chapter_links_that_cannot_be_read_stay_unverified(self):
+        walled = dict(TAXONOMY_WITH_CHAPTERS)
+        walled["/ar/node/1000"] = TAXONOMY_WITH_CHAPTERS["/ar/node/1000"]
+        with SiteFixture({"cms.example": walled},
+                         blocked={"cms.example"}):
+            proposals = ArabicSiteDiscovery(
+                self.store, SafeHTTP(["cms.example"])).discover([self.seed()])
+        self.assertEqual(proposals, [])
+        verdict = self._events("site_candidate")[-1]
+        self.assertEqual(verdict["verdict"], "REJECTED")
+        self.assertTrue(verdict["blocked"], "an unreadable site is a refusal, not a source")
+
+    def test_relative_links_are_resolved_and_off_host_links_are_not_followed(self):
+        page = ('<!doctype html><html lang="ar" dir="rtl"><body>'
+                '<a href="tax">فهرس</a>'
+                '<a href="//elsewhere.example/ar/node/1">خارجي</a>'
+                '<a href="https://elsewhere.example/ar/node/2">خارجي</a>'
+                + "".join(f'<a href="../node/{2000+i}">عمل {i}</a>' for i in range(4))
+                + "</body></html>")
+        with SiteFixture({"rel.example": {"/ar/": page}}):
+            proposals = ArabicSiteDiscovery(
+                self.store, SafeHTTP(["rel.example"])).discover(
+                [SeedFileFinder(self._seed("https://rel.example/ar/"))])
+        urls = [e["url"] for e in self._events("site_candidate")[-1]["evidence"]]
+        for u in urls:
+            self.assertNotIn("elsewhere.example", u,
+                             "an off-host link was fetched")
+        verdict = self._events("site_candidate")[-1]
+        self.assertTrue(verdict["hasIndex"],
+                        "relative links still produced index evidence")
+
+    def test_navigation_stays_within_its_budget_when_results_are_many(self):
+        page = ('<!doctype html><html lang="ar" dir="rtl"><body>'
+                + "".join(f'<a href="/ar/node/{3000+i}">عمل {i}</a>' for i in range(500))
+                + "</body></html>")
+        with SiteFixture({"big.example": {"/": page}}):
+            discovery = ArabicSiteDiscovery(self.store, SafeHTTP(["big.example"]))
+            discovery.discover([SeedFileFinder(self._seed("https://big.example/"))])
+        self.assertLessEqual(self._events("site_candidate")[-1]["pagesExamined"], 5,
+                             "a page with 500 links does not turn into 500 requests")
+
+    def _seed(self, url):
+        seed_file(self.root / "seeds.json", [url])
+        return self.root / "seeds.json"
+
+    def _events(self, event):
+        return [json.loads(d) for (d,) in self.store.db.execute(
+            "SELECT detail FROM history WHERE event=? ORDER BY id", (event,))]

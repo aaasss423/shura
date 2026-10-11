@@ -189,6 +189,7 @@ def evaluate_site(http, candidate: SiteCandidate, *, max_bytes: int = 2_000_000,
         return verdict
 
     pages: list[tuple[str, str]] = []          # (url, text) for evidence
+    budget = max(0, max_follow)                # extra pages this probe may spend
     try:
         body, headers, final = http.get(candidate.url, max_bytes=max_bytes)
     except Exception as exc:                                  # noqa: BLE001
@@ -234,7 +235,7 @@ def evaluate_site(http, candidate: SiteCandidate, *, max_bytes: int = 2_000_000,
     # not fetched.
     locale, offsite = _split_locale_links(verdict.locale_links, final, candidate.domain)
     verdict.offsite_locale_links = offsite
-    for link in locale[:max(0, max_follow)]:
+    for link in locale[:budget]:
         if verdict.verdict == "CANDIDATE":
             break
         try:
@@ -245,21 +246,25 @@ def evaluate_site(http, candidate: SiteCandidate, *, max_bytes: int = 2_000_000,
             continue
         text_l = _decode(body_l, headers_l)
         pages.append((final_l, text_l))
+        budget -= 1
         _judge(verdict, text_l, final_l)
 
-    if verdict.reachable and verdict.https and not verdict.blocked \
-            and verdict.verdict != "CANDIDATE":
+    if (verdict.reachable and verdict.https and not verdict.blocked
+            and verdict.verdict != "CANDIDATE" and budget > 0):
         # Still undecided: follow a small number of same-host links that look
         # like an index or a chapter listing. Each is a public GET on the same
         # host the candidate already claimed, under the same size and timeout
         # policy as the first request.
-        for link in _followups(text, final, candidate.domain)[:max(0, max_follow)]:
+        for link in _followups(text, final, candidate.domain):
             try:
                 body2, headers2, final2 = http.get(link, max_bytes=max_bytes)
             except Exception:                                 # noqa: BLE001
                 continue                    # one bad link is not a verdict
+            if budget <= 0:
+                break                       # the probe's page budget is spent
             text2 = _decode(body2, headers2)
             pages.append((final2, text2))
+            budget -= 1
             before = verdict.verdict
             _judge(verdict, text2, final2)
             if verdict.verdict != before:
@@ -352,6 +357,18 @@ def _judge(verdict: SiteVerdict, text: str, url: str) -> None:
     # of links shaped like works and chapters.
     works = _links_matching(text, _WORK_LINK)
     chapters = _links_matching(text, _CHAPTER_LINK)
+    listing = _listing_entries(text) if len(works) < 2 else set()
+    if len(works) >= 2:
+        works = set(works)
+    elif len(listing) >= _LISTING_MIN:
+        # No path literally says "manga" or "series", but dozens of links share
+        # one shape with numbers in it. That is what a content listing looks
+        # like whichever CMS produced it, so it counts as index evidence
+        # without this module needing to know any site's routes.
+        works = listing
+        verdict.evidence_reasons.append(
+            f"{url}: {len(listing)} links share one repeating content shape "
+            "(a listing, whatever the CMS calls it)")
     if not verdict.has_index and len(works) >= 2:
         verdict.has_index = True
         verdict.evidence_reasons.append(f"{url}: {len(works)} links shaped like works")
@@ -422,6 +439,43 @@ _CHAPTER_LINK = re.compile(r"/(?:chapter|chapters|ch|chap|episode|episodes|ep|vo
                            re.I)
 
 
+#: How many links must share a repeating shape before that is called a listing.
+_LISTING_MIN = 3
+_DIGITS = re.compile(r"\d+")
+
+
+def _listing_entries(text: str, *, limit: int = 200) -> set[str]:
+    """Distinct same-page hrefs that repeat one path shape with numbers in it.
+
+    Content listings are the same idea on every CMS - ``/node/2621``,
+    ``/manga/one/``, ``/book/12345/`` - so rather than enumerating routes this
+    looks for the shape itself: mask the digits, group the hrefs by what is
+    left, and keep the groups large enough to be a listing rather than a menu.
+    """
+    groups: dict[str, set[str]] = {}
+    for href in dict.fromkeys(_LINK_HREF.findall(text[:400_000])):
+        href = href.strip()
+        if not href or href.startswith(("#", "mailto:", "javascript:", "data:")):
+            continue
+        try:
+            path = urlparse(href).path
+        except ValueError:
+            continue
+        if not path or _SKIP_PATH.search(path) or _NON_HTML_PATH.search(path):
+            continue
+        shape = _DIGITS.sub("{n}", path.rstrip("/"))
+        if "{" not in shape:
+            continue
+        bucket = groups.setdefault(shape, set())
+        if len(bucket) < limit:
+            bucket.add(href)
+    out: set[str] = set()
+    for bucket in groups.values():
+        if len(bucket) >= _LISTING_MIN:
+            out |= bucket
+    return out
+
+
 def _links_matching(text: str, pattern: "re.Pattern[str]") -> list[str]:
     """Distinct same-page hrefs whose path matches ``pattern``."""
     out: set[str] = set()
@@ -460,6 +514,8 @@ def _followups(text: str, base_url: str, host: str, *, limit: int = 12) -> list[
             continue
         if _SKIP_PATH.search(parsed.path or "") or not (parsed.path or "").strip("/"):
             continue
+        if (parsed.path or "") == (urlparse(base_url).path or ""):
+            continue          # a "#section" jump back to this page is not a new page
         if _NON_HTML_PATH.search(parsed.path or ""):
             continue          # a manifest or a feed is not a catalogue page
             continue
