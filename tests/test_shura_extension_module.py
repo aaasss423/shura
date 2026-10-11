@@ -96,6 +96,48 @@ class ExtensionModuleTests(unittest.TestCase):
             self.assertEqual(found, [],
                              f"{path.name} appears to carry a credential: {found}")
 
+    # -- bugs found by running it, guarded so they cannot come back ----
+    def test_the_extension_lib_is_declared_as_a_number_aapt2_will_keep_numeric(self):
+        """A bare "1" is encoded as a boolean and the reader then refuses it.
+
+        aapt2 stores `android:value="1"` as TYPE_INT_BOOLEAN, which
+        ApkManifestReader renders as "true"; ShuraRepositoryClient then finds
+        "true" is not a number and rejects the extension. The reader has an
+        explicit TYPE_FLOAT branch for this field, so the manifest must supply
+        a float.
+        """
+        manifest = self.read(MODULE, "src/main/AndroidManifest.xml")
+        match = re.search(r'tachiyomix\.extensionLib"\s+android:value="([^"]+)"', manifest)
+        self.assertIsNotNone(match, "the manifest declares no extensionLib value")
+        value = match.group(1)
+        self.assertRegex(value, r"^\d+\.\d+$",
+                         f"extensionLib '{value}' must be a decimal literal so aapt2 "
+                         "encodes TYPE_FLOAT rather than a boolean")
+
+    def test_search_encodes_its_query(self):
+        """A bare space in a URL makes URL() throw and the search returns nothing."""
+        source = self.read(
+            MODULE, "src/main/java/app/shura/extension/mangadex/MangaDexSource.kt")
+        self.assertIn("URLEncoder.encode", source,
+                      "the title must be percent-encoded before it goes into the URL")
+        self.assertNotIn("?title=$query", source,
+                         "an unencoded query silently returns no results")
+
+    def test_the_localized_title_map_is_read_as_a_map(self):
+        """MangaDex returns title as a per-language map, not a string."""
+        source = self.read(
+            MODULE, "src/main/java/app/shura/extension/mangadex/MangaDexSource.kt")
+        self.assertIn('attrs?.str("title")', source,
+                      "reading the localized title map as a string yields blank titles")
+
+    def test_page_filenames_come_from_the_chapter_object(self):
+        """at-home returns chapter as an object holding hash and a data array."""
+        source = self.read(
+            MODULE, "src/main/java/app/shura/extension/mangadex/MangaDexSource.kt")
+        self.assertIn('root.obj("chapter")', source)
+        self.assertNotIn('root.arr("chapter")', source,
+                         "chapter is an object, not an array of filenames")
+
     # -- it satisfies what the runtime resolves at load time --------
     def test_the_manifest_declares_the_class_the_loader_resolves(self):
         manifest = self.read(MODULE, "src/main/AndroidManifest.xml")

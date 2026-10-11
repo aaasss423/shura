@@ -4,6 +4,11 @@
         <!-- The two keys ShuraExtensionLoader/ExtensionLoader resolve. -->
         <meta-data android:name="tachiyomi.extension.class"
                    android:value="app.shura.extension.mangadex.MangaDexSource" />
-        <meta-data android:name="tachiyomix.extensionLib" android:value="1" />
+        <!-- Declared as a float, not a bare "1". aapt2 encodes a bare 1 as
+             TYPE_INT_BOOLEAN, which ApkManifestReader renders as "true", and
+             ShuraRepositoryClient then refuses the extension because
+             "true" is not a number. The reader handles TYPE_FLOAT explicitly
+             for exactly this field. -->
+        <meta-data android:name="tachiyomix.extensionLib" android:value="1.0" />
     </application>
 </manifest>

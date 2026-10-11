@@ -1,6 +1,6 @@
 {
   "repo": "Shura",
-  "generated_at": 1791708695,
+  "generated_at": 1791742653,
   "signing_key_fingerprint": "f5b757d7c773d65e74907c08e4f8d2fdb30a3d76b78a764e2093f6a9e69bcba5",
   "packages": [
     {
@@ -11,7 +11,7 @@
       "source_id": "github:shura/extension-mangadex",
       "identity": "app.shura.extension.mangadex|1.0",
       "provenance": {},
-      "artifact_sha256": "64415dc5a05933f770efc02d26ea96d222b0e980c95c89774185442da4ce9be3",
+      "artifact_sha256": "efae79e81c15e199aabc04216fd50fc40af289d19fdc9dfb2ebef195ab5e789d",
       "signing_certificate_sha256": "f5b757d7c773d65e74907c08e4f8d2fdb30a3d76b78a764e2093f6a9e69bcba5",
       "malware": {
         "verdict": "CLEAN",

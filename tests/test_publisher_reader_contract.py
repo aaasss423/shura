@@ -221,6 +221,17 @@ class PublishedFixtureSyncTests(unittest.TestCase):
     FIXTURE = (Path(__file__).resolve().parents[1] / "android"
                / "shura-extension-runtime/src/test/resources/published")
 
+    #: Describing a particular artifact, so they cannot be reproduced by a
+    #: publish over a stand-in APK. The structural fields below are the ones
+    #: the reader's contract depends on; the digests are compared where the
+    #: artifact itself is available, in ShuraRepositoryClientVerifyTest.
+    ARTIFACT_SPECIFIC = ("artifact_sha256", "signing_certificate_sha256")
+
+    @classmethod
+    def _structural(cls, packages):
+        return [{k: v for k, v in entry.items() if k not in cls.ARTIFACT_SPECIFIC}
+                for entry in packages]
+
     def test_the_committed_index_matches_a_freshly_published_one(self):
         committed = json.loads((self.FIXTURE / "index.shura.json").read_text(encoding="utf-8"))
         case = PublisherReaderContractTests("test_the_reader_can_tell_the_apk_from_the_index")
@@ -230,8 +241,16 @@ class PublishedFixtureSyncTests(unittest.TestCase):
         finally:
             case.store.close()
             case.tmp.cleanup()
-        self.assertEqual(committed["packages"], fresh["packages"],
+        self.assertEqual(self._structural(committed["packages"]),
+                         self._structural(fresh["packages"]),
                          "the Kotlin fixture is stale; regenerate it from the publisher")
+
+    def test_the_committed_index_carries_the_digests_the_reader_compares(self):
+        committed = json.loads((self.FIXTURE / "index.shura.json").read_text(encoding="utf-8"))
+        for field in self.ARTIFACT_SPECIFIC:
+            value = committed["packages"][0].get(field, "")
+            self.assertRegex(value, r"^[0-9a-f]{64}$",
+                             f"the fixture must carry a real {field}")
 
     def test_the_committed_repo_json_matches_a_freshly_published_one(self):
         case = PublisherReaderContractTests("test_the_reader_can_tell_the_apk_from_the_index")
