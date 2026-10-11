@@ -20,6 +20,7 @@ from pathlib import Path
 from shura_core.coordinator import CrawlCoordinator
 from shura_core.crawler.github import GitHubReleasesCrawler, select_release_asset
 from shura_core.crawler.index import IndexCrawler, resolve_artifact_url
+from shura_core.models import Candidate as _Candidate, Source
 from shura_core.crawler.arabic import (ArabicSiteDiscovery, SeedFileFinder, evaluate_site,
                                           pending_proposals, SearchFinder,
                                           configured_search_finder, DEFAULT_ARABIC_QUERIES,
@@ -1973,3 +1974,129 @@ class ReleaseAssetSelectionTests(Case):
         identities = {c.identity for c in result.candidates}
         self.assertEqual(identities, {"org.example.ext|v1.0"},
                          "one release yields one identity, never one per build")
+
+
+class IndexIdentityAmbiguityTests(Case):
+    """Several binaries under one package|version must not resolve by position.
+
+    The coordinator used to keep whichever entry came first and drop the rest
+    without a word, so an index listing per-ABI APKs published whichever
+    happened to be listed first. The release path already refused that case;
+    the index path now uses the same explicit-choice-or-refuse rule.
+    """
+
+    BASE = "https://repo.shura.example"
+
+    def entries(self, *names):
+        return [{"name": n, "pkg": "org.example.ext", "version": "1.0",
+                 "lang": "ar", "apk": n} for n in names]
+
+    def crawl(self, index_body, source=None):
+        body = json.dumps(index_body).encode()
+        base = self.BASE
+
+        class Http:
+            def get(self, url, headers=None, max_bytes=None):
+                return body, None, f"{base}/index.json"
+        src = source or Source("index:shura/example", "Example",
+                               f"{base}/index.json", "index", "ar",
+                               configuration={"allowed_hosts": ["repo.shura.example"]})
+        return IndexCrawler(Http()).crawl(src, {"max_pages": 1, "max_candidates": 10})
+
+    def test_two_builds_under_one_identity_are_refused(self):
+        result = self.crawl(self.entries("e_arm64.apk", "e_x86.apk"))
+        self.assertEqual(result.candidates, [],
+                         "no artifact may be chosen by its position in the index")
+        refusals = [t for t in result.trace if "refused" in t]
+        self.assertEqual(len(refusals), 1)
+        detail = refusals[0]["refused"]
+        self.assertEqual(sorted(detail["assets"]), ["e_arm64.apk", "e_x86.apk"])
+        self.assertIn("universal", detail["reason"])
+
+    def test_reversing_the_index_does_not_change_the_outcome(self):
+        forward = self.crawl(self.entries("e_arm64.apk", "e_x86.apk"))
+        backward = self.crawl(self.entries("e_x86.apk", "e_arm64.apk"))
+        self.assertEqual(forward.candidates, [], "refused")
+        self.assertEqual(backward.candidates, [], "refused")
+        self.assertEqual(
+            sorted(forward.trace[1]["refused"]["assets"]),
+            sorted(backward.trace[1]["refused"]["assets"]),
+            "the same names are reported whatever the order")
+
+    def test_the_order_does_not_decide_which_universal_build_wins(self):
+        forward = self.crawl(self.entries("e_arm64.apk", "e_universal.apk", "e_x86.apk"))
+        backward = self.crawl(self.entries("e_x86.apk", "e_universal.apk", "e_arm64.apk"))
+        self.assertEqual([c.apk_url for c in forward.candidates],
+                         [f"{self.BASE}/apk/e_universal.apk"])
+        self.assertEqual([c.apk_url for c in forward.candidates],
+                         [c.apk_url for c in backward.candidates],
+                         "reversing the index must not silently publish a different APK")
+
+    def test_an_explicit_asset_choice_selects_that_one(self):
+        source = Source("index:shura/example", "Example", f"{self.BASE}/index.json",
+                        "index", "ar",
+                        configuration={"allowed_hosts": ["repo.shura.example"],
+                                       "asset": "e_x86.apk"})
+        forward = self.crawl(self.entries("e_arm64.apk", "e_x86.apk"), source)
+        backward = self.crawl(self.entries("e_x86.apk", "e_arm64.apk"), source)
+        self.assertEqual([c.apk_url for c in forward.candidates],
+                         [f"{self.BASE}/apk/e_x86.apk"])
+        self.assertEqual([c.apk_url for c in forward.candidates],
+                         [c.apk_url for c in backward.candidates])
+
+    def test_distinct_versions_are_not_treated_as_duplicates(self):
+        body = [{"pkg": "org.example.ext", "version": "1.0", "apk": "e-1.0.apk"},
+                {"pkg": "org.example.ext", "version": "1.1", "apk": "e-1.1.apk"}]
+        result = self.crawl(body)
+        self.assertEqual([c.version for c in result.candidates], ["1.0", "1.1"],
+                         "two versions are two identities, not an ambiguous group")
+
+    def test_a_single_entry_index_is_unchanged(self):
+        result = self.crawl(self.entries("e-1.0.apk"))
+        self.assertEqual(len(result.candidates), 1)
+        self.assertEqual(result.candidates[0].apk_url, f"{self.BASE}/apk/e-1.0.apk")
+        self.assertFalse([t for t in result.trace if "refused" in t])
+
+    def test_the_coordinator_records_a_conflicting_duplicate_rather_than_dropping_it(self):
+        """Even if a crawler emitted two, the ledger must show what conflicted."""
+        import json as _json
+        from shura_core.coordinator import CrawlCoordinator
+        from shura_core.models import Source as _Source
+
+        src = _Source("index:shua/example", "Example", f"{self.BASE}/index.json",
+                      "index", "ar", enabled=True,
+                      configuration={"allowed_hosts": ["repo.shura.example"],
+                                     "package": "org.example.ext", "signing_key": "a" * 64})
+
+        class Result:
+            candidates = [
+                _Candidate("index:shua/example", "org.example.ext", "1.0",
+                           "https://repo.shura.example/apk/a.apk", "E", "ar", "", None, {}, {}),
+                _Candidate("index:shua/example", "org.example.ext", "1.0",
+                           "https://repo.shura.example/apk/b.apk", "E", "ar", "", None, {}, {}),
+            ]
+            counters = {}
+            pages = 1
+
+        class Crawler:
+            def __init__(self, http):
+                pass
+
+            def crawl(self, source, budget=None):
+                return Result()
+
+        import shura_core.coordinator as C
+        saved = C.IndexCrawler
+        C.IndexCrawler = Crawler
+        try:
+            self.store.add_source(src)
+            CrawlCoordinator(self.store).run({"index:shua/example"})
+        finally:
+            C.IndexCrawler = saved
+        events = [_json.loads(d) for (d,) in self.store.db.execute(
+            "SELECT detail FROM history WHERE event='duplicate'")]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["artifact"], "https://repo.shura.example/apk/b.apk")
+        self.assertEqual(events[0]["conflictsWith"],
+                         "https://repo.shura.example/apk/a.apk",
+                         "the conflicting artifact must be named, not dropped silently")

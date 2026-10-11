@@ -10,7 +10,7 @@ class CrawlCoordinator:
     def run(self,source_ids=None):
         self.counters=Counter()
         eligible=[s for s in self.store.sources() if (source_ids is None or s.source_id in source_ids) and self.store.eligible(s)]
-        selected=eligible[:self.max_sources];results=[];seen=set();deadline=monotonic()+self.max_seconds
+        selected=eligible[:self.max_sources];results=[];seen={};deadline=monotonic()+self.max_seconds
         self.counters["sourcesBudgetSkipped"]+=max(0,len(eligible)-len(selected))
         for source in selected:
             if monotonic()>=deadline or self.counters["pages"]>=self.max_pages or self.counters["discovered"]>=self.max_candidates:
@@ -30,8 +30,16 @@ class CrawlCoordinator:
                 for c in result.candidates:
                     self.counters["discovered"]+=1;self.store.event(c.source_id,"discovered",{"identity":c.identity})
                     key=(c.source_id,c.identity)
-                    if key in seen:self.counters["duplicateCandidates"]+=1;self.counters["duplicatesSkipped"]+=1;self.store.event(c.source_id,"duplicate",{"identity":c.identity});continue
-                    seen.add(key)
+                    if key in seen:
+                        # Dropped, but no longer silently: when the duplicate names a
+                        # different artifact, the event says so. A crawler is expected
+                        # to resolve such a group itself, so reaching this with a
+                        # different URL means the ambiguity is still open, and the ledger
+                        # should say which two files were in conflict.
+                        self.counters["duplicateCandidates"]+=1;self.counters["duplicatesSkipped"]+=1
+                        self.store.event(c.source_id,"duplicate",{"identity":c.identity,"artifact":c.apk_url,"conflictsWith":None if seen[key]==c.apk_url else seen[key]})
+                        continue
+                    seen[key]=c.apk_url
                     if self.store.already_processed(c.source_id,c.identity,source.configuration_fingerprint):self.counters["knownEntriesSkipped"]+=1;self.store.event(c.source_id,"known_entry_skipped",{"identity":c.identity});continue
                     if self.store.has_pending_for(c.source_id,c.identity):
                         # Re-expose pending work so a failed pipeline/download can be retried.

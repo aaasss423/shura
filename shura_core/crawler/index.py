@@ -1,6 +1,7 @@
 import json
-from urllib.parse import urljoin,urlparse
+from urllib.parse import urljoin, urlparse
 from shura_core.crawler.base import Crawler,CrawlResult
+from .github import select_release_asset
 from shura_core.models import Candidate
 ARTIFACT_DIR="apk/"
 def resolve_artifact_url(index_url,named):
@@ -20,19 +21,29 @@ class IndexCrawler(Crawler):
     def crawl(self,source,budget=None):
         raw,headers,final=self.http.get(source.url);doc=json.loads(raw);items=doc if isinstance(doc,list) else doc.get("extensions",[])
         out=CrawlResult(pages=1,trace=[{"url":source.url,"final_url":final,"type":"index"}])
+        limit=(budget or {}).get("max_candidates",1000)
+        # Entries are grouped by identity first, because several entries can
+        # carry the same package and version and still be different binaries.
+        # Deciding per entry would make the outcome depend on list order.
+        groups={}
         for i,item in enumerate(items):
-            if budget and len(out.candidates)>=budget.get("max_candidates",100):break
             named=item.get("apk",item.get("apk_url",item.get("download")))
-            # An index entry names its artifact by filename, and the
-            # repositories Shura publishes keep those files under apk/. Taking
-            # the name verbatim produced a hostless URL that every later gate
-            # refused; resolving it against the index alone produced a valid URL
-            # pointing at a file that is not there. The apk/ prefix is not a
-            # guess: _materialize writes there and the protobuf index states the
-            # same rule, so the crawler now follows the layout this project
-            # actually publishes. An absolute URL is left untouched.
-            url=resolve_artifact_url(final,named)
             pkg=item.get("pkg",item.get("package"));version=str(item.get("version",""))
-            if not url or not pkg or not version:continue
-            out.candidates.append(Candidate(source.source_id,str(pkg),version,url,str(item.get("name",pkg)),str(item.get("lang",source.language)),str(item.get("lib","")),item.get("signingKey"),item,{"index_url":final,"item":i}))
+            if not named or not pkg or not version:continue
+            groups.setdefault((str(pkg),version),[]).append((i,item,named))
+        # The same explicit-choice-or-refuse rule the release path uses, with the
+        # same `asset` setting. No new setting is introduced.
+        configured=source.configuration.get("asset")
+        for (pkg,version),entries in groups.items():
+            chosen,refusal=select_release_asset([{"name":str(n)} for _,_,n in entries],configured)
+            if refusal is not None:
+                out.trace.append({"url":source.url,"final_url":final,"type":"index",
+                                  "identity":f"{pkg}|{version}","refused":refusal})
+                continue
+            if chosen is None:continue
+            picked=str(chosen["name"])
+            for i,item,named in entries:
+                if len(out.candidates)>=limit:break
+                if str(named)!=picked:continue
+                out.candidates.append(Candidate(source.source_id,pkg,version,resolve_artifact_url(final,named),str(item.get("name",pkg)),str(item.get("lang",source.language)),str(item.get("lib","")),item.get("signingKey"),item,{"index_url":final,"item":i}))
         return out
