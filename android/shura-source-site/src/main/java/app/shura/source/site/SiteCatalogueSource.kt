@@ -46,11 +46,48 @@ data class SiteSpec(
      */
     val chapterMarker: Regex = Regex(""),
 
+    /**
+     * Matches the hrefs that are chapters rather than works.
+     *
+     * Titles are not dependable for this. One live catalogue writes a chapter as
+     * "Chapter 6" butted against "2 days ago", so the text is "Chapter 62 days
+     * ago": the number in it belongs to nothing, and a rule that reads a
+     * trailing number out of it is reading nonsense. The URL says what the
+     * entry is, so it is asked first.
+     */
+    val chapterHref: Regex = Regex(""),
+
     /** The first heading of a page is the work's own title, and outranks the index. */
     val trustPageHeading: Boolean = true,
 
     /** Matches the image srcs that are a chapter's reading pages. */
     val pageImage: Regex,
+
+    /**
+     * The path prefix a reading page of *this* chapter must live under.
+     *
+     * An image extension is not evidence of anything. Every catalogue serves
+     * logos, banners and cover art as .jpg and .webp alongside its actual
+     * pages, and a chapter page that returns those instead of pages produces a
+     * chapter the reader opens to find nothing - which looks like a broken
+     * manga rather than an unsupported site.
+     *
+     * So a page has to be *attributable to the chapter it was found on*. The
+     * real sites put a chapter's pages under a path that contains that
+     * chapter's own identity - the work slug and the chapter number - and put
+     * covers and logos elsewhere. This is that path, proven by reading the
+     * chapter and derived by the converter, so it is data and not a guess.
+     */
+    val pageImagePrefix: Regex,
+
+    /**
+     * The host the reading pages are served from.
+     *
+     * Usually not the site's own host: catalogues put images on a CDN. Recorded
+     * because the reader fetches these URLs, and a host nobody declared is a
+     * host nobody is allowed to reach.
+     */
+    val imageHost: String = "",
 
     /** Matches the image srcs that are a work's cover. Optional. */
     val coverImage: Regex? = null,

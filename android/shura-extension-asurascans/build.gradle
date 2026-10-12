@@ -1,0 +1,28 @@
+plugins { id 'com.android.application'; id 'org.jetbrains.kotlin.android' }
+
+android {
+    namespace 'app.shura.extension.asurascans'
+    compileSdk 34
+    buildToolsVersion '35.0.0'
+    defaultConfig {
+        applicationId 'app.shura.extension.asurascans'
+        minSdk 26
+        targetSdk 34
+        versionCode 10000
+        versionName '1.0'
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    kotlinOptions { jvmTarget = '17' }
+    buildTypes {
+        debug { minifyEnabled false }
+        release { minifyEnabled false }
+    }
+}
+
+// GENERATED. The engine that reads this site lives in :shura-source-site and is
+// compileOnly: the eu.kanade.tachiyomi.* ABI layer and okhttp are supplied by
+// the host application at runtime, not bundled into the APK.
+dependencies {
+    compileOnly project(':shura-extension-runtime')
+    compileOnly project(':shura-source-site')
+}

@@ -32,9 +32,20 @@ class MangaDexSourceTest {
     @Test
     fun `the source declares itself the way the contract says`() {
         val source = MangaDexSource()
-        assertEquals("mangadex", source.id)
+        // The loader's own gates: a CatalogueSource, and the ABI values.
         assertEquals("MangaDex", source.name)
-        assertEquals("ar", source.language)
+        assertEquals("ar", source.lang)
+        assertTrue("the source id must be a stable number, not a string",
+            source.id > 0)
+        assertTrue(
+            "ExtensionLoader.load() refuses anything that is not a CatalogueSource",
+            source is eu.kanade.tachiyomi.source.CatalogueSource)
+        // Every method Shura's ExtensionSourceAdapter calls reflectively.
+        for (method in listOf("searchMangaRequest", "searchMangaParse", "mangaDetailsRequest",
+                              "mangaDetailsParse", "chapterListRequest", "chapterListParse",
+                              "pageListRequest", "pageListParse")) {
+            assertTrue("$method is not declared", source.javaClass.methods.any { it.name == method })
+        }
     }
 
     @Test

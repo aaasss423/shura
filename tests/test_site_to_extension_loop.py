@@ -41,8 +41,25 @@ def _plan(**overrides) -> ExtensionPlan:
 
 class TheShapeComesFromEvidence(unittest.TestCase):
 
-    def test_the_entry_shape_is_derived_from_the_links_that_were_seen(self):
-        self.assertEqual(derive_entry_shape(OBSERVED), r"/index\.php/ar/node/\d+")
+    def test_the_entry_shape_is_the_directory_the_entries_share(self):
+        """Not a digit-masked path.
+
+        A slug carrying an id suffix masks to a different string per work, so a
+        masked-path shape turns an index of forty works into forty groups of one
+        and the site looks like navigation.
+        """
+        self.assertEqual(derive_entry_shape(OBSERVED), r"/index\.php/ar/node")
+        slugs = [f"/comics/{name}-1bb35e56" for name in
+                 ("pick-up-a-grimoire", "solo-swordmaster", "overgeared", "my-dragon")]
+        self.assertEqual(derive_entry_shape(slugs), r"/comics")
+
+    def test_the_shape_matches_every_entry_under_that_directory(self):
+        shape = derive_entry_shape(["/x/1", "/x/2", "/x/3", "/x/4", "/y/5"])
+        self.assertEqual(shape, r"/x")
+        self.assertRegex("/x/99", shape)
+
+    def test_two_links_that_happen_to_share_a_parent_are_not_a_listing(self):
+        self.assertEqual(derive_entry_shape(["/x/1", "/x/2", "/y/3", "/y/4"]), "")
 
     def test_links_that_share_no_shape_yield_nothing_rather_than_a_guess(self):
         scattered = ["/a/1", "/b/2", "/c/3", "/d/4"]
@@ -92,22 +109,37 @@ class RefusalIsARefusal(unittest.TestCase):
         self.assertFalse(plan.publishable)
         self.assertIn("did not match", plan.reason())
 
-    def test_an_image_pattern_alone_cannot_tell_a_logo_from_a_reading_page(self):
+    def test_images_that_are_only_cover_and_logo_do_not_become_a_site(self):
         """Why the explicit gate exists rather than the pattern doing the work.
 
-        The live chapter page serves a cover and two site logos alongside
-        nothing else, and every one of them is a .jpg or .png. A pattern that
-        matches image extensions therefore matches site chrome too, so it cannot
-        decide whether a site can be read - only evidence that reading pages
-        were actually seen can.
+        Every one of these matches the image pattern and none is a reading page.
+        A chapter that served only these has no reading sequence, so the site is
+        refused rather than published as an extension that opens onto a cover.
         """
         from shura_core.extension.converter import PAGE_IMAGE, build_plan as plan_for
-        chrome = ["https://site.example/chapter_cover_image/Page_01.jpg",
-                  "https://site.example/youth_logo.png"]
+        chrome = ["https://site.example/covers/work.abc-400.jpg",
+                  "https://site.example/covers/work.def-400.jpg",
+                  "https://site.example/assets/youth_logo.png"]
         for src in chrome:
             self.assertRegex(src, PAGE_IMAGE)
-        self.assertTrue(plan_for(_descriptor(), observed_hrefs=OBSERVED,
-                                 observed_page_images=chrome).publishable)
+        plan = plan_for(_descriptor(), observed_hrefs=OBSERVED, observed_page_images=chrome)
+        self.assertFalse(plan.publishable)
+        self.assertIn("share no path that identifies the chapter", plan.reason())
+
+    def test_pages_are_found_by_the_directory_they_share_not_by_extension(self):
+        from shura_core.extension.converter import PAGE_IMAGE, build_plan as plan_for
+        work = "https://site.example/comics/a-work-1bb35e56"
+        pages = [f"https://cdn.site.example/img/chapters/a-work/7/{h}.webp"
+                 for h in ("a", "b", "c", "d", "e")]
+        covers = ["https://cdn.site.example/img/covers/a-work.abc-400.webp"]
+        plan = plan_for(_descriptor(), observed_hrefs=OBSERVED,
+                        observed_page_images=pages + covers,
+                        chapter_url=work + "/chapter/7", work_url=work)
+        self.assertTrue(plan.publishable, plan.reason())
+        self.assertEqual(plan.page_image_prefix, r"/img/chapters/[^/]+/\d+")
+        self.assertEqual(plan.image_host, "cdn.site.example")
+        for cover in covers:
+            self.assertRegex(cover, PAGE_IMAGE)
 
     def test_a_site_with_no_page_image_pattern_is_refused(self):
         plan = build_plan(_descriptor(), observed_hrefs=OBSERVED, page_image="")
@@ -176,8 +208,15 @@ class TheGeneratedModuleIsReal(unittest.TestCase):
         self.assertIn("pageImage", source)
         # The reading rules live in android/shura-source-site and are not
         # regenerated per site; a generated file that carried them would be a
-        # hand-written extension wearing a generated name.
-        self.assertLess(len(source.splitlines()), 45, source)
+        # hand-written extension wearing a generated name. It is a spec, not
+        # code: no parsing, no requests, no page handling of its own.
+        body = source.split("SiteSpec(")[-1]
+        for forbidden in ("findAll", "substring", "indexOf", "okhttp", "Request(",
+                          "while (", "for ("):
+            self.assertNotIn(forbidden, body, forbidden)
+        for required in ("entryHref", "chapterHref", "chapterMarker",
+                         "pageImagePrefix", "imageHost", "pageImage"):
+            self.assertIn(required, source, required)
 
     def test_the_source_id_is_a_stable_number_not_a_string(self):
         source = next(v for k, v in self.files.items() if k.endswith(".kt"))
@@ -267,15 +306,22 @@ class TheLoadGates(unittest.TestCase):
             _check_dex(path, "app.shura.extension.mangaarabia.MangaArabiaSource")
         self.assertIn("no dex", str(caught.exception))
 
-    def test_the_abi_must_not_be_bundled(self):
-        from shura_core.extension.builder import BuildFailure, _check_dex
+    def test_packaged_abi_types_are_reported_rather_than_assumed_absent(self):
+        """The Android Gradle Plugin packages a compileOnly *library*.
+
+        An extension that implements the ABI needs those types at compile time,
+        and they end up in the APK. Parent-first delegation means the host's
+        copies still win, so this is bloat and a latent coupling rather than a
+        failure - but it is reported, not passed over in silence.
+        """
+        from shura_core.extension.builder import _check_dex
         path = self._write([
-            "Lapp/shura/extension/mangaarabia/MangaArabiaSource;",
+            "Lapp/shura/extension/mangadex/MangaDexSource;",
             "Leu/kanade/tachiyomi/source/online/HttpSource;",
+            "Leu/kanade/tachiyomi/source/model/SManga;",
         ])
-        with self.assertRaises(BuildFailure) as caught:
-            _check_dex(path, "app.shura.extension.mangaarabia.MangaArabiaSource")
-        self.assertIn("bundles eu.kanade", str(caught.exception))
+        self.assertEqual(
+            2, _check_dex(path, "app.shura.extension.mangadex.MangaDexSource"))
 
     def test_the_shape_a_correctly_built_extension_has_passes(self):
         from shura_core.extension.builder import _check_dex
@@ -283,7 +329,8 @@ class TheLoadGates(unittest.TestCase):
             "Lapp/shura/extension/mangaarabia/MangaArabiaSource;",
             "Lapp/shura/source/site/SiteCatalogueSource;",
         ])
-        _check_dex(path, "app.shura.extension.mangaarabia.MangaArabiaSource")
+        self.assertEqual(
+            0, _check_dex(path, "app.shura.extension.mangaarabia.MangaArabiaSource"))
 
 
 class ReadingTheCompiledManifest(unittest.TestCase):

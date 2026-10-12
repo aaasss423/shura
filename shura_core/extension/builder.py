@@ -48,6 +48,10 @@ class BuiltArtifact:
     source_class: str
     sha256: str
     certificate_sha256: str
+    #: How many eu.kanade.tachiyomi types are packaged. Non-zero is bloat and
+    #: a latent coupling, not a rejection: the loader's class loader is
+    #: parent-first, so the host's copies are the ones actually used.
+    bundled_abi: int = 0
 
     def as_metadata(self) -> dict:
         """The security block Shura's publisher gates on."""
@@ -138,7 +142,7 @@ def describe_apk(apk, *, build_tools: str, jdk: str | None = None,
             version_name = found.group(1)
 
     source_class, extension_lib = manifest_metadata(apk)
-    _check_dex(apk, source_class)
+    bundled_abi = _check_dex(apk, source_class)
 
     signer = subprocess.run([str(Path(build_tools) / "apksigner"), "verify", "--print-certs", str(apk)],
                             capture_output=True, text=True, env=env, timeout=timeout)
@@ -158,7 +162,7 @@ def describe_apk(apk, *, build_tools: str, jdk: str | None = None,
     return BuiltArtifact(path=apk, package=package, version_code=version_code,
                          version_name=version_name, extension_lib=extension_lib,
                          source_class=source_class, sha256=digest,
-                         certificate_sha256=certificate)
+                         certificate_sha256=certificate, bundled_abi=bundled_abi)
 
 
 #: Android's value types, as they appear in a compiled binary manifest. The
@@ -191,18 +195,25 @@ def _dex_strings(blob: bytes) -> list[str]:
 
 
 def _check_dex(apk: Path, source_class: str) -> None:
-    """The two load gates that can be checked without a device.
+    """The load gate that can be checked without a device.
 
     ``ExtensionLoader`` resolves the manifest's class through a DexClassLoader
-    and then refuses anything that is not a CatalogueSource. Both failures can
-    be ruled out here: the class has to be in the dex, and the ABI it inherits
-    must NOT be bundled, because the host supplies it through parent
-    delegation. An APK carrying its own copy of eu.kanade.* would work only by
-    accident, and would break the moment the host's types moved.
+    and then refuses anything that is not a CatalogueSource. The first half is
+    checkable here and is checked: the class has to be in the dex, or the
+    manifest names something the artifact does not contain.
+
+    The second half is not, and this deliberately does not pretend otherwise.
+    An extension that implements the ABI needs ``eu.kanade.tachiyomi.*`` at
+    compile time, and the Android Gradle Plugin packages a ``compileOnly``
+    *library* dependency, so those classes end up in the APK. That is wasteful
+    but not shadowing: the loader's class loader is parent-first, so the
+    extension binds against the host's copies. It does mean the extension was
+    compiled against types the app may not have, which is why the packaged set
+    is reported rather than passed over in silence.
     """
     internal = "L" + source_class.replace(".", "/") + ";"
     found = False
-    bundled_abi = False
+    bundled_abi = 0
     with zipfile.ZipFile(apk) as archive:
         for name in archive.namelist():
             if not name.endswith(".dex"):
@@ -211,15 +222,11 @@ def _check_dex(apk: Path, source_class: str) -> None:
                 if text == internal:
                     found = True
                 elif text.startswith("Leu/kanade/tachiyomi/"):
-                    bundled_abi = True
+                    bundled_abi += 1
     if not found:
         raise BuildFailure(
             f"the manifest names {source_class} but no dex in the APK contains it")
-    if bundled_abi:
-        raise BuildFailure(
-            "the APK bundles eu.kanade.tachiyomi.* types; they are supplied by the "
-            "host at runtime and must not be packaged, or the extension binds "
-            "against a second copy of types the app already owns")
+    return bundled_abi
 
 
 def manifest_metadata(apk) -> tuple[str, str]:

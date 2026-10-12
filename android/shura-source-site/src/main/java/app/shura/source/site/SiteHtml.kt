@@ -89,25 +89,65 @@ internal object SiteHtml {
 
     // -- links ------------------------------------------------------------
 
-    /** Absolute, de-duplicated, entry-shaped hrefs, grouped by URL shape. */
+    /**
+     * The listing groups on a page: each is a set of entry links that belong to
+     * one index.
+     *
+     * Grouping is by *parent directory*, not by a digit-masked path. Masking
+     * digits looks equivalent and is not: a catalogue whose slugs carry an id
+     * suffix - ``/comics/pick-up-a-grimoire-become-a-mage-1bb35e56`` - masks to
+     * a different string per work, so every link lands in a group of one and a
+     * real index of forty works looks like navigation. The parent directory is
+     * what an index actually shares.
+     */
     private fun entryGroups(spec: SiteSpec, html: String): List<List<Pair<String, String>>> {
-        val shapes = LinkedHashMap<String, LinkedHashMap<String, String>>()
+        val byParent = LinkedHashMap<String, LinkedHashMap<String, String>>()
+        val byShape = LinkedHashMap<String, LinkedHashMap<String, String>>()
         for (match in ANCHOR.findAll(html)) {
             val href = match.groupValues[1].trim()
             if (href.isEmpty() || href.startsWith("#") || href.startsWith("mailto:") ||
                 href.startsWith("javascript:") || href.startsWith("data:")) continue
             if (!spec.entryHref.containsMatchIn(href)) continue
-            val shape = href.replace(Regex("\\d+"), "#")
-            shapes.getOrPut(shape) { LinkedHashMap() }.putIfAbsent(href, normaliseTitle(match.groupValues[2]))
+            val title = normaliseTitle(match.groupValues[2])
+            byShape.getOrPut(href.replace(Regex("\\d+"), "#")) { LinkedHashMap() }
+                .putIfAbsent(href, title)
+            val parent = href.substringBeforeLast('/', "")
+            byParent.getOrPut(parent) { LinkedHashMap() }.putIfAbsent(href, title)
         }
-        // A menu has many shapes of one link each; a listing repeats one shape.
-        return shapes.values.filter { it.size >= spec.minListingGroup }.map { it.toList() }
+        // A menu has many shapes of one link each; a listing repeats one shape
+        // under one parent. Parents win where they qualify, because they are the
+        // weaker assumption.
+        val byParents = byParent.values.filter { it.size >= spec.minListingGroup }
+        return (if (byParents.isNotEmpty()) byParents
+                 else byShape.values.filter { it.size >= spec.minListingGroup })
+            .map { it.toList() }
     }
 
     fun absolute(href: String, base: String): String = try {
         URL(URL(base), href).toString()
     } catch (_: Exception) {
         href
+    }
+
+    /**
+     * A chapter's number, preferring the one in its own URL.
+     *
+     * The link text is not reliable. One live catalogue renders a chapter as
+     * "Chapter 6" immediately followed by "2 days ago", so the first number in
+     * the text is 62 - a number that exists nowhere in the URL and belongs to
+     * no chapter. The URL of a chapter ends in its number, so that is read
+     * first and the text is only a fallback for sites that number nowhere else.
+     */
+    private fun chapterNumber(href: String, text: String, spec: SiteSpec): Float {
+        val tail = href.substringBefore('?').trimEnd('/').substringAfterLast('/')
+        if (tail.isNotEmpty() && Regex("^\\d+(?:\\.\\d+)?$").matches(tail)) {
+            return tail.toFloatOrNull() ?: -1f
+        }
+        if (text.isNotEmpty()) {
+            val fromText = splitChapterTitle(text, spec.chapterMarker)?.second
+            if (fromText != null) return fromText
+        }
+        return -1f
     }
 
     /** Every entry on a page, newest-first for chapters. */
@@ -118,8 +158,13 @@ internal object SiteHtml {
             for ((href, text) in group) {
                 val url = absolute(href, pageUrl)
                 if (!seen.add(url)) continue
-                val split = if (text.isEmpty()) null else splitChapterTitle(text, spec.chapterMarker)
-                out.add(Entry(url, text, split?.second ?: -1f, split != null))
+                // The URL is asked first; a title marker is the fallback for a
+                // site that numbers its chapters nowhere else.
+                val byHref = spec.chapterHref.pattern.isNotEmpty() &&
+                    spec.chapterHref.containsMatchIn(href)
+                val byTitle = text.isNotEmpty() && splitChapterTitle(text, spec.chapterMarker) != null
+                val isChapter = byHref || byTitle
+                out.add(Entry(url, text, chapterNumber(href, text, spec), isChapter))
             }
         }
         return out
@@ -194,12 +239,29 @@ internal object SiteHtml {
             .sortedByDescending { it.number }
     }
 
-    /** The reading pages of one chapter, in order. */
+    /**
+     * The reading pages of one chapter, in order.
+     *
+     * Two signals, both required. The image must match the extension pattern,
+     * and it must live under the prefix that identifies this chapter - which is
+     * what keeps a cover or a logo from being handed to the reader as page 1.
+     */
     fun pages(spec: SiteSpec, html: String, pageUrl: String): List<String> {
+        // Without a proven chapter prefix there is no way to tell a reading
+        // page from the cover and the logos on the same page, so this returns
+        // nothing. Guessing here is what puts a cover in front of the reader as
+        // page 1 of a chapter they are trying to read.
+        if (spec.pageImagePrefix.pattern.isEmpty()) return emptyList()
         val found = ArrayList<Pair<Float, String>>()
         for (match in IMAGE_SRC.findAll(html)) {
             val src = match.groupValues[1].trim()
             if (!spec.pageImage.containsMatchIn(src)) continue
+            if (spec.pageImagePrefix.pattern.isNotEmpty() &&
+                !spec.pageImagePrefix.containsMatchIn(src)) continue
+            if (spec.imageHost.isNotEmpty()) {
+                val host = URL(src).host
+                if (host.isNotEmpty() && !host.equals(spec.imageHost, ignoreCase = true)) continue
+            }
             val number = firstNumber(src.substringAfterLast('/')) ?: found.size.toFloat()
             found += number to absolute(src, pageUrl)
         }

@@ -51,6 +51,10 @@ CHAPTER_MARKER = (
 )
 
 #: Matches the image sources a chapter page serves as its reading pages.
+#:
+#: Necessary and nowhere near sufficient. Every catalogue serves logos, banners
+#: and cover art as .jpg and .webp beside its real pages, so this only says "an
+#: image"; ``page_image_prefix`` is what says "a page of this chapter".
 PAGE_IMAGE = r"\.(?:jpe?g|png|webp|gif)(?:\?|$)"
 
 #: Matches cover art on a work page.
@@ -82,6 +86,9 @@ class ExtensionPlan:
     chapter_marker: str = CHAPTER_MARKER
     page_image: str = PAGE_IMAGE
     cover_image: str = COVER_IMAGE
+    page_image_prefix: str = ""
+    image_host: str = ""
+    chapter_href: str = ""
     trust_page_heading: bool = True
     min_listing_group: int = 4
     version_code: int = 0
@@ -139,7 +146,10 @@ def build_plan(descriptor, *, observed_hrefs: list[str] | None = None,
                chapter_marker: str = CHAPTER_MARKER,
                entry_href: str | None = None,
                observed_page_images: list[str] | None = None,
-               page_images_observed: bool | None = None) -> ExtensionPlan:
+               page_images_observed: bool | None = None,
+               chapter_url: str = "",
+               work_url: str = "",
+               observed_chapter_urls: list[str] | None = None) -> ExtensionPlan:
     """Plan the extension for one accepted site.
 
     ``descriptor`` is the :class:`~shura_core.content.htmlsite.SiteDescriptor`
@@ -199,15 +209,26 @@ def build_plan(descriptor, *, observed_hrefs: list[str] | None = None,
     if not plan.page_image:
         plan.blockers.append("no page image pattern was proven, so no reading pages")
     observed_pages = list(observed_page_images or [])
+    plan.chapter_href = derive_chapter_shape(work_url, list(observed_chapter_urls or []))
+    plan.image_host = urlparse(observed_pages[0]).hostname or "" if observed_pages else ""
+    if observed_pages:
+        plan.page_image_prefix = derive_page_prefix(
+            observed_pages, chapter_url or "", work_url or "")
     if page_images_observed is False:
         plan.blockers.append(
             "a chapter page was read and served no reading images, so this site "
             "needs an extraction mechanism that does not exist yet; it is not "
             "safe to publish an extension that would show empty chapters")
-    elif observed_pages and not any(re.search(plan.page_image, src) for src in observed_pages):
-        plan.blockers.append(
-            "the images this site served did not match the page image pattern, "
-            "so reading pages could not be located")
+    elif observed_pages:
+        if not any(re.search(plan.page_image, src) for src in observed_pages):
+            plan.blockers.append(
+                "the images this site served did not match the page image pattern, "
+                "so reading pages could not be located")
+        elif not plan.page_image_prefix:
+            plan.blockers.append(
+                "the images this site served share no path that identifies the "
+                "chapter they belong to, so a cover or a logo could not be told "
+                "apart from a reading page")
     observed = list(observed_hrefs or [])
     if not observed:
         plan.blockers.append(
@@ -220,31 +241,141 @@ def build_plan(descriptor, *, observed_hrefs: list[str] | None = None,
     return plan
 
 
+def derive_chapter_shape(work_url: str, child_urls: list[str]) -> str:
+    """The href shape of a work's chapters, from the links under its own path.
+
+    A work's page lives at one path and its chapters live beneath it, so
+    "a link under the work's path" is a structural definition of "a chapter of
+    this work" that does not depend on how the site words its links. The shape
+    is digit-masked because chapter numbers vary while the route does not.
+    """
+    root = urlparse(work_url or "").path if "://" in (work_url or "") \
+        else (work_url or "").split("?")[0]
+    root = root.rstrip("/")
+    if not root:
+        return ""
+    shapes: dict[str, int] = {}
+    for href in child_urls or []:
+        path = urlparse(href).path if "://" in href else href.split("?")[0]
+        if not path.startswith(root + "/"):
+            continue
+        # The suffix under the work, not the whole URL: the work's own slug
+        # carries an id whose digits would be masked into the pattern and make
+        # it site-specific for no benefit. "chapter/\d+" is the part that says
+        # "this is a chapter of that work".
+        suffix = path[len(root) + 1:]
+        shape = re.sub(r"\d+", lambda _: "\\d+", suffix)
+        shapes[shape] = shapes.get(shape, 0) + 1
+    if not shapes:
+        return ""
+    best, count = max(shapes.items(), key=lambda item: item[1])
+    return best if count >= 2 else ""
+
+
+def derive_page_prefix(page_images: list[str], chapter_url: str, work_url: str = "") -> str:
+    """The path a chapter's own pages share, as a regex.
+
+    This is the structural signal that a page belongs to *this* chapter rather
+    than being site chrome. Real catalogues put a chapter's images under a path
+    containing that chapter's own identity - the work slug and the chapter
+    number - and put covers under a different path entirely. Observed on a live
+    manhwa site::
+
+        chapter: /comics/pick-up-a-grimoire-become-a-mage-1bb35e56/chapter/6
+        pages:   cdn/.../asura-images/chapters/pick-up-a-grimoire-become-a-mage/6/f698fa.webp
+        covers:  cdn/.../asura-images/covers/pick-up-a-grimoire-become-a-mage.<hash>-400.webp
+
+    Only the pages share the ``chapters/<slug>/6/`` segment, so only they survive
+    this prefix. Returns "" when the pages share no such segment, because a
+    prefix that does not include the chapter's identity would admit the covers
+    back in.
+    """
+    # A chapter's pages share one directory. Covers and logos do not: they are
+    # scattered, and they sit under a different directory entirely. Grouping by
+    # directory and taking the largest group is therefore the structural
+    # statement "these are this chapter's pages", without needing to know what a
+    # cover looks like on this particular site.
+    by_directory: dict[str, list[str]] = {}
+    for image in page_images:
+        path = urlparse(image).path
+        if not path:
+            continue
+        by_directory.setdefault(path.rsplit("/", 1)[0], []).append(path)
+    if not by_directory:
+        return ""
+    directory, members = max(by_directory.items(), key=lambda item: len(item[1]))
+    # A chapter is more than two pages long; a group that small is chrome.
+    if len(members) < 3:
+        return ""
+    # The prefix has to name this chapter, or it proves nothing: a bare
+    # "/images" would happily match every logo on the site.
+    numbers = re.findall(r"\d+", urlparse(chapter_url).path)
+    if numbers and numbers[-1] not in directory:
+        return ""
+    return _generalise(directory, chapter_url, work_url)
+
+
+def _generalise(directory: str, chapter_url: str, work_url: str) -> str:
+    r"""Turn one chapter's directory into a pattern that fits every chapter.
+
+    An extension serves a *site*, not one chapter. The directory observed on the
+    chapter that was read -
+    ``/asura-images/chapters/pick-up-a-grimoire-become-a-mage/1`` - contains that
+    one work's slug and that one chapter's number, so writing it into the
+    extension verbatim would produce a source that reads exactly one chapter of
+    exactly one work and reports every other as empty.
+
+    So the segments that carry identity become patterns: the chapter number
+    becomes ``\d+``, and the work slug becomes ``[^/]+``. Everything else stays
+    literal, because that is the part that is the same on every work - and the
+    part that separates pages from covers.
+    """
+    work_segment = ""
+    if work_url:
+        work_path = urlparse(work_url).path if "://" in work_url else work_url
+        work_segment = work_path.rstrip("/").rsplit("/", 1)[-1]
+    number = ""
+    numbers = re.findall(r"\d+", urlparse(chapter_url).path)
+    if numbers:
+        number = numbers[-1]
+
+    out = []
+    for segment in directory.strip("/").split("/"):
+        if number and segment == number:
+            out.append("\\d+")
+        elif work_segment and segment and (segment in work_segment or work_segment in segment):
+            out.append("[^/]+")
+        else:
+            out.append(re.escape(segment))
+    return "/" + "/".join(out)
+
+
 def derive_entry_shape(hrefs: list[str]) -> str:
     """The href shape the index repeats, e.g. ``/node/\\d+`` for ``/node/4192``.
 
-    This is the same "mask the digits and group" idea the crawler's
-    repeating-shape detector uses, applied to the links evaluation observed, so
-    the extension's pattern and the evidence that justified accepting the site
-    come from one definition rather than two.
+    The group is the *directory*, not a digit-masked path. Masking looks
+    equivalent and is not: a catalogue whose slugs carry an id suffix -
+    ``/comics/pick-up-a-grimoire-become-a-mage-1bb35e56`` - masks to a different
+    string per work, so every link lands in a group of one and an index of
+    forty works looks like navigation. It also generalises better: ``/node``
+    matches ``/node/4192`` and any other chapter of that work, so a pattern
+    written once keeps working as the site adds entries.
+
+    This mirrors what the generated engine groups by, so the pattern written
+    into the extension is the one the engine will actually match.
     """
-    groups: dict[str, int] = {}
+    parents: dict[str, int] = {}
     for href in hrefs:
-        shape = re.sub(r"\d+", lambda _: "\\d+", href.split("?")[0])
-        # Everything that is not a digit is literal, and is escaped so that a
-        # dot in "/index.php" matches a dot rather than any character.
-        shape = re.sub(r"\\d\+", "\x00", shape)
-        # "/" is not a metacharacter in a regex; escaping it would only make
-        # the generated pattern harder to read.
-        shape = re.sub(r"([.\\+*?\[\]^$(){}|])", r"\\\1", shape)
-        shape = shape.replace("\x00", "\\d+")
-        groups[shape] = groups.get(shape, 0) + 1
-    if not groups:
-        return ""
-    best, count = max(groups.items(), key=lambda item: item[1])
-    # One link is a menu entry, not a listing; the same threshold the crawler
-    # uses to tell a listing from navigation.
-    return best if count >= 4 else ""
+        path = urlparse(href).path if "://" in href else href.split("?")[0]
+        parent = path.rsplit("/", 1)[0] if "/" in path else ""
+        parents[parent] = parents.get(parent, 0) + 1
+    if parents:
+        best, count = max(parents.items(), key=lambda item: item[1])
+        if count >= 4:
+            return re.escape(best)
+    # Nothing groups into a listing. "" rather than a best guess: a shape that
+    # matches nothing at runtime reads to the reader as a source with no manga.
+    return ""
 
 
 _SOURCE_TEMPLATE = '''package {namespace}
@@ -277,8 +408,19 @@ class {class_name} : SiteCatalogueSource() {{
         entryHref = Regex("""{entry_href}"""),
         minListingGroup = {min_listing_group},
         chapterMarker = Regex("""{chapter_marker}"""),
+        // Read from the links under a work's own path, so it does not depend on
+        // how the site words them: one live catalogue writes "Chapter 6" against
+        // "2 days ago" and the text alone reads as 62.
+        chapterHref = Regex("""{chapter_href}"""),
         trustPageHeading = {trust_page_heading},
         pageImage = Regex("""{page_image}""", RegexOption.IGNORE_CASE),
+        // Proof, not a guess: the path a chapter's own pages share, naming that
+        // chapter's work and number. Covers and logos on the same page do not
+        // match it, so they cannot be handed to the reader as page 1.
+        pageImagePrefix = Regex("""{page_image_prefix}"""),
+        // The reading images usually live on a different host than the pages
+        // that link them, and the reader fetches these URLs.
+        imageHost = "{image_host}",
         coverImage = Regex("""{cover_image}""", RegexOption.IGNORE_CASE),
     )
 }}
@@ -348,9 +490,10 @@ def render_module(plan: ExtensionPlan) -> dict[str, str]:
             source_id=source_number(plan.source_id), language=plan.language,
             catalogue_url=plan.catalogue_url, entry_href=plan.entry_href,
             min_listing_group=plan.min_listing_group,
-            chapter_marker=plan.chapter_marker,
+            chapter_marker=plan.chapter_marker, chapter_href=plan.chapter_href,
             trust_page_heading=str(plan.trust_page_heading).lower(),
-            page_image=plan.page_image, cover_image=plan.cover_image),
+            page_image=plan.page_image, page_image_prefix=plan.page_image_prefix,
+            image_host=plan.image_host, cover_image=plan.cover_image),
     }
 
 
@@ -374,25 +517,32 @@ def write_module(root, plan: ExtensionPlan) -> Path:
 
 
 def register_module(settings_path, module_name: str) -> bool:
-    """Add a generated module to ``settings.gradle``, idempotently."""
-    from pathlib import Path
+    """Add a generated module to ``settings.gradle``, idempotently.
+
+    The include line is parsed as a list and rewritten rather than patched with
+    a regex. Patching it worked exactly once: the next call found a line that
+    already ended in a generated module, matched a different boundary, and
+    produced ``':x, ':y'`` - a settings file Gradle then refused to parse.
+    """
+    import re as _re
 
     settings_path = Path(settings_path)
     text = settings_path.read_text(encoding="utf-8")
-    if f":{module_name}'" in text or f":{module_name}\"" in text:
+    if _re.search(rf"['\"]{_re.escape(module_name)}['\"]", text):
         return False
-    import re as _re
 
-    # MULTILINE matters: the include line is not the last line of the file, so
-    # without it the substitution silently matched nothing and Gradle reported
-    # "project with path ':x' could not be found" instead of a missing include.
-    # Group 1 stops *before* the closing quote and the replacement supplies its
-    # own, so emitting group 2 as well would double it and break the file.
-    text, changed = _re.subn(r"(include\s+[^\n]*?)(['\"])$",
-                             lambda m: m.group(1) + f", ':{module_name}'",
-                             text, count=1, flags=_re.MULTILINE)
-    if not changed:
+    def rewrite(match):
+        names = [n.strip().strip("'\"") for n in match.group(1).split(",")]
+        names = [n for n in names if n]
+        names.append(":" + module_name)
+        return "include " + ", ".join(f"'{n}'" for n in names)
+
+    updated, count = _re.subn(r"include\s+([^\n]+)", rewrite, text, count=1)
+    if not count:
         return False
-    settings_path.write_text(text + f"project(':{module_name}').projectDir = "
-                             f"file('{module_name}')\n", encoding="utf-8")
+    if not updated.endswith("\n"):
+        updated += "\n"
+    settings_path.write_text(
+        updated + f"project(':{module_name}').projectDir = file('{module_name}')\n",
+        encoding="utf-8")
     return True

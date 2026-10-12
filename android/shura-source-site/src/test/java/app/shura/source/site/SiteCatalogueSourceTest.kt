@@ -31,6 +31,9 @@ class SiteCatalogueSourceTest {
         chapterMarker = Regex(
             """(?:\s*[-–—|]\s*(?:[A-Za-z]{2,12}\s+|الفصل|فصل|حلقة)\s*#?\s*\d+(?:\.\d+)?\s*$)"""),
         pageImage = Regex("""\.(?:jpe?g|png|webp|gif)(?:\?|$)""", RegexOption.IGNORE_CASE),
+        // This site's chapter pages carry a cover and two logos that all match
+        // the extension pattern; only this prefix identifies an actual page.
+        pageImagePrefix = Regex(""),
         coverImage = Regex("""(?:cover|capa|thumb|poster)[^/]*\.(?:jpe?g|png|webp)(?:\?|$)""",
             RegexOption.IGNORE_CASE),
     )

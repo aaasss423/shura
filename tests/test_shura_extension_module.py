@@ -61,28 +61,45 @@ class ExtensionModuleTests(unittest.TestCase):
             self.assertNotIn(token, gradle,
                              f"the extension build must not reference {token}")
 
-    def test_its_source_references_no_foreign_types(self):
-        sources = list((MODULE / "src/main/java").rglob("*.kt"))
-        self.assertTrue(sources, "the module has no Kotlin source")
-        for path in sources:
-            text = self.code_only(path.read_text(encoding="utf-8")).lower()
-            for token in FORBIDDEN:
-                self.assertNotIn(token, text,
-                                 f"{path.name} references {token}; the extension must "
-                                 "implement Shura's interface in its own terms")
+    def test_it_implements_the_abi_the_loader_actually_loads(self):
+        """What ShuraExtensionLoader instantiates, not what it adapts to.
 
-    def test_it_implements_the_shura_source_contract(self):
+        This test used to assert the extension implemented `ShuraSource` and
+        referenced no other project's types. Both were wrong about what the
+        loader does: it loads whatever the manifest names, requires it to be a
+        `CatalogueSource`, and only then adapts it onto `ShuraSource`. An
+        extension satisfying the old rule could never have loaded, however
+        correctly it was built.
+        """
         source = self.read(
             MODULE, "src/main/java/app/shura/extension/mangadex/MangaDexSource.kt")
-        self.assertIn("import app.shura.source.ShuraSource", source)
-        self.assertIn(": ShuraSource", source)
-        for member in ("val id", "val name", "val language",
+        self.assertIn("HttpSource()", source)
+        for member in ("override val id", "override val name", "override val lang",
+                       "override val baseUrl"):
+            self.assertIn(member, source, member)
+        # The eight methods ExtensionSourceAdapter calls reflectively.
+        for method in ("searchMangaRequest", "searchMangaParse", "mangaDetailsRequest",
+                       "mangaDetailsParse", "chapterListRequest", "chapterListParse",
+                       "pageListRequest", "pageListParse"):
+            self.assertIn(f"fun {method}(", source, method)
+            # The transitional ABI declares none of them, so `override` on any
+            # of them is a compile error, not a style preference.
+            self.assertNotIn(f"override fun {method}(", source, method)
+
+    def test_it_still_serves_shuras_three_operations(self):
+        """The contract the app consumes is still implemented, directly."""
+        source = self.read(
+            MODULE, "src/main/java/app/shura/extension/mangadex/MangaDexSource.kt")
+        for member in ("import app.shura.source.MangaSummary", "import app.shura.source.Chapter",
+                       "import app.shura.source.Page",
                        "fun search", "fun chapters", "fun pages"):
             self.assertIn(member, source,
                           f"the contract declares {member} and it is not implemented")
-        # Only the three operations the interface states. Nothing extra claimed.
-        overrides = re.findall(r"override\s+suspend\s+fun\s+(\w+)", source)
-        self.assertEqual(sorted(overrides), ["chapters", "pages", "search"])
+        # Only the three operations the contract states; nothing extra claimed.
+        # They are no longer `override`s because the class implements the ABI the
+        # loader instantiates and serves these alongside it.
+        suspends = re.findall(r"suspend\s+fun\s+(\w+)", source)
+        self.assertEqual(sorted(suspends), ["chapters", "pages", "search"])
 
     def test_it_holds_no_credentials(self):
         """MangaDex's public API needs no key, so the extension must not carry one."""
@@ -127,8 +144,11 @@ class ExtensionModuleTests(unittest.TestCase):
         """MangaDex returns title as a per-language map, not a string."""
         source = self.read(
             MODULE, "src/main/java/app/shura/extension/mangadex/MangaDexSource.kt")
-        self.assertIn('attrs?.str("title")', source,
-                      "reading the localized title map as a string yields blank titles")
+        # The title is read through the helper that knows it is a map; a direct
+        # string read of it yields blank titles for every result.
+        self.assertIn("title(attributes)", source)
+        self.assertIn('titles.str(lang)', source)
+        self.assertIn("obj(\"title\")", source)
 
     def test_page_filenames_come_from_the_chapter_object(self):
         """at-home returns chapter as an object holding hash and a data array."""
