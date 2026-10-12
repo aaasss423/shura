@@ -1,0 +1,23 @@
+plugins { id 'com.android.library'; id 'org.jetbrains.kotlin.android' }
+
+android {
+    namespace 'app.shura.source.site'
+    compileSdk 34
+    buildToolsVersion '35.0.0'
+    defaultConfig { minSdk 26 }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    kotlinOptions { jvmTarget = '17' }
+    testOptions { unitTests.returnDefaultValues = true }
+}
+
+dependencies {
+    // compileOnly, deliberately. The eu.kanade.tachiyomi.* ABI layer and okhttp
+    // are supplied by the host application at runtime: an extension binds
+    // against them, it does not bundle them. Bundling would ship a second copy
+    // of every one of those classes inside the APK.
+    compileOnly project(':shura-extension-runtime')
+    // The generic engine is plain JVM logic, so it is exercised for real
+    // against saved HTML without an Android runtime.
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation project(':shura-extension-runtime')
+}
