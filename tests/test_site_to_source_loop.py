@@ -9,8 +9,10 @@ the existing code rather than by a fixture shaped to match.
 
 import json
 import unittest
+from unittest import mock
 from pathlib import Path
 
+from shura_core.content import htmlsite
 from shura_core.content import HtmlCatalogueSource, SiteDescriptor, open_store
 from shura_core.content.fetcher import load_source_config, sync_source_policy, upsert_source_entry
 from shura_core.content.ingest import import_payload
@@ -38,8 +40,18 @@ CHAPTER_HTML = """<!doctype html><html><body>
 class FakeHttp:
     """Serves the three page shapes by path. Opens no socket."""
 
-    def __init__(self, host="site.example"):
+    #: The pages every test can rely on. A test adds to this rather than
+    #: replacing it, so extending the fixture cannot unbreak the others.
+    DEFAULT = {"": INDEX_HTML,
+               "/ar/cat": INDEX_HTML,
+               "/ar/manga/alpha/": WORK_HTML,
+               "/ar/manga/beta/": WORK_HTML,
+               "/ar/manga/alpha/ch-1/": CHAPTER_HTML,
+               "/ar/manga/alpha/ch-2/": CHAPTER_HTML}
+
+    def __init__(self, host="site.example", pages=None):
         self.host = host
+        self.pages = {**self.DEFAULT, **(pages or {})}
 
     def get(self, url, headers=None, max_bytes=None):
         host = url.split("/")[2]
@@ -48,13 +60,7 @@ class FakeHttp:
         class H:
             def get_content_charset(self_inner):
                 return "utf-8"
-        body = {"": INDEX_HTML,
-                "/ar/cat": INDEX_HTML,
-                "/ar/manga/alpha/": WORK_HTML,
-                "/ar/manga/beta/": WORK_HTML,
-                "/ar/manga/alpha/ch-1/": CHAPTER_HTML,
-                "/ar/manga/alpha/ch-2/": CHAPTER_HTML}.get(path, "")
-        return body.encode("utf-8"), H(), url
+        return self.pages.get(path, "").encode("utf-8"), H(), url
 
 
 def _descriptor():
@@ -160,3 +166,98 @@ MAX_PAGES = HtmlCatalogueSource(  # mirror the module's bound for the assertion
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# The shapes a real Arabic catalogue actually served, taken from
+# www.mangaarabia.com/index.php/ar/node. Its index links to *chapter* nodes
+# whose text names the work, so taking that text as a title produced works
+# called "الولد الضب - الفصل 24" and every chapter looked like a new manga.
+MIXED_INDEX_HTML = """<!doctype html><html lang="ar" dir="rtl"><body>
+<a href="/index.php/ar/node/11994">الطريق إلى 2034</a>
+<a href="/index.php/ar/node/10000">الولد الضب</a>
+<a href="/index.php/ar/node/13026">الولد الضب - الفصل 32</a>
+<a href="/index.php/ar/node/13101">الولد الضب - الفصل 33</a>
+<a href="/index.php/ar/node/13604">الولد&nbsp;الضب - الفصل 37</a>
+<a href="/index.php/ar/node/13671">الولد الضب - الفصل 37.5</a>
+</body></html>"""
+
+TITLED_WORK_HTML = """<!doctype html><html lang="ar" dir="rtl"><body>
+<h1>الولد الضب</h1>
+</body></html>"""
+
+
+class WorkAndChapterAreDifferentThings(unittest.TestCase):
+    """A catalogue link is not a work, and a chapter page is not a work page."""
+
+    def _source(self, work_html=TITLED_WORK_HTML):
+        descriptor = SiteDescriptor(source_id="site:site.example", name="Site",
+                                    language="ar", catalogue_url="https://site.example/ar/node",
+                                    host="site.example", origin="https://site.example")
+        return HtmlCatalogueSource(descriptor, FakeHttp(pages={
+            "/ar/node": MIXED_INDEX_HTML,
+            "/index.php/ar/node/10000": work_html}))
+
+    def test_chapter_links_are_grouped_under_their_work_not_listed_as_works(self):
+        titles = [w["title"] for w in self._source().works(limit=10)]
+        self.assertIn("الولد الضب", titles)
+        self.assertNotIn("الولد الضب - الفصل 32", titles)
+        self.assertFalse([t for t in titles if "الفصل" in t], titles)
+
+    def test_a_non_breaking_space_does_not_fork_a_work_into_two(self):
+        """The live index ships one work under two spellings of its own title."""
+        titles = [w["title"] for w in self._source().works(limit=10)]
+        self.assertEqual(len(titles), len(set(titles)), titles)
+        self.assertEqual(len(titles), 2, titles)
+
+    def test_chapters_are_collected_under_the_work_they_belong_to(self):
+        work = [w for w in self._source().works(limit=10)
+                if w["title"] == "الولد الضب"][0]
+        self.assertEqual([c["number"] for c in work["chapters"]], [37.5, 37.0, 33.0, 32.0])
+
+    def test_the_page_own_heading_outranks_the_index_text(self):
+        """The index is a claim; the page is the evidence."""
+        work = [w for w in self._source(work_html="<!doctype html><html><body>"
+                                               "<h1>اسم مختلف</h1></body></html>").works(limit=10)
+                if w["chapters"]][0]
+        self.assertEqual(work["title"], "اسم مختلف")
+        self.assertTrue(work["verified"])
+
+    def test_a_chapter_url_is_never_passed_off_as_the_work_page(self):
+        work = [w for w in self._source().works(limit=10) if w["chapters"]][0]
+        # The index also links the work's own page, so that is the one used.
+        self.assertTrue(work["url"].endswith("/node/10000"), work["url"])
+        for chapter in work["chapters"]:
+            self.assertNotIn(work["url"], chapter["url"])
+
+    def test_a_work_with_only_chapter_links_reports_why_it_has_no_page(self):
+        """A work the catalogue never links directly cannot be read, and says so."""
+        source = self._source()
+        only_chapters = SiteDescriptor(source_id="s", name="S", language="ar",
+                                       catalogue_url="https://site.example/ar/node",
+                                       host="site.example")
+        works = HtmlCatalogueSource(only_chapters, FakeHttp(pages={
+            "/ar/node": """<html><body>
+<a href="/index.php/ar/node/2">عمل - الفصل 1</a>
+<a href="/index.php/ar/node/3">عمل - الفصل 2</a>
+<a href="/index.php/ar/node/4">عمل - الفصل 3</a>
+<a href="/index.php/ar/node/5">عمل - الفصل 4</a>
+</body></html>"""})).works(limit=10)
+        self.assertEqual(len(works), 1, works)
+        self.assertEqual(works[0].get("unresolved", ""),
+                         "the catalogue lists chapters of this work but no page for the "
+                         "work itself, so its details cannot be read")
+        self.assertEqual(works[0]["url"], "")
+
+    def test_a_work_left_unopened_by_the_page_budget_says_so(self):
+        """An unverified work must not read as a refuted one."""
+        descriptor = SiteDescriptor(source_id="s", name="S", language="ar",
+                                    catalogue_url="https://site.example/ar/node",
+                                    host="site.example", origin="https://site.example")
+        http = FakeHttp(pages={"/ar/node": MIXED_INDEX_HTML,
+                               "/index.php/ar/node/10000": TITLED_WORK_HTML})
+        with mock.patch.object(htmlsite, "MAX_PAGES", 1):
+            works = HtmlCatalogueSource(descriptor, http).works(limit=5)
+        unverified = [w for w in works if not w.get("verified")]
+        self.assertTrue(unverified, works)
+        self.assertEqual(unverified[0].get("unverified"),
+                         "not opened: this pass reached its page budget")
