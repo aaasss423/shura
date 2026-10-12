@@ -170,6 +170,87 @@ class RegistrationIsIdempotent(unittest.TestCase):
             self.assertIn("project(':shura-extension-generated')", once)
 
 
+class TheLoadGates(unittest.TestCase):
+    """The two ExtensionLoader failures that can be ruled out off-device.
+
+    ``load()`` resolves the manifest's class through a DexClassLoader and then
+    refuses anything that is not a CatalogueSource. Both need the dex, so a
+    manifest that names a class nobody packaged only fails when it reaches a
+    phone.
+    """
+
+    @staticmethod
+    def _apk(descriptor: str) -> bytes:
+        """A dex carrying one class descriptor and nothing else.
+
+        Hand-built to the minimum ``_check_dex`` reads: a string_ids table of
+        one entry pointing at a single string_data_item. Nothing else in the
+        dex is validated, and nothing else needs to be.
+        """
+        import struct
+
+        def uleb(value: int) -> bytes:
+            out = bytearray()
+            while True:
+                byte = value & 0x7F
+                value >>= 7
+                out.append(byte | (0x80 if value else 0))
+                if not value:
+                    return bytes(out)
+
+        # The header is a fixed 112 bytes and the parser reads string_ids_size
+        # and string_ids_off from byte 56 of it, so they have to be written
+        # there rather than left as padding.
+        header_size = 112
+        table_offset = header_size
+        header = (b"dex\n038\x00" + b"\x00" * (56 - 8)
+                  + struct.pack("<II", 1, table_offset)
+                  + b"\x00" * (header_size - 64))
+        table = struct.pack("<I", table_offset + 4)    # the one string offset
+        data = uleb(len(descriptor)) + descriptor.encode("utf-8") + b"\x00"
+        return header + table + data
+
+    def _write(self, descriptors: list[str]) -> Path:
+        import io
+        import zipfile
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            for index, descriptor in enumerate(descriptors):
+                archive.writestr(f"classes{index}.dex", self._apk(descriptor))
+        path = Path(self.tmp.name) / "a.apk"
+        path.write_bytes(buffer.getvalue())
+        return path
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def test_the_named_class_must_be_in_the_dex(self):
+        from shura_core.extension.builder import BuildFailure, _check_dex
+        path = self._write(["Lapp/shura/extension/other/OtherSource;"])
+        with self.assertRaises(BuildFailure) as caught:
+            _check_dex(path, "app.shura.extension.mangaarabia.MangaArabiaSource")
+        self.assertIn("no dex", str(caught.exception))
+
+    def test_the_abi_must_not_be_bundled(self):
+        from shura_core.extension.builder import BuildFailure, _check_dex
+        path = self._write([
+            "Lapp/shura/extension/mangaarabia/MangaArabiaSource;",
+            "Leu/kanade/tachiyomi/source/online/HttpSource;",
+        ])
+        with self.assertRaises(BuildFailure) as caught:
+            _check_dex(path, "app.shura.extension.mangaarabia.MangaArabiaSource")
+        self.assertIn("bundles eu.kanade", str(caught.exception))
+
+    def test_the_shape_a_correctly_built_extension_has_passes(self):
+        from shura_core.extension.builder import _check_dex
+        path = self._write([
+            "Lapp/shura/extension/mangaarabia/MangaArabiaSource;",
+            "Lapp/shura/source/site/SiteCatalogueSource;",
+        ])
+        _check_dex(path, "app.shura.extension.mangaarabia.MangaArabiaSource")
+
+
 class ReadingTheCompiledManifest(unittest.TestCase):
     """The type check aapt2's own dump cannot make.
 

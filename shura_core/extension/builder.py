@@ -138,6 +138,7 @@ def describe_apk(apk, *, build_tools: str, jdk: str | None = None,
             version_name = found.group(1)
 
     source_class, extension_lib = manifest_metadata(apk)
+    _check_dex(apk, source_class)
 
     signer = subprocess.run([str(Path(build_tools) / "apksigner"), "verify", "--print-certs", str(apk)],
                             capture_output=True, text=True, env=env, timeout=timeout)
@@ -165,6 +166,60 @@ def describe_apk(apk, *, build_tools: str, jdk: str | None = None,
 #: *type* decides whether the reader gets a number at all.
 TYPE_FLOAT = 0x04
 TYPE_INT_BOOLEAN = 0x12
+
+
+def _dex_strings(blob: bytes) -> list[str]:
+    import struct
+
+    def uleb(data: bytes, at: int):
+        result = shift = 0
+        while True:
+            byte = data[at]
+            at += 1
+            result |= (byte & 0x7F) << shift
+            if not byte & 0x80:
+                return result, at
+            shift += 7
+
+    count, offset = struct.unpack_from("<II", blob, 56)
+    strings = []
+    for i in range(count):
+        (start,) = struct.unpack_from("<I", blob, offset + 4 * i)
+        length, at = uleb(blob, start)
+        strings.append(blob[at:at + length].decode("utf-8", "replace"))
+    return strings
+
+
+def _check_dex(apk: Path, source_class: str) -> None:
+    """The two load gates that can be checked without a device.
+
+    ``ExtensionLoader`` resolves the manifest's class through a DexClassLoader
+    and then refuses anything that is not a CatalogueSource. Both failures can
+    be ruled out here: the class has to be in the dex, and the ABI it inherits
+    must NOT be bundled, because the host supplies it through parent
+    delegation. An APK carrying its own copy of eu.kanade.* would work only by
+    accident, and would break the moment the host's types moved.
+    """
+    internal = "L" + source_class.replace(".", "/") + ";"
+    found = False
+    bundled_abi = False
+    with zipfile.ZipFile(apk) as archive:
+        for name in archive.namelist():
+            if not name.endswith(".dex"):
+                continue
+            for text in _dex_strings(archive.read(name)):
+                if text == internal:
+                    found = True
+                elif text.startswith("Leu/kanade/tachiyomi/"):
+                    bundled_abi = True
+    if not found:
+        raise BuildFailure(
+            f"the manifest names {source_class} but no dex in the APK contains it")
+    if bundled_abi:
+        raise BuildFailure(
+            "the APK bundles eu.kanade.tachiyomi.* types; they are supplied by the "
+            "host at runtime and must not be packaged, or the extension binds "
+            "against a second copy of types the app already owns")
 
 
 def manifest_metadata(apk) -> tuple[str, str]:
