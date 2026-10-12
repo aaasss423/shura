@@ -137,7 +137,9 @@ def _title(host: str, name: str) -> str:
 def build_plan(descriptor, *, observed_hrefs: list[str] | None = None,
                page_image: str = PAGE_IMAGE,
                chapter_marker: str = CHAPTER_MARKER,
-               entry_href: str | None = None) -> ExtensionPlan:
+               entry_href: str | None = None,
+               observed_page_images: list[str] | None = None,
+               page_images_observed: bool | None = None) -> ExtensionPlan:
     """Plan the extension for one accepted site.
 
     ``descriptor`` is the :class:`~shura_core.content.htmlsite.SiteDescriptor`
@@ -149,6 +151,14 @@ def build_plan(descriptor, *, observed_hrefs: list[str] | None = None,
     to derive it from, and a shape invented here would compile and then match
     nothing at runtime. A descriptor with no observed hrefs is therefore refused
     rather than guessed at.
+
+    ``observed_page_images`` is the evidence for the reading pages, and it is the
+    gate that matters most. A catalogue that finds works and chapters but serves
+    no page images in its HTML is a site whose reader is JavaScript; an
+    extension for it would search perfectly and then show an empty chapter, which
+    reads to the user as a broken manga rather than as an unsupported site.
+    Pass ``page_images_observed=False`` when the evaluation saw a chapter page
+    and found no images, and the site is refused with that reason.
     """
     usable, reason = descriptor.usable()
     host = descriptor.host or (urlparse(descriptor.catalogue_url).hostname or "")
@@ -188,6 +198,16 @@ def build_plan(descriptor, *, observed_hrefs: list[str] | None = None,
             f"the proven entry shape {plan.entry_href!r} does not occur in {plan.catalogue_url}")
     if not plan.page_image:
         plan.blockers.append("no page image pattern was proven, so no reading pages")
+    observed_pages = list(observed_page_images or [])
+    if page_images_observed is False:
+        plan.blockers.append(
+            "a chapter page was read and served no reading images, so this site "
+            "needs an extraction mechanism that does not exist yet; it is not "
+            "safe to publish an extension that would show empty chapters")
+    elif observed_pages and not any(re.search(plan.page_image, src) for src in observed_pages):
+        plan.blockers.append(
+            "the images this site served did not match the page image pattern, "
+            "so reading pages could not be located")
     observed = list(observed_hrefs or [])
     if not observed:
         plan.blockers.append(

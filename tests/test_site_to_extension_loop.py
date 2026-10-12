@@ -74,7 +74,42 @@ class RefusalIsARefusal(unittest.TestCase):
         plan = build_plan(_descriptor(catalogue_url=""), observed_hrefs=OBSERVED)
         self.assertFalse(plan.publishable)
 
-    def test_a_site_with_no_page_images_is_refused(self):
+    def test_a_site_that_serves_no_reading_images_is_refused(self):
+        """The gate that matters most for this site.
+
+        The Arabic catalogue was read and its chapter page served a cover and
+        two site logos, and no reading pages. An extension for it would search
+        and list chapters perfectly and then show an empty chapter, which the
+        reader sees as a broken manga rather than an unsupported site.
+        """
+        plan = build_plan(_descriptor(), observed_hrefs=OBSERVED, page_images_observed=False)
+        self.assertFalse(plan.publishable)
+        self.assertIn("needs an extraction mechanism", plan.reason())
+
+    def test_images_that_do_not_match_the_pattern_are_refused(self):
+        plan = build_plan(_descriptor(), observed_hrefs=OBSERVED,
+                          observed_page_images=["https://site.example/page.php?id=9"])
+        self.assertFalse(plan.publishable)
+        self.assertIn("did not match", plan.reason())
+
+    def test_an_image_pattern_alone_cannot_tell_a_logo_from_a_reading_page(self):
+        """Why the explicit gate exists rather than the pattern doing the work.
+
+        The live chapter page serves a cover and two site logos alongside
+        nothing else, and every one of them is a .jpg or .png. A pattern that
+        matches image extensions therefore matches site chrome too, so it cannot
+        decide whether a site can be read - only evidence that reading pages
+        were actually seen can.
+        """
+        from shura_core.extension.converter import PAGE_IMAGE, build_plan as plan_for
+        chrome = ["https://site.example/chapter_cover_image/Page_01.jpg",
+                  "https://site.example/youth_logo.png"]
+        for src in chrome:
+            self.assertRegex(src, PAGE_IMAGE)
+        self.assertTrue(plan_for(_descriptor(), observed_hrefs=OBSERVED,
+                                 observed_page_images=chrome).publishable)
+
+    def test_a_site_with_no_page_image_pattern_is_refused(self):
         plan = build_plan(_descriptor(), observed_hrefs=OBSERVED, page_image="")
         self.assertFalse(plan.publishable)
         self.assertIn("no reading pages", plan.reason())
