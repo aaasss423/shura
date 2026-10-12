@@ -5,6 +5,7 @@ existing SafeHTTP through a transport; tests wire a local fixture. There is
 no switch that relaxes a network guard.
 """
 
+from .htmlsite import HtmlCatalogueSource, SiteDescriptor
 from .fetcher import (Budget, Budgets, FetchResult, HOST_LIMITER, PageFetcher,
                       SharedRateLimiter, SOURCE_FILE_NAME, chapter_is_fetchable,
                       fetchable_sources, load_source_config, sync_source_policy,
@@ -31,6 +32,7 @@ __all__ = ["SCHEMA_VERSION", "connect", "migrate", "open_store", "Attempt", "Rec
            "HOST_LIMITER", "SOURCE_FILE_NAME", "load_source_config", "sync_source_policy",
            "fetchable_sources", "work_is_downloadable", "chapter_is_fetchable",
            "normalise_source_entry", "upsert_source_entry",
+           "SiteDescriptor", "HtmlCatalogueSource",
            "PageRejected", "ValidatedPage",
            "validate_page", "digest_of", "usage_bytes", "cleanup_stale_parts", "write_bounded",
            "SafeHTTPTransport", "run_fetch_run", "FetchRunReport", "default_identity",
