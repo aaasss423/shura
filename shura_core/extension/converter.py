@@ -84,7 +84,7 @@ class ExtensionPlan:
     cover_image: str = COVER_IMAGE
     trust_page_heading: bool = True
     min_listing_group: int = 4
-    version_code: int = 1
+    version_code: int = 0
     version_name: str = "1.0"
     module_name: str = ""
     blockers: list[str] = field(default_factory=list)
@@ -168,6 +168,13 @@ def build_plan(descriptor, *, observed_hrefs: list[str] | None = None,
         chapter_marker=chapter_marker,
         page_image=page_image,
     )
+    # Derived from the same function the publisher uses, so the index and the
+    # artifact cannot disagree. Shura's index publishes a surrogate versionCode
+    # of 10000 for "1.0"; an APK declaring 1 would make the reader compare its
+    # own published index against an artifact that contradicts it.
+    from ..publishing.repository import _version_code
+
+    plan.version_code = _version_code(plan.version_name)
     if not usable:
         plan.blockers.append(reason or "the site is not usable")
     if not plan.catalogue_url:

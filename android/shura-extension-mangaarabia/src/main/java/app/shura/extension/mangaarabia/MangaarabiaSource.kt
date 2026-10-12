@@ -25,7 +25,7 @@ class MangaarabiaSource : SiteCatalogueSource() {
         lang = "ar",
         catalogueUrl = "https://www.mangaarabia.com/index.php/ar/node",
         // Proven by the repeating-shape detector over this site's own index.
-        entryHref = Regex("""/index.php/ar/node/\d+"""),
+        entryHref = Regex("""/index\.php/ar/node/\d+"""),
         minListingGroup = 4,
         chapterMarker = Regex("""(?:\s*[-–—|]\s*(?:[A-Za-z]{2,12}\s+|الفصل|فصل|حلقة|الفصـل)\s*#?\s*\d+(?:\.\d+)?\s*$)"""),
         trustPageHeading = true,
