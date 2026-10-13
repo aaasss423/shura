@@ -26,7 +26,10 @@ class ShuraRepositoryClientTest {
     fun setUp() {
         root = File(System.getProperty("shura.repo.dir") ?: "../../repo")
         assertTrue("no published repository at $root", File(root, "repo.json").isFile)
-        client = ShuraRepositoryClient(root, null, TrustAnchor("b655a474503f4471fdaf6ba35b9385f71d144669f3c28602c5b60b062022c41d"))
+        client = ShuraRepositoryClient(root, null, TrustPolicy(
+            TrustAnchor("b655a474503f4471fdaf6ba35b9385f71d144669f3c28602c5b60b062022c41d"),
+            listOf(TrustedPublisher("b655a474503f4471fdaf6ba35b9385f71d144669f3c28602c5b60b062022c41d",
+                listOf("eu.kanade.tachiyomi.extension.ar.procomic")))))
     }
 
     @Test

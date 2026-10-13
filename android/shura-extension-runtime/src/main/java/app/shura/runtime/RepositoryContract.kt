@@ -67,6 +67,87 @@ data class RepositoryPackage(
 object RepositoryIndex {
     fun parse(text: String): List<RepositoryPackage> = RepositoryPackage.parseAll(text)
 }
+
+/**
+ * A publisher this build is willing to run code from, and the packages it may.
+ *
+ * WHY THIS IS NOT JUST ANOTHER ANCHOR
+ *
+ * The build pinned exactly one certificate, and it happened to be the one that
+ * signs `eu.kanade.tachiyomi.extension.ar.procomic` - an extension downloaded
+ * from a third party's GitHub releases, not one Shura built. So the app's trust
+ * model said "the publisher of Shura is whoever published ProComic".
+ *
+ * That is wrong twice over. Shura builds its own extensions, and they cannot be
+ * signed with a third party's private key; and a repository that carried both a
+ * third-party extension and a Shura-built one would have been refused by the
+ * publisher for holding two signers. The two identities were fused into one,
+ * which is why no Shura-built extension could ever have loaded.
+ *
+ * So an identity is a certificate *and the packages it speaks for*. A trusted
+ * publisher cannot sign for a package outside its scope, so a key trusted for
+ * one third-party extension cannot be used to mint another one.
+ *
+ * Provisioned out of band. A repository may declare its own signers, and those
+ * are claims; only what this build was configured with counts.
+ */
+data class TrustedPublisher(
+    val digest: String,
+    /** Packages this key may sign for, as exact names or `prefix.`-scoped. */
+    val packageScopes: List<String>,
+    /** Shown in a refusal, so the user knows which identity was involved. */
+    val label: String = digest.take(8),
+) {
+    init {
+        if (!digest.matches(Regex("[0-9a-fA-F]{64}"))) {
+            throw LoadFailure.NotVerified(
+                "a trusted publisher needs a 64-hex certificate digest, got '$digest'")
+        }
+        if (packageScopes.isEmpty()) {
+            throw LoadFailure.NotVerified(
+                "trusted publisher ${digest.take(8)} was given no package scope; an " +
+                    "unscoped key would be trusted for every package in the repository")
+        }
+    }
+
+    /** Whether this key may sign for [pkg]. */
+    fun covers(pkg: String): Boolean = packageScopes.any { scope ->
+        pkg == scope || (scope.endsWith('.') && pkg.startsWith(scope))
+    }
+
+    fun coversAny(packages: Collection<String>): Boolean = packages.any { covers(it) }
+}
+
+/**
+ * Everything this build trusts: the repository's own metadata key, and the
+ * publishers whose code it will run.
+ *
+ * These are separate on purpose. The repository anchor says who may speak for
+ * the repository; the publisher list says whose extensions may run inside the
+ * app. Collapsing them is what made a third-party key stand in for Shura's.
+ */
+data class TrustPolicy(
+    val repository: TrustAnchor,
+    val publishers: List<TrustedPublisher>,
+) {
+    /**
+     * The publisher that may sign [pkg], or a refusal naming what is pinned.
+     *
+     * Empty is a normal, configured state: a build with no Shura publisher key
+     * simply refuses Shura-built extensions, which is the correct outcome
+     * rather than a reason to fall back to somebody else's key.
+     */
+    fun publisherFor(pkg: String): TrustedPublisher =
+        publishers.firstOrNull { it.covers(pkg) }
+            ?: throw LoadFailure.NotVerified(
+                "no trusted publisher is pinned for '$pkg' in this build. " +
+                    (if (publishers.isEmpty())
+                        "No publisher is pinned at all, so no extension can run."
+                    else
+                        "Pinned publishers: " + publishers.joinToString { "${it.label} (${it.packageScopes.joinToString()})" }) +
+                    " Installing an extension cannot grant this permission."
+            )
+}
 /**
  * The certificate digest this build expects a repository to be signed with.
  *

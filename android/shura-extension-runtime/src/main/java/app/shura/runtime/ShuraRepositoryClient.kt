@@ -36,8 +36,11 @@ class ShuraRepositoryClient(
      *
      * `null` means "nothing configured", and every entry is then refused.
      */
-    private val expectedAnchor: TrustAnchor,
+    private val policy: TrustPolicy,
 ) {
+
+    /** Kept as a named property: the repository's own metadata key. */
+    private val expectedAnchor: TrustAnchor get() = policy.repository
 
     private val repoMeta: RepositoryMeta by lazy {
         val text = File(root, "repo.json").takeIf { it.isFile }?.readText()
@@ -104,7 +107,16 @@ class ShuraRepositoryClient(
                 "SHA-256 mismatch for ${entry.apk}: got $digest, repository published ${entry.artifactSha256}"
             )
         }
-        val anchor = trustAnchor()
+        // Which publisher is allowed to speak for this package is decided here,
+        // before any of its bytes are trusted, and only from what this build was
+        // configured with. The index's own claim about the signer is checked
+        // against that decision afterwards - it is a claim, never the authority.
+        val expectedPublisher = runCatching { policy.publisherFor(entry.pkg) }
+            .getOrElse { e ->
+                staged.delete()
+                throw e
+            }
+        val anchor = expectedPublisher.digest
         val fromFile = signatures?.verify(staged, anchor, entry.signingCertificateSha256)
         if (fromFile == null) {
             staged.delete()
@@ -117,6 +129,16 @@ class ShuraRepositoryClient(
             staged.delete()
             throw LoadFailure.Manifest(
                 "${entry.apk} declares package ${metadata.packageName}, index says ${entry.pkg}"
+            )
+        }
+        // The key was checked against the scope for the package the index named;
+        // confirm the APK really declares that package, so a trusted publisher
+        // cannot sign for a package it was not granted.
+        if (!expectedPublisher.covers(metadata.packageName)) {
+            staged.delete()
+            throw LoadFailure.NotVerified(
+                "${metadata.packageName} is signed by ${expectedPublisher.label}, which is " +
+                    "pinned only for ${expectedPublisher.packageScopes.joinToString()}"
             )
         }
         val abiText = metadata.metaData["tachiyomix.extensionLib"]

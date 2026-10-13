@@ -71,13 +71,25 @@ class RealExtensionLoadTest {
         return dst
     }
 
+    /**
+     * The policy the shipped app pins, built from the constants it ships.
+     *
+     * The certificate is scoped to the one package it was ever trusted for, so
+     * this test cannot silently start accepting an extension that key was never
+     * granted.
+     */
+    private fun policy(anchor: String) = TrustPolicy(
+        TrustAnchor(anchor),
+        listOf(TrustedPublisher(anchor, listOf("eu.kanade.tachiyomi.extension.ar.procomic"), "procomic")),
+    )
+
     @Test
     fun loadsThePublishedProcomicAndPerformsARealSearch() {
         val repository = stageRepository()
         val client = ShuraRepositoryClient(
             repository,
             ApkSignatureVerifier(context),
-            TrustAnchor(anchor),
+            policy(anchor),
         )
 
         // 1. the entry resolves to the published file
@@ -126,7 +138,7 @@ class RealExtensionLoadTest {
         val client = ShuraRepositoryClient(
             repository,
             ApkSignatureVerifier(context),
-            TrustAnchor("f".repeat(64)),
+            policy("f".repeat(64)),
         )
         val entry = client.entries().first { it.pkg.endsWith("procomic") }
         try {

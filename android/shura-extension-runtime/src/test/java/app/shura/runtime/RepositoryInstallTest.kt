@@ -53,6 +53,15 @@ class RepositoryInstallTest {
 
     private fun certificate(): String = "b".repeat(64)
 
+    /**
+     * Installing and reading an index is not a trust decision, so these tests
+     * pin a policy covering the sample package rather than asserting on trust.
+     */
+    private fun policy() = TrustPolicy(
+        TrustAnchor(certificate()),
+        listOf(TrustedPublisher(certificate(), listOf("app.shura.extension.sample"))),
+    )
+
     /** A repository that satisfies the index contract, built on disk. */
     private fun buildRepository(name: String, extraApks: List<String> = emptyList()): File {
         val root = tempDir(name)
@@ -106,7 +115,7 @@ class RepositoryInstallTest {
         assertTrue(File(into, "apk/extension-1.0.apk").isFile)
 
         // The client can now find what the loader asks for.
-        val entries = ShuraRepositoryClient(into, null, TrustAnchor(certificate())).entries()
+        val entries = ShuraRepositoryClient(into, null, policy()).entries()
         assertEquals(1, entries.size)
         assertEquals("app.shura.extension.sample", entries.single().pkg)
     }
@@ -120,7 +129,9 @@ class RepositoryInstallTest {
         // Installing is copying. Trust is still decided against the pinned
         // anchor, and a repository that declares a different key is refused
         // even though it is sitting exactly where the loader reads from.
-        val wrong = TrustAnchor("c".repeat(64))
+        val wrong = TrustPolicy(
+            TrustAnchor("c".repeat(64)),
+            listOf(TrustedPublisher("c".repeat(64), listOf("app.shura.extension.sample"))))
         val failure = try {
             ShuraRepositoryClient(into, null, wrong).entries()
             null
@@ -160,7 +171,7 @@ class RepositoryInstallTest {
         assertFalse(ShuraRepositoryInstaller.install(bad, into).ok)
 
         // The previous one is intact and still readable.
-        val entries = ShuraRepositoryClient(into, null, TrustAnchor(certificate())).entries()
+        val entries = ShuraRepositoryClient(into, null, policy()).entries()
         assertEquals(1, entries.size)
     }
 
@@ -181,7 +192,7 @@ class RepositoryInstallTest {
         // down on first launch.
         val empty = tempDir("fresh")
         val failure = try {
-            ShuraRepositoryClient(empty, null, TrustAnchor(certificate())).entries()
+            ShuraRepositoryClient(empty, null, policy()).entries()
             null
         } catch (e: Throwable) { e }
         assertTrue("expected the client to refuse an empty directory", failure != null)
@@ -203,7 +214,10 @@ class RepositoryInstallTest {
         val anchor = File(live, "repo.json").let {
             RepositoryMeta.parse(it.readText()).signingKeyFingerprint
         }
-        val entries = ShuraRepositoryClient(into, null, TrustAnchor(anchor)).entries()
+        val entries = ShuraRepositoryClient(
+            into, null,
+            TrustPolicy(TrustAnchor(anchor),
+                listOf(TrustedPublisher(anchor, listOf("app.shura.extension.asurascans"))))).entries()
         assertEquals(
             "every published entry should have been copied",
             RepositoryIndex.parse(File(live, "index.shura.json").readText()).size,

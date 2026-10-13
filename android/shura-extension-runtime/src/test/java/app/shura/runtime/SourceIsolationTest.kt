@@ -47,7 +47,7 @@ class SourceIsolationTest {
         // it: a wrong anchor fails loudly instead of yielding nothing.
         val repo = File(System.getProperty("shura.repo.dir") ?: "../repo")
         assertTrue("no published repository at $repo", File(repo, "repo.json").isFile)
-        val client = ShuraRepositoryClient(repo, null, TrustAnchor("f".repeat(64)))
+        val client = ShuraRepositoryClient(repo, null, anchorPolicy("f".repeat(64)))
         val failure = try { client.entries(); null } catch (e: LoadFailure) { e }
         assertTrue("a foreign anchor must be reported", failure is LoadFailure.NotVerified)
         assertTrue("the failure must carry a reason", !failure!!.message.isNullOrBlank())
@@ -60,4 +60,14 @@ class SourceIsolationTest {
         assertEquals("MangaDex", host.all().first().name)
         assertNotNull(host.find("com.shura.source.mangadex"))
     }
+
+/**
+ * Repository-anchor tests, not publisher tests: the publisher list only has to
+ * exist. Trust of who may sign for a package is a separate decision, covered by
+ * RepositoryTrustTest.
+ */
+private fun anchorPolicy(digest: String?) =
+    TrustPolicy(TrustAnchor(digest), listOf(TrustedPublisher(
+        "a".repeat(64), listOf("eu.kanade.tachiyomi.extension.ar.procomic"), "unused")))
+
 }

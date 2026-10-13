@@ -62,7 +62,7 @@ class TrustAnchorIndependenceTest {
     fun aRepositoryPinnedToAnUntrustedAnchorIsRefused() {
         val dir = forgeRepository(folder.root, attacker)
         // The operator pins the genuine anchor; the downloaded repo names another.
-        val client = ShuraRepositoryClient(dir, null, TrustAnchor(genuine))
+        val client = ShuraRepositoryClient(dir, null, anchorPolicy(genuine))
         val failure = try {
             client.entries()
             null
@@ -80,7 +80,7 @@ class TrustAnchorIndependenceTest {
     fun theAnchorIsNeverReadFromTheRepositoryItCertifies() {
         val dir = forgeRepository(folder.root, attacker)
         // Even the accessor itself must not hand back the downloaded value.
-        val client = ShuraRepositoryClient(dir, null, TrustAnchor(genuine))
+        val client = ShuraRepositoryClient(dir, null, anchorPolicy(genuine))
         assertEquals("the anchor must be the configured one", genuine, client.trustAnchor())
     }
 
@@ -90,7 +90,7 @@ class TrustAnchorIndependenceTest {
         // repo.json, index entry and artifact all agree with each other, served
         // by the attacker. It must not get as far as the APK.
         val dir = forgeRepository(folder.root, attacker)
-        val client = ShuraRepositoryClient(dir, null, TrustAnchor(genuine))
+        val client = ShuraRepositoryClient(dir, null, anchorPolicy(genuine))
         val failure = try { client.entries(); null } catch (e: LoadFailure) { e }
         assertTrue("a self-consistent forgery must still be refused", failure is LoadFailure.NotVerified)
     }
@@ -99,7 +99,7 @@ class TrustAnchorIndependenceTest {
     fun theGenuineRepositoryIsAcceptedByItsAnchor() {
         val repo = File(System.getProperty("shura.repo.dir") ?: "../../repo")
         assertTrue("no published repository at $repo", File(repo, "repo.json").isFile)
-        val client = ShuraRepositoryClient(repo, null, TrustAnchor(genuine))
+        val client = ShuraRepositoryClient(repo, null, anchorPolicy(genuine))
         // It passes the anchor gate and its entries are readable: nothing about
         // the repository itself is rejected. The APK's own signature is then
         // required separately, which cannot run off-device.
@@ -111,7 +111,7 @@ class TrustAnchorIndependenceTest {
     fun anUnconfiguredAnchorRefusesRatherThanTrustingTheDownload() {
         val repo = File(System.getProperty("shura.repo.dir") ?: "../../repo")
         assertTrue("no published repository at $repo", File(repo, "repo.json").isFile)
-        val client = ShuraRepositoryClient(repo, null, TrustAnchor(null))
+        val client = ShuraRepositoryClient(repo, null, anchorPolicy(null))
         val failure = try {
             client.entries()
             null
@@ -123,4 +123,14 @@ class TrustAnchorIndependenceTest {
             failure is LoadFailure.NotVerified,
         )
     }
+
+/**
+ * Repository-anchor tests, not publisher tests: the publisher list only has to
+ * exist. Trust of who may sign for a package is a separate decision, covered by
+ * RepositoryTrustTest.
+ */
+private fun anchorPolicy(digest: String?) =
+    TrustPolicy(TrustAnchor(digest), listOf(TrustedPublisher(
+        "a".repeat(64), listOf("eu.kanade.tachiyomi.extension.ar.procomic"), "unused")))
+
 }

@@ -109,6 +109,18 @@ class RepositoryTrustTest {
         "b655a474503f4471fdaf6ba35b9385f71d144669f3c28602c5b60b062022c41d"
 
     /**
+     * What the shipped build actually pins: the ProComic certificate, scoped to
+     * the one package that certificate was ever trusted for.
+     */
+    private fun shippedPolicy(extra: List<TrustedPublisher> = emptyList()): TrustPolicy = TrustPolicy(
+        TrustAnchor(certificateOf()),
+        listOf(TrustedPublisher(
+            certificateOf(),
+            listOf("eu.kanade.tachiyomi.extension.ar.procomic"),
+            "procomic")) + extra,
+    )
+
+    /**
      * A repository whose entry describes [apk], with its digest computed for
      * real rather than pasted.
      */
@@ -143,7 +155,7 @@ class RepositoryTrustTest {
         val dir = repositoryFor(apk, tempDir("good"), pin)
 
         val client = ShuraRepositoryClient(
-            dir, ArchiveVerifier(pin), TrustAnchor(pin))
+            dir, ArchiveVerifier(pin), shippedPolicy())
         val entry = client.entries().single()
         val verified = client.verify(entry)
 
@@ -169,7 +181,7 @@ class RepositoryTrustTest {
         val staged = File(dir, "apk/${apk.name}")
         staged.writeBytes(staged.readBytes() + byteArrayOf(0))
 
-        val client = ShuraRepositoryClient(dir, ArchiveVerifier(pin), TrustAnchor(pin))
+        val client = ShuraRepositoryClient(dir, ArchiveVerifier(pin), shippedPolicy())
         val failure = runCatching { client.verify(client.entries().single()) }.exceptionOrNull()
         assertTrue("a modified artifact was accepted", failure != null)
         assertTrue(failure!!.message!!, failure.message!!.contains("SHA-256 mismatch"))
@@ -183,7 +195,7 @@ class RepositoryTrustTest {
         val other = "d".repeat(64)
         val dir = repositoryFor(apk, tempDir("otherkey"), other)
 
-        val client = ShuraRepositoryClient(dir, ArchiveVerifier(other), TrustAnchor(certificateOf()))
+        val client = ShuraRepositoryClient(dir, ArchiveVerifier(other), shippedPolicy())
         val failure = runCatching { client.verify(client.entries().single()) }.exceptionOrNull()
         assertTrue("a repository pinning its own key was trusted", failure != null)
         // The repository agrees with itself, and is still refused: the anchor is
@@ -202,7 +214,7 @@ class RepositoryTrustTest {
         val text = index.readText().replace(pin, "e".repeat(64))
         index.writeText(text)
 
-        val client = ShuraRepositoryClient(dir, ArchiveVerifier(pin), TrustAnchor(pin))
+        val client = ShuraRepositoryClient(dir, ArchiveVerifier(pin), shippedPolicy())
         val failure = runCatching { client.verify(client.entries().single()) }.exceptionOrNull()
         assertTrue("a repository that lies about its signer was trusted", failure != null)
     }
@@ -213,7 +225,7 @@ class RepositoryTrustTest {
         val pin = certificateOf()
         val dir = repositoryFor(apk, tempDir("noverify"), pin)
 
-        val client = ShuraRepositoryClient(dir, null, TrustAnchor(pin))
+        val client = ShuraRepositoryClient(dir, null, shippedPolicy())
         val failure = runCatching { client.verify(client.entries().single()) }.exceptionOrNull()
         assertTrue("metadata alone was trusted", failure != null)
         assertTrue(failure!!.message!!, failure.message!!.contains("no APK signature verifier"))

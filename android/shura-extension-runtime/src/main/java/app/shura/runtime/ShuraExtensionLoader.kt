@@ -20,10 +20,10 @@ data class ExtensionOutcome(val source: ShuraSource?, val error: String?)
  */
 object ShuraExtensionLoader {
 
-    fun load(context: Context, repositoryDir: File, anchor: TrustAnchor): List<ExtensionOutcome> {
+    fun load(context: Context, repositoryDir: File, policy: TrustPolicy): List<ExtensionOutcome> {
         val outcomes = mutableListOf<ExtensionOutcome>()
         val entries = try {
-            ShuraRepositoryClient(repositoryDir, ApkSignatureVerifier(context), anchor).entries()
+            ShuraRepositoryClient(repositoryDir, ApkSignatureVerifier(context), policy).entries()
         } catch (e: Throwable) {
             // Reading the index is inside this try on purpose.
             //
@@ -36,7 +36,7 @@ object ShuraExtensionLoader {
             // is always reported rather than dropped.
             return listOf(ExtensionOutcome(null, "repository: ${e.message}"))
         }
-        val client = ShuraRepositoryClient(repositoryDir, ApkSignatureVerifier(context), anchor)
+        val client = ShuraRepositoryClient(repositoryDir, ApkSignatureVerifier(context), policy)
         val loader = ExtensionLoader(context)
         for (entry in entries) {
             try {
