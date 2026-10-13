@@ -9,6 +9,8 @@ import java.io.File
 data class StoredChapter(
     val dir: File,
     val sourceId: String,
+    /** The id the source knows the title by, so the chapter list can be refetched. */
+    val mangaId: String,
     val chapterId: String,
     val title: String,
     val pageUris: List<Uri>,
@@ -22,12 +24,20 @@ fun indexStoredChapters(store: File): List<StoredChapter> =
         ?.mapNotNull { readManifest(it) }
         ?.sortedByDescending { it.title } ?: emptyList()
 
-fun persistStoredChapter(store: File, sourceId: String, chapterId: String, title: String, files: List<File>): StoredChapter {
+fun persistStoredChapter(
+    store: File,
+    sourceId: String,
+    mangaId: String,
+    chapterId: String,
+    title: String,
+    files: List<File>,
+): StoredChapter {
     val dir = File(store, chapterId.replace(Regex("[^A-Za-z0-9_.-]"), "_"))
     dir.mkdirs()
     files.forEach { file -> if (file.parentFile != dir) file.copyTo(File(dir, file.name), overwrite = true) }
     val manifest = JSONObject()
         .put("sourceId", sourceId)
+        .put("mangaId", mangaId)
         .put("chapterId", chapterId)
         .put("title", title)
         .put("pages", JSONArray(files.map(File::getName)))
@@ -46,5 +56,6 @@ private fun readManifest(dir: File): StoredChapter? {
     val pageArray = json.optJSONArray("pages") ?: return null
     val uris = (0 until pageArray.length()).map { Uri.fromFile(File(dir, pageArray.optString(it))) }
     if (uris.isEmpty()) return null
-    return StoredChapter(dir, json.optString("sourceId"), json.optString("chapterId"), json.optString("title"), uris)
+    return StoredChapter(dir, json.optString("sourceId"), json.optString("mangaId"),
+        json.optString("chapterId"), json.optString("title"), uris)
 }

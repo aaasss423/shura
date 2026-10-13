@@ -50,3 +50,52 @@ object ChapterNavigation {
         previous(chapters, currentId) != null
 
 }
+
+
+/**
+ * What the reader needs when a chapter is opened by resuming, not by tapping.
+ *
+ * Opening from Home or from the Library is a different act from opening from the
+ * chapter list: the reader already has a chapter, but not the list around it.
+ * Without the list its previous/next have nothing to step through, which is
+ * why those two entry points used to open a reader with no arrows at all.
+ *
+ * So the chapters are refetched, and the stored chapter is located *in that
+ * list* rather than assumed to be there. Three outcomes, all of them honest:
+ *
+ *  - the chapter is in the list: it is the current one, and the list travels
+ *    with it, so the reader can step both ways.
+ *  - the list came back but without that chapter - the source reorganised, or
+ *    the id changed. The reader still opens the chapter it was asked for, but
+ *    with no arrows, because stepping into a neighbouring chapter that is not
+ *    in the real list would be inventing navigation.
+ *  - the list could not be fetched at all. Same outcome, and the reason is
+ *    available so the UI can say the source could not be reached rather than
+ *    silently offering a reader with less in it.
+ */
+data class ResumeContext(
+    val chapter: Chapter,
+    /** The real list, or empty when it could not be established. */
+    val chapters: List<Chapter>,
+    /** Whether [chapters] actually contains [chapter]. */
+    val locatedInList: Boolean,
+    val failure: String? = null,
+)
+
+object ChapterResume {
+
+    fun resolve(chapter: Chapter, fetched: List<Chapter>?): ResumeContext {
+        if (fetched == null) {
+            return ResumeContext(chapter, emptyList(), locatedInList = false,
+                failure = "the chapter list could not be fetched")
+        }
+        val located = fetched.any { it.id == chapter.id }
+        return ResumeContext(
+            // The fetched copy, not the caller's: it carries the name and
+            // number the source currently reports for that chapter.
+            chapter = fetched.firstOrNull { it.id == chapter.id } ?: chapter,
+            chapters = if (located) fetched else emptyList(),
+            locatedInList = located,
+        )
+    }
+}

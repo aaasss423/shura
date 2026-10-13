@@ -36,23 +36,23 @@ class ReaderJourneyTest {
 
     @Test
     fun `a reopened chapter returns to the page it was left on`() {
-        progress.save(ReadingProgress("src", "Title", "c2", "Chapter 2", 11, 30, 1))
+        progress.save(ReadingProgress("src", "Title", "manga-1", "c2", "Chapter 2", 11, 30, 1))
         // The reader exits, the app restarts, the chapter is opened again.
         assertEquals(11, progress.pageFor("src", "Title", "c2", 30))
     }
 
     @Test
     fun `reading one chapter does not move another`() {
-        progress.save(ReadingProgress("src", "Title", "c2", "Chapter 2", 11, 30, 1))
+        progress.save(ReadingProgress("src", "Title", "manga-1", "c2", "Chapter 2", 11, 30, 1))
         // Step forward to c1 and read a little.
-        progress.save(ReadingProgress("src", "Title", "c1", "Chapter 1", 2, 30, 2))
+        progress.save(ReadingProgress("src", "Title", "manga-1", "c1", "Chapter 1", 2, 30, 2))
         assertEquals(11, progress.pageFor("src", "Title", "c2", 30))
         assertEquals(2, progress.pageFor("src", "Title", "c1", 30))
     }
 
     @Test
     fun `a chapter that grew since it was left clamps instead of falling off the end`() {
-        progress.save(ReadingProgress("src", "Title", "c2", "Chapter 2", 40, 50, 1))
+        progress.save(ReadingProgress("src", "Title", "manga-1", "c2", "Chapter 2", 40, 50, 1))
         // Re-read after the source split the chapter into fewer pages.
         assertEquals(19, progress.pageFor("src", "Title", "c2", 20))
     }
@@ -85,10 +85,10 @@ class ReaderJourneyTest {
     @Test
     fun `progress survives walking forward and back`() {
         var current = chapters.first().id
-        progress.save(ReadingProgress("src", "T", current, "C3", 5, 20, 1))
+        progress.save(ReadingProgress("src", "T", "manga-1", current, "C3", 5, 20, 1))
         repeat(2) {
             val next = ChapterNavigation.next(chapters, current)!!
-            progress.save(ReadingProgress("src", "T", next.id, next.name, 1, 20, 2))
+            progress.save(ReadingProgress("src", "T", "manga-1", next.id, next.name, 1, 20, 2))
             current = next.id
         }
         // Back to where it started: the page it was left on is still there.

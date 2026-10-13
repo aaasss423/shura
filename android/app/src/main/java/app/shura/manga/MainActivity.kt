@@ -92,7 +92,7 @@ private fun ShuraApp() {
             outcome.onSuccess { imported ->
                 pages.clear()
                 pages.addAll(imported)
-                readerMeta = ReaderMeta("local", "Local chapter", null, "device")
+                readerMeta = ReaderMeta("local", "Local chapter", "", null, "device")
                 loadError = null
             }.onFailure {
                 loadError = it.message ?: "Import failed"
@@ -150,6 +150,7 @@ private fun ShuraApp() {
         { source, chapter ->
             val sourceId = source.id
             val mangaTitle = readerMeta?.mangaTitle ?: source.name
+            val mangaId = readerMeta?.mangaId ?: ""
             scope.launch {
                 isLoading = true
                 loadError = null
@@ -158,7 +159,7 @@ private fun ShuraApp() {
                     .onSuccess { fetched ->
                         pages.clear()
                         pages.addAll(fetched)
-                        readerMeta = ReaderMeta(sourceId, mangaTitle, chapter, source.name)
+                        readerMeta = ReaderMeta(sourceId, mangaTitle, mangaId, chapter, source.name)
                         isLoading = false
                         if (fetched.isEmpty()) {
                             loadError = "This chapter returned no pages from ${source.name}."
@@ -187,11 +188,16 @@ private fun ShuraApp() {
         isLoading = isLoading,
         loadError = loadError,
         onFetchChapter = { source, chapter -> openChapter(source, chapter) },
+        // Suspends off the main thread: a resume refetches the whole list, and
+        // doing that on the UI thread is a dropped-frame freeze on every tap.
+        fetchChapters = { source, mangaId ->
+            runCatching { source.chapters(mangaId) }.getOrNull()
+        },
         onOpenStored = { entry ->
             // The pages are local files; the reader points at them directly.
             pages.clear()
             pages.addAll(entry.pageUris)
-            readerMeta = ReaderMeta(entry.sourceId, entry.title, null, "library")
+            readerMeta = ReaderMeta(entry.sourceId, entry.title, entry.mangaId, null, "library")
             loadError = null
             isLoading = false
         },
@@ -219,6 +225,7 @@ private fun ShuraApp() {
                     ReadingProgress(
                         sourceId = meta.sourceId,
                         mangaTitle = meta.mangaTitle,
+                        mangaId = meta.mangaId,
                         chapterId = chapter.id,
                         chapterName = chapter.name,
                         page = page,
@@ -240,6 +247,7 @@ private fun ShuraApp() {
 private data class ReaderMeta(
     val sourceId: String,
     val mangaTitle: String,
+    val mangaId: String,
     val chapter: app.shura.source.Chapter?,
     val sourceName: String,
 )

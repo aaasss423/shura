@@ -32,8 +32,8 @@ class ReaderStateTest {
     fun `progress is kept per chapter not globally`() {
         val store = ReadingProgressStore(memory)
         store.clearHistory()
-        store.save(ReadingProgress("src", "One Piece", "ch1", "Chapter 1", 7, 20, 1))
-        store.save(ReadingProgress("src", "One Piece", "ch2", "Chapter 2", 3, 20, 2))
+        store.save(ReadingProgress("src", "One Piece", "manga-1", "ch1", "Chapter 1", 7, 20, 1))
+        store.save(ReadingProgress("src", "One Piece", "manga-1", "ch2", "Chapter 2", 3, 20, 2))
 
         // A global "last page" would have moved ch1 to ch2's page.
         assertEquals(7, store.pageFor("src", "One Piece", "ch1", 20))
@@ -43,7 +43,7 @@ class ReaderStateTest {
     @Test
     fun `a stored page beyond the chapter is clamped rather than crashing`() {
         val store = ReadingProgressStore(memory)
-        store.save(ReadingProgress("s", "M", "c", "C", 99, 5, 1))
+        store.save(ReadingProgress("s", "M", "manga-1", "c", "C", 99, 5, 1))
         assertEquals(4, store.pageFor("s", "M", "c", 5))
         assertEquals(0, store.pageFor("s", "M", "other", 0))
     }
@@ -61,7 +61,7 @@ class ReaderStateTest {
         store.clearHistory()
         // More entries than the cap, written oldest last.
         (1..40).forEach { n ->
-            store.save(ReadingProgress("s", "M", "c$n", "Chapter $n", 0, 10, n.toLong()))
+            store.save(ReadingProgress("s", "M", "manga-1", "c$n", "Chapter $n", 0, 10, n.toLong()))
         }
         val history = store.history()
         assertTrue("history is unbounded: ${history.size}", history.size <= 24)
@@ -72,9 +72,9 @@ class ReaderStateTest {
     fun `reopening a chapter moves it to the front instead of duplicating it`() {
         val store = ReadingProgressStore(memory)
         store.clearHistory()
-        store.save(ReadingProgress("s", "M", "a", "A", 0, 10, 1))
-        store.save(ReadingProgress("s", "M", "b", "B", 0, 10, 2))
-        store.save(ReadingProgress("s", "M", "a", "A", 5, 10, 3))
+        store.save(ReadingProgress("s", "M", "manga-1", "a", "A", 0, 10, 1))
+        store.save(ReadingProgress("s", "M", "manga-1", "b", "B", 0, 10, 2))
+        store.save(ReadingProgress("s", "M", "manga-1", "a", "A", 5, 10, 3))
         val history = store.history()
         assertEquals(2, history.size)
         assertEquals("a", history.first().chapterId)

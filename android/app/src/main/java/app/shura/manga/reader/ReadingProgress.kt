@@ -19,13 +19,22 @@ import org.json.JSONObject
 data class ReadingProgress(
     val sourceId: String,
     val mangaTitle: String,
+    /**
+     * The id the source knows this title by.
+     *
+     * Needed to resume properly: the chapter list is fetched by manga id, so a
+     * history entry that carried only a title could not restore the reader's
+     * place in the list, and its previous/next arrows had nothing to step
+     * through. Carrying the title alone is not enough to re-enter a manga.
+     */
+    val mangaId: String,
     val chapterId: String,
     val chapterName: String,
     val page: Int,
     val pageCount: Int,
     val updatedAt: Long,
 ) {
-    val key: String get() = "$sourceId|$mangaTitle|$chapterId"
+    val key: String get() = "$sourceId|$mangaId|$chapterId"
 }
 
 /**
@@ -98,6 +107,7 @@ class ReadingProgressStore(private val prefs: KeyValueStore) {
             ReadingProgress(
                 sourceId = entry.optString("sourceId"),
                 mangaTitle = entry.optString("mangaTitle"),
+                mangaId = entry.optString("mangaId"),
                 chapterId = entry.optString("chapterId"),
                 chapterName = entry.optString("chapterName"),
                 page = entry.optInt("page"),
@@ -126,6 +136,7 @@ class ReadingProgressStore(private val prefs: KeyValueStore) {
             array.put(JSONObject()
                 .put("sourceId", item.sourceId)
                 .put("mangaTitle", item.mangaTitle)
+                .put("mangaId", item.mangaId)
                 .put("chapterId", item.chapterId)
                 .put("chapterName", item.chapterName)
                 .put("page", item.page)

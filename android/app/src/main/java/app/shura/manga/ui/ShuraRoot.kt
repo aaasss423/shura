@@ -10,6 +10,8 @@ import androidx.compose.material3.Text
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.*
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import app.shura.host.SourceHost
@@ -98,6 +100,11 @@ fun ShuraRoot(
      * from the last chapter.
      */
     onOpenStored: (StoredChapter) -> Unit = {},
+    /**
+     * Refetches a title's chapter list so a resumed chapter knows its
+     * neighbours. Null means the source could not be reached.
+     */
+    fetchChapters: suspend (ShuraSource, String) -> List<Chapter>? = { _, _ -> null },
 ) {
     ShuraTheme(dark = dark) {
         androidx.compose.runtime.CompositionLocalProvider(
@@ -114,6 +121,7 @@ fun ShuraRoot(
             // its previous/next have something real to step through.
             var loadedChapters by remember { mutableStateOf<List<Chapter>>(emptyList()) }
             val sourceOf = { id: String -> nav.sourceHost.find(id) }
+            val resumeScope = rememberCoroutineScope()
 
             // Move the reader onto a chapter and start loading it, as one step.
             // Fetching and navigating separately let the route keep naming the
@@ -156,11 +164,23 @@ fun ShuraRoot(
                                 // whatever was last loaded.
                                 val source = sourceOf(entry.sourceId)
                                 if (source != null) {
-                                    openChapter(
-                                        entry.sourceId, entry.mangaTitle, source,
-                                        Chapter(entry.chapterId, entry.chapterName, null),
-                                        emptyList(),
-                                    )
+                                    // Resume with the real list: without it the
+                                    // reader opens with no previous/next at all.
+                                    val stored = Chapter(entry.chapterId, entry.chapterName, null)
+                                    // Fetched off the main thread: a resume
+                                    // refetches the whole list, and doing that
+                                    // inline freezes the tap that triggered it.
+                                    resumeScope.launch {
+                                        val resolved = ChapterResume.resolve(
+                                            stored,
+                                            if (entry.mangaId.isBlank()) null
+                                            else fetchChapters(source, entry.mangaId),
+                                        )
+                                        openChapter(
+                                            entry.sourceId, entry.mangaTitle, source,
+                                            resolved.chapter, resolved.chapters,
+                                        )
+                                    }
                                 }
                             },
                             onBrowse = { route = ShuraScreen.Sources },
@@ -177,10 +197,26 @@ fun ShuraRoot(
                             stored = libraryState,
                             onRead = { entry ->
                                 onOpenStored(entry)
-                                route = ShuraScreen.Reader(
-                                    entry.sourceId, entry.title,
-                                    Chapter(entry.chapterId, entry.title, null), emptyList(),
-                                )
+                                val source = sourceOf(entry.sourceId)
+                                // A stored chapter whose source is still present
+                                // gets its list back too, so it opens with the
+                                // same navigation a freshly-fetched one does.
+                                val stored = Chapter(entry.chapterId, entry.title, null)
+                                if (source != null && entry.mangaId.isNotBlank()) {
+                                    resumeScope.launch {
+                                        val resolved = ChapterResume.resolve(
+                                            stored, fetchChapters(source, entry.mangaId),
+                                        )
+                                        route = ShuraScreen.Reader(
+                                            entry.sourceId, entry.title,
+                                            resolved.chapter, resolved.chapters,
+                                        )
+                                    }
+                                } else {
+                                    route = ShuraScreen.Reader(
+                                        entry.sourceId, entry.title, stored, emptyList(),
+                                    )
+                                }
                             },
                             onDelete = { entry ->
                                 app.shura.manga.deleteStoredChapter(entry)
