@@ -143,6 +143,11 @@ fun ChapterListScreen(
     onOpenChapter: (Chapter) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * The list that was actually fetched, handed upward so the reader can step
+     * between chapters without a second round trip.
+     */
+    onChaptersLoaded: (List<Chapter>) -> Unit = {},
 ) {
     val language = LocalUiLanguage.current
     var chapters by remember(mangaId) { mutableStateOf<List<Chapter>?>(null) }
@@ -151,7 +156,10 @@ fun ChapterListScreen(
 
     LaunchedEffect(mangaId) {
         runCatching { withContext(Dispatchers.IO) { source.chapters(mangaId) } }
-            .onSuccess { chapters = it }
+            .onSuccess {
+                chapters = it
+                onChaptersLoaded(it)
+            }
             .onFailure { error = it.message ?: Strings.t("error.generic", language) }
     }
 

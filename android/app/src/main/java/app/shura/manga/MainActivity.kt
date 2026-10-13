@@ -146,8 +146,10 @@ private fun ShuraApp() {
     val library = remember(libraryVersion) { indexStoredChapters(chapterStore(context)) }
 
     // The reader's data source: the pages of whatever is open.
-    val openChapter: (String, String, app.shura.source.ShuraSource, app.shura.source.Chapter) -> Unit =
-        { sourceId, mangaTitle, source, chapter ->
+    val openChapter: (app.shura.source.ShuraSource, app.shura.source.Chapter) -> Unit =
+        { source, chapter ->
+            val sourceId = source.id
+            val mangaTitle = readerMeta?.mangaTitle ?: source.name
             scope.launch {
                 isLoading = true
                 loadError = null
@@ -184,12 +186,21 @@ private fun ShuraApp() {
         pages = pages,
         isLoading = isLoading,
         loadError = loadError,
+        onFetchChapter = { source, chapter -> openChapter(source, chapter) },
+        onOpenStored = { entry ->
+            // The pages are local files; the reader points at them directly.
+            pages.clear()
+            pages.addAll(entry.pageUris)
+            readerMeta = ReaderMeta(entry.sourceId, entry.title, null, "library")
+            loadError = null
+            isLoading = false
+        },
         onRetry = {
             val meta = readerMeta
             val source = meta?.sourceId?.let { sourceHost.find(it) }
             val chapter = meta?.chapter
             if (source != null && chapter != null) {
-                openChapter(meta.sourceId, meta.mangaTitle, source, chapter)
+                openChapter(source, chapter)
             }
         },
         onExitReader = {

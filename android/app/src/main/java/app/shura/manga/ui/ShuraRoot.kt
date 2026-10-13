@@ -85,8 +85,19 @@ fun ShuraRoot(
     repositoryNotice: String?,
     onImport: () -> Unit,
     onInstallRepository: () -> Unit,
-    /** Opens a chapter: fetch its pages, then show the reader. */
-    onOpenChapter: (sourceId: String, mangaTitle: String, ShuraSource, Chapter) -> Unit = { _, _, _, _ -> },
+    /**
+     * Starts fetching a chapter's pages. Navigation is owned here, so the
+     * reader's route always names the chapter whose pages are on screen -
+     * fetching and navigating are one step, not two that can drift apart.
+     */
+    onFetchChapter: (ShuraSource, Chapter) -> Unit = { _, _ -> },
+    /**
+     * Opens a stored chapter. Its pages are already on disk, so there is
+     * nothing to fetch - but the reader still has to be pointed at them, and
+     * navigating there without doing so used to show whatever was left over
+     * from the last chapter.
+     */
+    onOpenStored: (StoredChapter) -> Unit = {},
 ) {
     ShuraTheme(dark = dark) {
         androidx.compose.runtime.CompositionLocalProvider(
@@ -99,7 +110,25 @@ fun ShuraRoot(
             var route by remember { mutableStateOf<ShuraScreen>(ShuraScreen.Home) }
             var settings by remember { mutableStateOf(nav.settingsStore.load()) }
             var libraryState by remember { mutableStateOf(library) }
+            // The chapters the list screen fetched, carried into the reader so
+            // its previous/next have something real to step through.
+            var loadedChapters by remember { mutableStateOf<List<Chapter>>(emptyList()) }
             val sourceOf = { id: String -> nav.sourceHost.find(id) }
+
+            // Move the reader onto a chapter and start loading it, as one step.
+            // Fetching and navigating separately let the route keep naming the
+            // old chapter while the new one's pages were already on screen.
+            fun openChapter(
+                sourceId: String,
+                mangaTitle: String,
+                source: ShuraSource?,
+                chapter: Chapter,
+                chapters: List<Chapter>,
+            ) {
+                if (source == null) return
+                route = ShuraScreen.Reader(sourceId, mangaTitle, chapter, chapters)
+                onFetchChapter(source, chapter)
+            }
 
             androidx.compose.material3.Scaffold(
                 bottomBar = {
@@ -121,9 +150,14 @@ fun ShuraRoot(
                         is ShuraScreen.Home -> HomeScreen(
                             progress = history.filter { it.chapterId != "" },
                             onOpenEntry = { entry ->
-                                sourceOf(entry.sourceId)?.let { source ->
-                                    route = ShuraScreen.Reader(
-                                        entry.sourceId, entry.mangaTitle,
+                                // Continue resumes the chapter for real: the
+                                // pages are re-fetched and the route moves with
+                                // them, rather than opening a reader over
+                                // whatever was last loaded.
+                                val source = sourceOf(entry.sourceId)
+                                if (source != null) {
+                                    openChapter(
+                                        entry.sourceId, entry.mangaTitle, source,
                                         Chapter(entry.chapterId, entry.chapterName, null),
                                         emptyList(),
                                     )
@@ -131,6 +165,7 @@ fun ShuraRoot(
                             },
                             onBrowse = { route = ShuraScreen.Sources },
                             onOpenLibrary = { route = ShuraScreen.Library },
+                            onImport = onImport,
                         )
 
                         is ShuraScreen.Sources -> SourcePickerScreen(
@@ -141,8 +176,11 @@ fun ShuraRoot(
                         is ShuraScreen.Library -> LibraryScreen(
                             stored = libraryState,
                             onRead = { entry ->
-                                route = ShuraScreen.Reader(entry.sourceId, entry.title,
-                                    Chapter(entry.chapterId, entry.title, null), emptyList())
+                                onOpenStored(entry)
+                                route = ShuraScreen.Reader(
+                                    entry.sourceId, entry.title,
+                                    Chapter(entry.chapterId, entry.title, null), emptyList(),
+                                )
                             },
                             onDelete = { entry ->
                                 app.shura.manga.deleteStoredChapter(entry)
@@ -179,8 +217,10 @@ fun ShuraRoot(
                                 source = source,
                                 mangaId = screen.manga.id,
                                 onOpenChapter = { chapter ->
-                                    onOpenChapter(screen.sourceId, screen.manga.title, source, chapter)
+                                    openChapter(screen.sourceId, screen.manga.title, source,
+                                        chapter, loadedChapters)
                                 },
+                                onChaptersLoaded = { loadedChapters = it },
                                 onBack = { route = ShuraScreen.Search(screen.sourceId) },
                             )
                         }
@@ -190,6 +230,11 @@ fun ShuraRoot(
                                 screen.sourceId, screen.mangaTitle, screen.chapter.id,
                                 pages.size.coerceAtLeast(1),
                             )
+                            // Null where there is nowhere to go, so the bar hides
+                            // the arrow rather than offering a dead step.
+                            val previous = ChapterNavigation.previous(screen.chapters, screen.chapter.id)
+                            val next = ChapterNavigation.next(screen.chapters, screen.chapter.id)
+                            val source = sourceOf(screen.sourceId)
                             ReaderScreen(
                                 pages = pages,
                                 sourceId = screen.sourceId,
@@ -197,8 +242,12 @@ fun ShuraRoot(
                                 chapterTitle = screen.mangaTitle + " · " + screen.chapter.name,
                                 savedPage = saved,
                                 onProgress = onProgressChanged,
-                                onPrevChapter = null,
-                                onNextChapter = null,
+                                onPrevChapter = previous?.let { c ->
+                                    { openChapter(screen.sourceId, screen.mangaTitle, source, c, screen.chapters) }
+                                },
+                                onNextChapter = next?.let { c ->
+                                    { openChapter(screen.sourceId, screen.mangaTitle, source, c, screen.chapters) }
+                                },
                                 onBack = onExitReader,
                                 translationSettings = settings,
                                 onTranslationSettingsChange = {
