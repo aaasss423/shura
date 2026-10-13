@@ -1,349 +1,234 @@
 package app.shura.manga
 
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.gestures.transformable
-import androidx.compose.foundation.gestures.rememberTransformableState
-import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.snapshotFlow
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.platform.testTag
 import app.shura.host.MangaDexChapterDownloader
 import app.shura.host.MangaDexSource
 import app.shura.host.SourceHost
-import app.shura.manga.reader.translation.TranslationMode
-import app.shura.manga.reader.translation.TranslationSettings
+import app.shura.manga.reader.ReadingProgress
+import app.shura.manga.reader.ReadingProgressStore
+import app.shura.manga.reader.translation.TranslationCache
 import app.shura.manga.reader.translation.TranslationSettingsStore
-import app.shura.source.Chapter
+import app.shura.manga.ui.ChapterDownloader
+import app.shura.manga.ui.ShuraNav
+import app.shura.manga.ui.ShuraRoot
+import app.shura.manga.ui.theme.UiLanguage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
 class MainActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); setContent { ShuraApp() } }
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent { ShuraApp() }
+    }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable private fun ShuraApp() {
+private const val KEY_LANGUAGE = "ui-language"
+private const val KEY_DARK = "ui-dark"
+
+@androidx.compose.runtime.Composable
+private fun ShuraApp() {
     val context = LocalContext.current
-    val preferences = remember { context.getSharedPreferences("reader-library", 0) }
-    val pages = remember {
-        mutableStateListOf<Uri>().apply {
-            runCatching {
-                val saved = org.json.JSONArray(preferences.getString("chapter-pages", "[]"))
-                for (index in 0 until saved.length()) add(Uri.parse(saved.getString(index)))
-            }
-        }
+    val preferences = remember { context.getSharedPreferences("shura-ui", 0) }
+    val scope = rememberCoroutineScope()
+
+    var language by remember {
+        mutableStateOf(
+            runCatching { UiLanguage.valueOf(preferences.getString(KEY_LANGUAGE, "en") ?: "en") }
+                .getOrDefault(UiLanguage.ENGLISH)
+        )
     }
-    var tab by remember { mutableStateOf("Home") }
+    var dark by remember { mutableStateOf(preferences.getBoolean(KEY_DARK, true)) }
+
     val translationStore = remember { TranslationSettingsStore(context) }
-    var translationSettings by remember { mutableStateOf(translationStore.load()) }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { selected ->
-        if (selected.isNotEmpty()) {
-            pages.clear()
-            selected.forEach { uri ->
-                try { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: SecurityException) { }
-                pages.add(uri)
-            }
-            preferences.edit().putString("chapter-pages", org.json.JSONArray(pages.map(Uri::toString)).toString()).apply()
-            tab = "Reader"
+    val progressStore = remember { ReadingProgressStore(context) }
+    val translationCache = remember { TranslationCache(context) }
+
+    val sourceHost = remember {
+        SourceHost().apply {
+            // MangaDex stays as the built-in adapter; extensions from the
+            // repository are added beside it, never instead of it.
+            register(MangaDexSource())
+            ShuraExtensions.load(context, File(context.filesDir, "repo"))
+                .forEach { outcome -> outcome.source?.let { register(it) } }
         }
     }
 
-    // Shura's own repository is the only source of extensions. MangaDex stays as
-    // the built-in adapter; extensions loaded from the repository are added
-    // alongside it, never instead of it, and each load failure is reported.
-    var extensionNotice by remember { mutableStateOf<String?>(null) }
-    val sourceHost = remember {
-        SourceHost().apply {
-            register(MangaDexSource())
-            val outcomes = ShuraExtensions.load(context, java.io.File(context.filesDir, "repo"))
-            outcomes.forEach { outcome ->
-                val source = outcome.source
-                if (source != null) register(source)
+    // Local chapters currently open in the reader, and how they got there.
+    val pages = remember { mutableStateListOf<Uri>() }
+    var readerMeta by remember { mutableStateOf<ReaderMeta?>(null) }
+    var isLoading by remember { mutableStateOf(false) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var historyVersion by remember { mutableIntStateOf(0) }
+    var libraryVersion by remember { mutableIntStateOf(0) }
+    var repositoryNotice by remember { mutableStateOf<String?>(null) }
+
+    val picker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments()
+    ) { selected ->
+        if (selected.isEmpty()) return@rememberLauncherForActivityResult
+        scope.launch {
+            val outcome = runCatching {
+                withContext(Dispatchers.IO) {
+                    selected.map { uri ->
+                        val target = File(context.filesDir, "import/${System.currentTimeMillis()}_${uri.hashCode()}")
+                        target.parentFile?.mkdirs()
+                        context.contentResolver.openInputStream(uri)?.use { i ->
+                            target.outputStream().use { o -> i.copyTo(o) }
+                        }
+                        Uri.fromFile(target)
+                    }
+                }
             }
-            val failures = outcomes.mapNotNull { it.error }
-            if (failures.isNotEmpty()) extensionNotice = failures.joinToString("\n")
+            outcome.onSuccess { imported ->
+                pages.clear()
+                pages.addAll(imported)
+                readerMeta = ReaderMeta("local", "Local chapter", null, "device")
+                loadError = null
+            }.onFailure {
+                loadError = it.message ?: "Import failed"
+            }
         }
     }
-    val appScope = rememberCoroutineScope()
-    var readerTitle by remember { mutableStateOf("Local chapter") }
-    var readerMangaTitle by remember { mutableStateOf("") }
-    var readerChapters by remember { mutableStateOf<List<Chapter>?>(null) }
-    var readerChapterId by remember { mutableStateOf<String?>(null) }
-    var activeSource by remember { mutableStateOf<app.shura.source.ShuraSource?>(null) }
-    var downloadNotice by remember { mutableStateOf<String?>(null) }
-    // Bumped after an install so the source list is re-read: `sourceHost` is
-    // created once, and without this the new extensions would only appear
-    // after a restart.
-    var sourceListVersion by remember { mutableIntStateOf(0) }
-    var downloadsVersion by remember { mutableIntStateOf(0) }
-    // The repository is picked, not downloaded: Shura has no fetch policy yet,
-    // and adding one here would be a policy change rather than a fix. The
-    // picked folder is copied in and then verified against the pinned anchor.
-    val pickerScope = rememberCoroutineScope()
+
     val repositoryPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocumentTree()) { tree ->
+        ActivityResultContracts.OpenDocumentTree()
+    ) { tree ->
         if (tree == null) return@rememberLauncherForActivityResult
-        // The picker callback is not a coroutine, and copying a repository is
-        // disk work, so it is launched rather than run inline.
-        pickerScope.launch {
+        scope.launch {
             val outcome = withContext(Dispatchers.IO) {
                 ShuraRepository.installFromTree(context, tree)
             }
             val failures = withContext(Dispatchers.IO) {
                 ShuraRepository.reload(sourceHost, context)
             }
-            extensionNotice = failures.ifEmpty {
-                listOf(
-                    if (outcome.ok) "Repository installed: ${outcome.installed.size} files"
-                    else outcome.refused ?: "the repository could not be installed",
-                )
+            repositoryNotice = failures.ifEmpty {
+                listOf(if (outcome.ok) "Repository installed: ${outcome.installed.size} files"
+                else outcome.refused ?: "the repository could not be installed")
             }.joinToString("\n")
-            sourceListVersion++
         }
     }
 
-    fun currentChapterIndex(): Int = readerChapters?.indexOfFirst { it.id == readerChapterId } ?: -1
-    fun neighbor(offset: Int): Chapter? {
-        val index = currentChapterIndex()
-        val list = readerChapters ?: return null
-        val target = index + offset
-        return if (target in list.indices) list[target] else null
+    // onInstallRepository has to be read lazily: the picker launcher is
+    // declared after this call site, so capturing it eagerly reads a null.
+    var installRequested by remember { mutableIntStateOf(0) }
+    val nav = remember {
+        val downloader = ChapterDownloader { source, chapterId ->
+            withContext(Dispatchers.IO) {
+                val pageRefs = source.pages(chapterId)
+                val dir = File(context.cacheDir, "reader-${chapterId}".replace(Regex("[^A-Za-z0-9_.-]"), "_"))
+                MangaDexChapterDownloader().downloadChapter(pageRefs, dir).map { Uri.fromFile(it) }
+            }
+        }
+        ShuraNav(
+            sourceHost = sourceHost,
+            downloader = downloader,
+            settingsStore = translationStore,
+            progressStore = progressStore,
+            translationCache = translationCache,
+            context = context,
+            // No translation engine is reachable; the reader says so rather than
+            // pretending the control works.
+            translationEngineAvailable = BuildConfig.TRANSLATION_ENABLED,
+        )
     }
 
-    val openChapter: (app.shura.source.ShuraSource, String, Chapter, List<Chapter>) -> Unit = { source, mangaTitle, chapter, chapterList ->
-        appScope.launch {
-            runCatching {
-                withContext(Dispatchers.IO) {
-                    val pageRefs = source.pages(chapter.id)
-                    val dir = File(context.cacheDir, "reader-${chapter.id}".replace(Regex("[^A-Za-z0-9_.-]"), "_"))
-                    MangaDexChapterDownloader().downloadChapter(pageRefs, dir).map { Uri.fromFile(it) }
-                }
-            }.onSuccess { uris ->
+    val history = remember(historyVersion) { progressStore.history() }
+    val library = remember(libraryVersion) { indexStoredChapters(chapterStore(context)) }
+
+    // The reader's data source: the pages of whatever is open.
+    val openChapter: (String, String, app.shura.source.ShuraSource, app.shura.source.Chapter) -> Unit =
+        { sourceId, mangaTitle, source, chapter ->
+            scope.launch {
+                isLoading = true
+                loadError = null
                 pages.clear()
-                pages.addAll(uris)
-                readerTitle = "$mangaTitle · ${chapter.name}"
-                readerMangaTitle = mangaTitle
-                readerChapters = chapterList
-                readerChapterId = chapter.id
-                activeSource = source
-                preferences.edit().putString("chapter-pages", org.json.JSONArray(pages.map(Uri::toString)).toString()).apply()
-                tab = "Reader"
-            }.onFailure { tab = "Sources"; downloadNotice = it.message ?: "failed to open chapter" }
-        }
-    }
-
-    fun neighborChapter(source: app.shura.source.ShuraSource, offset: Int): Chapter? {
-        val target = neighbor(offset) ?: return null
-        openChapter(source, readerMangaTitle.ifBlank { "Chapter" }, target, readerChapters ?: emptyList())
-        return target
-    }
-
-    val downloadChapter: (app.shura.source.ShuraSource, String, Chapter) -> Unit = { source, mangaTitle, chapter ->
-        appScope.launch {
-            runCatching {
-                withContext(Dispatchers.IO) {
-                    val pageRefs = source.pages(chapter.id)
-                    val staging = File(context.cacheDir, "dl-${chapter.id}".replace(Regex("[^A-Za-z0-9_.-]"), "_"))
-                    val files = MangaDexChapterDownloader().downloadChapter(pageRefs, staging)
-                    persistStoredChapter(chapterStore(context), source.id, chapter.id, "$mangaTitle · ${chapter.name}", files)
-                }
-            }.onSuccess { downloadNotice = "Downloaded ${source.name} · ${chapter.name}"; downloadsVersion++ }
-                .onFailure { downloadNotice = it.message ?: "download failed" }
-        }
-    }
-    MaterialTheme {
-        Scaffold(
-            topBar = { TopAppBar(title = { Text("Shura · $tab") }) },
-            bottomBar = {
-                NavigationBar {
-                    listOf("Home", "Sources", "Library", "Downloads", "Settings").forEach { item ->
-                        NavigationBarItem(selected = tab == item, onClick = { tab = item }, icon = {}, label = { Text(item) })
-                    }
-                }
-            }
-        ) { padding ->
-            when (tab) {
-                "Reader" -> ReaderScreen(
-                    pages,
-                    preferences.getInt("reader-page", 0),
-                    { page -> preferences.edit().putInt("reader-page", page).apply() },
-                    Modifier.padding(padding),
-                    translationSettings,
-                    onTranslationSettingsChange = { updated -> translationStore.save(updated); translationSettings = updated },
-                    chapterTitle = readerTitle,
-                    onPrevChapter = { activeSource?.let { source -> neighborChapter(source, -1) } },
-                    onNextChapter = { activeSource?.let { source -> neighborChapter(source, +1) } },
-                )
-                "Sources" -> Column(Modifier.padding(padding)) {
-                    Column(Modifier.padding(horizontal = 20.dp)) {
-                        Button(onClick = { repositoryPicker.launch(null) }) {
-                            Text("Install repository from storage")
-                        }
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "Extensions come from Shura's own repository. A repository is " +
-                                "believed only if its signing key matches the one pinned in " +
-                                "this build.",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                    MangaBrowserScreen(
-                        // Keyed on the install counter: `sourceHost` is created
-                        // once, so without this the newly installed extensions
-                        // would only show up after a restart.
-                        sources = remember(sourceListVersion) { sourceHost.all() },
-                        onOpenChapter = openChapter,
-                        onDownloadChapter = downloadChapter,
-                        notice = extensionNotice ?: downloadNotice,
-                        modifier = Modifier.weight(1f, fill = true),
-                    )
-                }
-                "Library" -> Column(Modifier.fillMaxSize().padding(padding).padding(20.dp)) {
-                    downloadNotice?.let { Text(it, color = MaterialTheme.colorScheme.primary); Spacer(Modifier.height(8.dp)) }
-                    Text(if (pages.isEmpty()) "Your library is empty" else "Local chapter · ${pages.size} pages")
-                    if (pages.isNotEmpty()) Button(onClick = { tab = "Reader" }) { Text("Continue reading") }
-                    Button(onClick = { picker.launch(arrayOf("image/*")) }) { Text("Import chapter images") }
-                }
-                "Downloads" -> DownloadsScreen(
-                    context,
-                    onRead = { stored ->
+                runCatching { nav.downloader.pages(source, chapter.id) }
+                    .onSuccess { fetched ->
                         pages.clear()
-                        pages.addAll(stored.pageUris)
-                        readerTitle = stored.title
-                        activeSource = null
-                        tab = "Reader"
-                    },
-                    refresh = downloadsVersion,
-                    modifier = Modifier.padding(padding),
+                        pages.addAll(fetched)
+                        readerMeta = ReaderMeta(sourceId, mangaTitle, chapter, source.name)
+                        isLoading = false
+                        if (fetched.isEmpty()) {
+                            loadError = "This chapter returned no pages from ${source.name}."
+                        }
+                    }
+                    .onFailure {
+                        isLoading = false
+                        loadError = it.message ?: "Could not open this chapter."
+                    }
+            }
+        }
+
+    ShuraRoot(
+        nav = nav,
+        language = language,
+        onLanguage = { chosen ->
+            language = chosen
+            preferences.edit().putString(KEY_LANGUAGE, chosen.code).apply()
+        },
+        dark = dark,
+        onDark = { chosen ->
+            dark = chosen
+            preferences.edit().putBoolean(KEY_DARK, chosen).apply()
+        },
+        pages = pages,
+        isLoading = isLoading,
+        loadError = loadError,
+        onRetry = {
+            val meta = readerMeta
+            val source = meta?.sourceId?.let { sourceHost.find(it) }
+            val chapter = meta?.chapter
+            if (source != null && chapter != null) {
+                openChapter(meta.sourceId, meta.mangaTitle, source, chapter)
+            }
+        },
+        onExitReader = {
+            readerMeta = null
+            pages.clear()
+            historyVersion++
+        },
+        history = history,
+        onProgressChanged = { page ->
+            // Progress is recorded per chapter, so switching chapters does not
+            // overwrite the other one's place.
+            val meta = readerMeta
+            val chapter = meta?.chapter
+            if (chapter != null && pages.isNotEmpty()) {
+                progressStore.save(
+                    ReadingProgress(
+                        sourceId = meta.sourceId,
+                        mangaTitle = meta.mangaTitle,
+                        chapterId = chapter.id,
+                        chapterName = chapter.name,
+                        page = page,
+                        pageCount = pages.size,
+                        updatedAt = System.currentTimeMillis(),
+                    )
                 )
-                "Settings" -> PlaceholderScreen("Translation mode (Full chapter / Follow reading) lives in the reader bar and stays on across chapters until disabled. No screen overlay is used; the reader owns all touch input. Offline: imported chapter images are read from device storage.", Modifier.padding(padding))
-                else -> Column(Modifier.fillMaxSize().padding(padding).padding(20.dp)) {
-                    Text("Read comics stored on this device", style = MaterialTheme.typography.headlineSmall)
-                    Spacer(Modifier.height(12.dp))
-                    Button(onClick = { picker.launch(arrayOf("image/*")) }) { Text("Import chapter images") }
-                    if (pages.isNotEmpty()) Button(onClick = { tab = "Reader" }) { Text("Continue · ${pages.size} pages") }
-                    TextButton(onClick = { tab = "Sources" }) { Text("Source management") }
-                }
+                historyVersion++
             }
-        }
-    }
+        },
+        library = library,
+        repositoryNotice = repositoryNotice,
+        onImport = { picker.launch(arrayOf("image/*")) },
+        onInstallRepository = { repositoryPicker.launch(null) },
+    )
 }
 
-@Composable private fun PlaceholderScreen(text: String, modifier: Modifier = Modifier) {
-    Box(modifier.fillMaxSize().padding(16.dp)) { Text(text) }
-}
-
-@Composable internal fun ReaderScreen(
-    pages: List<Uri>,
-    savedPage: Int,
-    onProgress: (Int) -> Unit,
-    modifier: Modifier = Modifier,
-    translationSettings: TranslationSettings = TranslationSettings(),
-    onTranslationSettingsChange: (TranslationSettings) -> Unit = {},
-    chapterTitle: String = "Local chapter",
-    onPrevChapter: (() -> Unit)? = null,
-    onNextChapter: (() -> Unit)? = null,
-) {
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = savedPage.coerceIn(0, (pages.size - 1).coerceAtLeast(0)))
-    LaunchedEffect(listState) { snapshotFlow { listState.firstVisibleItemIndex }.collect { onProgress(it) } }
-    Column(modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("$chapterTitle · ${if (pages.isEmpty()) 0 else listState.firstVisibleItemIndex + 1}/${pages.size}")
-            Row {
-                if (onPrevChapter != null) TextButton(onClick = onPrevChapter) { Text("◀") }
-                if (onNextChapter != null) TextButton(onClick = onNextChapter) { Text("▶") }
-                TranslationMenu(translationSettings, onTranslationSettingsChange, enabled = BuildConfig.TRANSLATION_ENABLED)
-            }
-        }
-        if (pages.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(20.dp)) { Text("Import chapter images from Home or Library to read offline.") }
-        } else {
-            LazyColumn(state = listState, modifier = Modifier.fillMaxSize().testTag("reader-pages")) {
-                itemsIndexed(pages, key = { index, uri -> "$index:$uri" }) { index, uri ->
-                    ReaderPage(uri, "Page ${index + 1}")
-                }
-            }
-        }
-    }
-}
-
-@Composable private fun ReaderPage(uri: Uri, label: String) {
-    val context = LocalContext.current
-    val bitmap by produceState<Bitmap?>(initialValue = null, key1 = uri) {
-        value = withContext(Dispatchers.IO) { runCatching { decodeSampled(context, uri) }.getOrNull() }
-    }
-    var scale by remember(uri) { mutableFloatStateOf(1f) }
-    val transform = rememberTransformableState { zoom, _, _ -> scale = (scale * zoom).coerceIn(1f, 4f) }
-    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Text(label, Modifier.padding(horizontal = 12.dp, vertical = 4.dp), style = MaterialTheme.typography.labelMedium)
-        Box(Modifier.fillMaxWidth().heightIn(min = 520.dp)) {
-            bitmap?.let { image ->
-                androidx.compose.foundation.Image(
-                    bitmap = image.asImageBitmap(), contentDescription = label,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 320.dp).graphicsLayer { scaleX = scale; scaleY = scale }.transformable(transform),
-                    contentScale = androidx.compose.ui.layout.ContentScale.FillWidth
-                )
-            } ?: LinearProgressIndicator(Modifier.fillMaxWidth())
-        }
-    }
-}
-
-private fun decodeSampled(context: android.content.Context, uri: Uri): Bitmap? {
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-    val options = BitmapFactory.Options().apply {
-        inSampleSize = 1
-        while (bounds.outWidth / inSampleSize > 1800 || bounds.outHeight / inSampleSize > 2600) inSampleSize *= 2
-    }
-    return context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
-}
-
-@Composable private fun TranslationMenu(
-    settings: TranslationSettings,
-    onChange: (TranslationSettings) -> Unit,
-    enabled: Boolean,
-) {
-    if (!enabled) {
-        // Feature-flagged: the control is visible but inert until a translation engine exists.
-        TextButton(onClick = {}, enabled = false) { Text("Translate") }
-        return
-    }
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        TextButton(onClick = { expanded = true }) { Text("Translate · ${settings.mode.displayName()}") }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            TranslationMode.entries.forEach { mode ->
-                DropdownMenuItem(
-                    text = { Text(mode.displayName()) },
-                    onClick = { onChange(settings.copy(mode = mode)); expanded = false },
-                )
-            }
-        }
-    }
-}
-
-@Composable private fun TranslationMode.displayName(): String = when (this) {
-    TranslationMode.OFF -> "Off"
-    TranslationMode.FULL -> "Full chapter"
-    TranslationMode.FOLLOW_READING -> "Follow reading"
-}
+/** What the reader is currently showing, and how it got its pages. */
+private data class ReaderMeta(
+    val sourceId: String,
+    val mangaTitle: String,
+    val chapter: app.shura.source.Chapter?,
+    val sourceName: String,
+)
