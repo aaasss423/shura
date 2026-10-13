@@ -90,7 +90,36 @@ class MainActivity : ComponentActivity() {
     var readerChapterId by remember { mutableStateOf<String?>(null) }
     var activeSource by remember { mutableStateOf<app.shura.source.ShuraSource?>(null) }
     var downloadNotice by remember { mutableStateOf<String?>(null) }
+    // Bumped after an install so the source list is re-read: `sourceHost` is
+    // created once, and without this the new extensions would only appear
+    // after a restart.
+    var sourceListVersion by remember { mutableIntStateOf(0) }
     var downloadsVersion by remember { mutableIntStateOf(0) }
+    // The repository is picked, not downloaded: Shura has no fetch policy yet,
+    // and adding one here would be a policy change rather than a fix. The
+    // picked folder is copied in and then verified against the pinned anchor.
+    val pickerScope = rememberCoroutineScope()
+    val repositoryPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()) { tree ->
+        if (tree == null) return@rememberLauncherForActivityResult
+        // The picker callback is not a coroutine, and copying a repository is
+        // disk work, so it is launched rather than run inline.
+        pickerScope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                ShuraRepository.installFromTree(context, tree)
+            }
+            val failures = withContext(Dispatchers.IO) {
+                ShuraRepository.reload(sourceHost, context)
+            }
+            extensionNotice = failures.ifEmpty {
+                listOf(
+                    if (outcome.ok) "Repository installed: ${outcome.installed.size} files"
+                    else outcome.refused ?: "the repository could not be installed",
+                )
+            }.joinToString("\n")
+            sourceListVersion++
+        }
+    }
 
     fun currentChapterIndex(): Int = readerChapters?.indexOfFirst { it.id == readerChapterId } ?: -1
     fun neighbor(offset: Int): Chapter? {
@@ -164,13 +193,30 @@ class MainActivity : ComponentActivity() {
                     onPrevChapter = { activeSource?.let { source -> neighborChapter(source, -1) } },
                     onNextChapter = { activeSource?.let { source -> neighborChapter(source, +1) } },
                 )
-                "Sources" -> MangaBrowserScreen(
-                    sources = sourceHost.all(),
-                    onOpenChapter = openChapter,
-                    onDownloadChapter = downloadChapter,
-                    notice = extensionNotice ?: downloadNotice,
-                    modifier = Modifier.padding(padding),
-                )
+                "Sources" -> Column(Modifier.padding(padding)) {
+                    Column(Modifier.padding(horizontal = 20.dp)) {
+                        Button(onClick = { repositoryPicker.launch(null) }) {
+                            Text("Install repository from storage")
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "Extensions come from Shura's own repository. A repository is " +
+                                "believed only if its signing key matches the one pinned in " +
+                                "this build.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    MangaBrowserScreen(
+                        // Keyed on the install counter: `sourceHost` is created
+                        // once, so without this the newly installed extensions
+                        // would only show up after a restart.
+                        sources = remember(sourceListVersion) { sourceHost.all() },
+                        onOpenChapter = openChapter,
+                        onDownloadChapter = downloadChapter,
+                        notice = extensionNotice ?: downloadNotice,
+                        modifier = Modifier.weight(1f, fill = true),
+                    )
+                }
                 "Library" -> Column(Modifier.fillMaxSize().padding(padding).padding(20.dp)) {
                     downloadNotice?.let { Text(it, color = MaterialTheme.colorScheme.primary); Spacer(Modifier.height(8.dp)) }
                     Text(if (pages.isEmpty()) "Your library is empty" else "Local chapter · ${pages.size} pages")

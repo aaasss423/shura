@@ -21,10 +21,24 @@ data class ExtensionOutcome(val source: ShuraSource?, val error: String?)
 object ShuraExtensionLoader {
 
     fun load(context: Context, repositoryDir: File, anchor: TrustAnchor): List<ExtensionOutcome> {
+        val outcomes = mutableListOf<ExtensionOutcome>()
+        val entries = try {
+            ShuraRepositoryClient(repositoryDir, ApkSignatureVerifier(context), anchor).entries()
+        } catch (e: Throwable) {
+            // Reading the index is inside this try on purpose.
+            //
+            // It was not, and a fresh install has no repository directory yet -
+            // nothing installs one - so `entries()` threw "repo.json is missing"
+            // straight out of `load()` and into composition, taking the whole
+            // app down on first launch. A missing or unreadable repository is
+            // the normal state before extensions are installed, not an
+            // exceptional one, and this class already promises that a failure
+            // is always reported rather than dropped.
+            return listOf(ExtensionOutcome(null, "repository: ${e.message}"))
+        }
         val client = ShuraRepositoryClient(repositoryDir, ApkSignatureVerifier(context), anchor)
         val loader = ExtensionLoader(context)
-        val outcomes = mutableListOf<ExtensionOutcome>()
-        for (entry in client.entries()) {
+        for (entry in entries) {
             try {
                 val verified = client.verify(entry)
                 val named = verified.copy(sourceClassName = loader.resolveSourceClass(verified.metadata))
