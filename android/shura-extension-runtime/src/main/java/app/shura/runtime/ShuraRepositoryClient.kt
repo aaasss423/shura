@@ -23,7 +23,7 @@ class ShuraRepositoryClient(
      * logic is testable off-device, but the production wiring always passes the
      * real one: a nil signature check would make every other check decorative.
      */
-    private val signatures: ApkSignatureVerifier?,
+    private val signatures: ApkSignatureCheck?,
     /**
      * The expected certificate digest, configured independently of anything
      * downloaded.
@@ -82,11 +82,18 @@ class ShuraRepositoryClient(
      * are all read from the copy -- the exact bytes the class loader is handed.
      */
     fun verify(entry: RepositoryPackage): VerifiedExtension {
-        val downloaded = File(root, "apk").resolve(entry.apk)
+        // `apk` comes from the index, which comes from the network. Resolving it
+        // unchecked let a repository name "../../../somewhere/else" and the read,
+        // the digest and the later delete would all happen outside the
+        // repository - and a digest check protects nothing when the file it is
+        // checked against was chosen by whoever wrote the path. An artifact is
+        // a name inside apk/, never a path.
+        val artifactName = safeArtifactName(entry.apk)
+        val downloaded = File(root, "apk").resolve(artifactName)
         if (!downloaded.isFile) {
             throw LoadFailure.NotVerified("${entry.apk} is not present under ${downloaded.parentFile}")
         }
-        val staged = File(stagingDir(), entry.apk)
+        val staged = File(stagingDir(), artifactName)
         staged.parentFile?.mkdirs()
         downloaded.inputStream().use { input -> staged.outputStream().use { input.copyTo(it) } }
 
@@ -147,6 +154,27 @@ class ShuraRepositoryClient(
     fun useStaging(dir: File) { staging = dir }
 
     private var staging: File? = null
+
+    /**
+     * An artifact name, or a refusal.
+     *
+     * Only a plain file name is accepted: no separators, no parent references,
+     * nothing that could resolve outside `apk/`. Windows separators count too,
+     * because the name arrives from a network and does not know what it lands
+     * on.
+     */
+    internal fun safeArtifactName(name: String): String {
+        val trimmed = name.trim()
+        val unsafe = trimmed.isEmpty() ||
+            trimmed == "." || trimmed == ".." ||
+            trimmed.contains('/') || trimmed.contains('\\') ||
+            trimmed.contains('\u0000')
+        if (unsafe) {
+            throw LoadFailure.Manifest(
+                "the index names an artifact that is not a plain file name in apk/: '$name'")
+        }
+        return trimmed
+    }
 
     private fun indexApkMismatch(entry: RepositoryPackage, field: String, published: Any?, declared: Any?) {
         System.err.println(

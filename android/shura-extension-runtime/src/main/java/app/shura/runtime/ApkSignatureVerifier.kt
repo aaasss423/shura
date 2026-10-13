@@ -8,6 +8,25 @@ import java.io.File
 import java.security.MessageDigest
 
 /**
+ * The one thing [ShuraRepositoryClient] needs from a signature verifier.
+ *
+ * This exists so the trust path can be exercised off-device. The client took a
+ * concrete `ApkSignatureVerifier`, whose certificates come from PackageManager
+ * and so need a `Context` - so `verify()` had never once been run in a test,
+ * and the only reachable assertion was "no verifier supplied, refusing". That
+ * left the whole of digest, signature, package and ABI checking unproven.
+ *
+ * Production wiring is unchanged: [ApkSignatureVerifier] is what is passed.
+ */
+interface ApkSignatureCheck {
+    /**
+     * The certificate digest of [apk], refusing unless it matches both [anchor]
+     * and [publishedPin]. Returns the digest it accepted.
+     */
+    fun verify(apk: File, anchor: String, publishedPin: String): String
+}
+
+/**
  * Reads the signing certificate out of the APK file itself.
  *
  * This exists because comparing `signing_certificate_sha256` from the repository
@@ -24,7 +43,7 @@ import java.security.MessageDigest
  * Fail-closed: no signer, several signers when one was expected, or an
  * unreadable archive all refuse.
  */
-class ApkSignatureVerifier(private val context: Context) {
+class ApkSignatureVerifier(private val context: Context) : ApkSignatureCheck {
 
     /** All certificates the package declares, in Android's own form. */
     fun certificates(apk: File): List<ByteArray> {
@@ -76,7 +95,7 @@ class ApkSignatureVerifier(private val context: Context) {
      * Full check against both the pinned anchor and the published entry pin.
      * Either mismatch refuses; so does anything unreadable.
      */
-    fun verify(apk: File, anchor: String, publishedPin: String): String {
+    override fun verify(apk: File, anchor: String, publishedPin: String): String {
         val (_, actual) = primaryCertificate(apk)
         if (!actual.equals(anchor, ignoreCase = true)) {
             throw LoadFailure.NotVerified(

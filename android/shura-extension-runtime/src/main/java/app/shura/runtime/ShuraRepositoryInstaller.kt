@@ -76,6 +76,7 @@ object ShuraRepositoryInstaller {
         val wanted = entries.map { it.apk }.filter { it.isNotBlank() }.toSet()
         val present = apkDir.listFiles()?.filter { it.isFile }?.map { it.name }?.toSet()
             ?: emptySet()
+        for (name in wanted) safeName(name)
         val missing = wanted - present
         if (missing.isNotEmpty()) {
             return InstallReport(emptyList(), "the index references ${missing.size} artifact(s) not in apk/: ${missing.sorted().take(3)}")
@@ -104,11 +105,14 @@ object ShuraRepositoryInstaller {
             meta.copyTo(File(staged, "repo.json"), overwrite = true)
             index.copyTo(File(staged, "index.shura.json"), overwrite = true)
             for (name in wanted) {
-                val source = File(apkDir, name)
+                // The same refusal as the client applies: an index-supplied name
+                // is a file name, never a path.
+                val safe = safeName(name)
+                val source = File(apkDir, safe)
                 if (source.length() > MAX_FILE_BYTES) {
                     return InstallReport(emptyList(), "$name exceeds the ${MAX_FILE_BYTES} byte artifact limit")
                 }
-                source.copyTo(File(File(staged, "apk"), name), overwrite = true)
+                source.copyTo(File(File(staged, "apk"), safe), overwrite = true)
             }
             // Swapped in whole, so a failure above leaves the previous
             // repository exactly as it was rather than half replaced.
@@ -137,6 +141,18 @@ object ShuraRepositoryInstaller {
             )
         }
         return InstallReport(copied)
+    }
+
+    /** A plain file name, refusing anything that could escape `apk/`. */
+    private fun safeName(name: String): String {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty() || trimmed == "." || trimmed == ".." ||
+            trimmed.contains('/') || trimmed.contains('\\') || trimmed.contains('\u0000')
+        ) {
+            throw LoadFailure.Manifest(
+                "the index names an artifact that is not a plain file name in apk/: '$name'")
+        }
+        return trimmed
     }
 
     private fun copyTree(from: File, to: File) {
