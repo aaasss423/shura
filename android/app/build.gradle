@@ -4,7 +4,29 @@ android {
     namespace 'app.shura.manga'
     compileSdk 34
     buildToolsVersion '35.0.0'
-    defaultConfig { applicationId 'app.shura.manga'; minSdk 26; targetSdk 34; versionCode 1; versionName '0.1.0'; testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'; buildConfigField 'boolean', 'TRANSLATION_ENABLED', 'false' }
+    defaultConfig {
+    applicationId 'app.shura.manga'; minSdk 26; targetSdk 34
+    versionCode 1; versionName '0.1.0'
+    testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+    buildConfigField 'boolean', 'TRANSLATION_ENABLED', 'false'
+    // The certificate Shura signs its own extensions with, as a SHA-256.
+    //
+    // Supplied by the build that holds the key and never committed: inject it
+    // with -Pshura.publisherCert=<64 hex>, or SHURA_PUBLISHER_CERT in the
+    // environment. Empty is the correct default - it means "no publisher
+    // configured", and extensions Shura built are then refused by name with a
+    // message saying why, rather than being run under somebody else's
+    // certificate.
+    //
+    // There is deliberately no fallback to the debug keystore. That key has the
+    // password "android", is regenerated per machine, and on a debug build it
+    // is the *same identity* as the app's own signer - so trusting it as a
+    // publisher would mean "whoever compiled this app build may also sign
+    // extensions", which is the opposite of the check.
+    def publisherCert = project.findProperty('shura.publisherCert') ?:
+            System.getenv('SHURA_PUBLISHER_CERT') ?: ''
+    buildConfigField 'String', 'SHURA_PUBLISHER_CERT', "\"${publisherCert}\""
+}
     buildFeatures { compose true; buildConfig true }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = '17' }

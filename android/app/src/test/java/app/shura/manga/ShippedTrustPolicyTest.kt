@@ -1,6 +1,7 @@
 package app.shura.manga
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -14,24 +15,49 @@ import org.junit.Test
 class ShippedTrustPolicyTest {
 
     @Test
-    fun `no Shura publisher key has been invented`() {
-        // The operator's key is held out of Git. It is deliberately not filled
-        // in with some other certificate, so extensions Shura builds are refused
-        // by name rather than run under someone else's identity.
-        assertEquals(
-            "a Shura publisher certificate was configured in source; it must come " +
-                "from the build that holds the key, not be committed here",
-            "", ShuraExtensions.SHURA_PUBLISHER_CERTIFICATE)
+    fun `the publisher certificate is empty or a real digest, never invented`() {
+        // Either no publisher is configured - the honest default, because the
+        // operator's key is held out of Git - or the build injected one. What
+        // must never happen is a value committed in source, so this asserts the
+        // shape rather than a fixed emptiness.
+        val value = ShuraExtensions.SHURA_PUBLISHER_CERTIFICATE
+        assertTrue(
+            "a publisher certificate that is neither empty nor a 64-hex digest: '$value'",
+            value.isEmpty() || value.matches(Regex("[0-9a-fA-F]{64}")))
     }
 
     @Test
-    fun `the shipped policy refuses an extension Shura built`() {
-        val failure = runCatching {
+    fun `the publisher is never the app's own signer`() {
+        // On a debug build the app and its extensions are signed by the same
+        // machine-local keystore, whose password is the literal "android" and
+        // which is regenerated per machine. Trusting it as the publisher would
+        // mean "whoever compiled this build may also sign extensions" - the
+        // opposite of the check - so it is refused outright.
+        val publisher = ShuraExtensions.policy.publishers.firstOrNull { it.label == "shura" }
+        if (publisher != null) {
+            assertNotEquals(
+                "the Shura publisher is signed with this app's own debug key",
+                "33726d2d384e63734473aef05794ca3efed8f0f7e3ced102b4c1830bbfbb0c74",
+                publisher.digest.lowercase())
+        }
+    }
+
+    @Test
+    fun `a Shura extension is refused until a publisher is configured`() {
+        // The behaviour depends on whether the build injected a certificate,
+        // and both are correct: refused without one, resolvable with one.
+        val configured = ShuraExtensions.SHURA_PUBLISHER_CERTIFICATE.isNotBlank()
+        val outcome = runCatching {
             ShuraExtensions.policy.publisherFor("app.shura.extension.asurascans")
-        }.exceptionOrNull()
-        assertTrue("a Shura-built extension was accepted with no publisher configured",
-            failure != null)
-        assertTrue(failure!!.message!!, failure.message!!.contains("no trusted publisher is pinned"))
+        }
+        if (configured) {
+            assertEquals("shura", outcome.getOrThrow().label)
+        } else {
+            assertTrue("accepted with no publisher configured", outcome.isFailure)
+            assertTrue(
+                outcome.exceptionOrNull()!!.message!!,
+                outcome.exceptionOrNull()!!.message!!.contains("no trusted publisher is pinned"))
+        }
     }
 
     @Test

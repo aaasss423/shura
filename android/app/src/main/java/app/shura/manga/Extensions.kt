@@ -37,9 +37,11 @@ import java.io.File
  * refused by name with a message saying why - which is the correct outcome, and
  * strictly safer than falling back to a third party's certificate.
  *
- * Provisioning it is an explicit act: set the constant (or inject it from a
- * build that holds it) to the SHA-256 of the publisher certificate. It is
- * checked against the APK at load, so a wrong value refuses rather than trusts.
+ * Provisioning it is an explicit act and never a source edit. The build reads
+ * the digest from `-Pshura.publisherCert=<64 hex>` or `SHURA_PUBLISHER_CERT`
+ * in the environment, so the value lives with the key and not in this
+ * repository. It is checked against the APK at load, so a wrong value refuses
+ * rather than trusts.
  */
 object ShuraExtensions {
 
@@ -60,7 +62,8 @@ object ShuraExtensions {
      * Empty means "no Shura publisher is configured", and extensions built by
      * Shura are refused with that reason. It is never defaulted to another key.
      */
-    const val SHURA_PUBLISHER_CERTIFICATE: String = ""
+    val SHURA_PUBLISHER_CERTIFICATE: String
+        get() = BuildConfig.SHURA_PUBLISHER_CERT
 
     /**
      * Third-party extensions this build will run, each limited to the packages
