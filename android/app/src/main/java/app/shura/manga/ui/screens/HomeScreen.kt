@@ -188,10 +188,26 @@ private fun RecentCard(entry: ReadingProgress, onClick: () -> Unit) {
 fun SourcePickerScreen(
     sources: List<app.shura.source.ShuraSource>,
     onPick: (app.shura.source.ShuraSource) -> Unit,
+    /** Sends the reader to where they can actually fix it. */
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (sources.isEmpty()) {
-        StatePanel(shura("discover.sourcesEmpty"), shura("discover.search"))
+        // Without a source there is nothing to search, so this must offer the
+        // way out rather than just stating the problem.
+        Column(
+            modifier.fillMaxSize().padding(32.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                shura("discover.sourcesEmpty"),
+                style = MaterialTheme.typography.titleMedium,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+            Spacer(Modifier.height(16.dp))
+            Button(onClick = onOpenSettings) { Text(shura("settings.installRepository")) }
+        }
         return
     }
     LazyColumn(

@@ -61,6 +61,8 @@ fun ReaderScreen(
     onPrevChapter: (() -> Unit)?,
     onNextChapter: (() -> Unit)?,
     onBack: () -> Unit,
+    /** Opens the next chapter, offered when this one turned out to have no pages. */
+    onOpenNextChapter: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     translationSettings: TranslationSettings = TranslationSettings(),
     onTranslationSettingsChange: (TranslationSettings) -> Unit = {},
@@ -113,6 +115,8 @@ fun ReaderScreen(
             pages.isEmpty() -> ReaderMessage(
                 title = shura("nav.reader"),
                 body = shura("reader.noPages"),
+                actionLabel = onOpenNextChapter?.let { shura("reader.next") },
+                onAction = { onOpenNextChapter?.invoke() },
             )
             else -> LazyColumn(
                 state = listState,

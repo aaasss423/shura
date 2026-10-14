@@ -191,6 +191,7 @@ fun ShuraRoot(
                         is ShuraScreen.Sources -> SourcePickerScreen(
                             sources = nav.sourceHost.all(),
                             onPick = { route = ShuraScreen.Search(it.id) },
+                            onOpenSettings = { route = ShuraScreen.Settings },
                         )
 
                         is ShuraScreen.Library -> LibraryScreen(
@@ -285,6 +286,11 @@ fun ShuraRoot(
                                     { openChapter(screen.sourceId, screen.mangaTitle, source, c, screen.chapters) }
                                 },
                                 onBack = onExitReader,
+                                // A listed chapter can still have no images; the
+                                // way out of that is the next one, not a dead end.
+                                onOpenNextChapter = next?.let { c ->
+                                    { openChapter(screen.sourceId, screen.mangaTitle, source, c, screen.chapters) }
+                                },
                                 translationSettings = settings,
                                 onTranslationSettingsChange = {
                                     nav.settingsStore.save(it)
