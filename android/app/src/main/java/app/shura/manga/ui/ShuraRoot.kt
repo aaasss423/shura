@@ -60,6 +60,7 @@ sealed interface ShuraScreen {
     data object Library : ShuraScreen
     data object Settings : ShuraScreen
     data class Search(val sourceId: String) : ShuraScreen
+    data class Details(val sourceId: String, val manga: MangaSummary) : ShuraScreen
     data class Chapters(val sourceId: String, val manga: MangaSummary) : ShuraScreen
     data class Reader(
         val sourceId: String,
@@ -139,7 +140,12 @@ fun ShuraRoot(
             }
 
             androidx.compose.material3.Scaffold(
+                // Reading is not a tab. Leaving the app's navigation on screen
+                // under the pages meant the reader could never use the full
+                // height, and tapping a tab mid-chapter threw away where the
+                // reader was.
                 bottomBar = {
+                    if (route is ShuraScreen.Reader) return@Scaffold
                     ShuraBottomBar(
                         current = route,
                         onNavigate = { target ->
@@ -240,9 +246,25 @@ fun ShuraRoot(
                             else SearchScreen(
                                 source = source,
                                 onOpenManga = { manga ->
-                                    route = ShuraScreen.Chapters(screen.sourceId, manga)
+                                    route = ShuraScreen.Details(screen.sourceId, manga)
                                 },
                                 onBack = { route = ShuraScreen.Sources },
+                            )
+                        }
+
+                        is ShuraScreen.Details -> {
+                            val source = sourceOf(screen.sourceId)
+                            if (source == null) StatePanel(shura("common.error"), screen.sourceId)
+                            else WorkDetailsScreen(
+                                manga = screen.manga,
+                                sourceName = source.name,
+                                inLibrary = libraryState.any { it.sourceId == screen.sourceId },
+                                onToggleLibrary = { /* library holds chapters, not works */ },
+                                onReadLatest = { },
+                                onOpenChapters = {
+                                    route = ShuraScreen.Chapters(screen.sourceId, screen.manga)
+                                },
+                                onBack = { route = ShuraScreen.Search(screen.sourceId) },
                             )
                         }
 

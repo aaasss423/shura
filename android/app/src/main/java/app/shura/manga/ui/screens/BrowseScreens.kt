@@ -18,6 +18,8 @@ import app.shura.source.Chapter
 import app.shura.source.MangaSummary
 import app.shura.source.ShuraSource
 import app.shura.manga.ui.Strings
+import app.shura.manga.ui.image.CoverImage
+import androidx.compose.foundation.layout.size
 import app.shura.manga.ui.shura
 import app.shura.manga.ui.theme.LocalUiLanguage
 import kotlinx.coroutines.Dispatchers
@@ -110,19 +112,22 @@ fun SearchScreen(
                         shape = RoundedCornerShape(12.dp),
                     ) {
                         Column(Modifier.padding(16.dp)) {
-                            Text(
-                                manga.title,
-                                style = MaterialTheme.typography.titleMedium,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            manga.coverUrl?.let { cover ->
-                                Spacer(Modifier.height(6.dp))
+                            // The cover is an image. It was rendered as its own
+                            // URL as text, which put a long
+                            // https://... string on every result card.
+                            Row {
+                                CoverImage(
+                                    source = manga.coverUrl,
+                                    modifier = Modifier
+                                        .size(width = 56.dp, height = 80.dp)
+                                        .clip(RoundedCornerShape(6.dp)),
+                                    retryLabel = shura("common.retry"),
+                                )
+                                Spacer(Modifier.width(12.dp))
                                 Text(
-                                    cover,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
+                                    manga.title,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    maxLines = 3,
                                     overflow = TextOverflow.Ellipsis,
                                 )
                             }
@@ -257,6 +262,79 @@ fun LibraryScreen(
                         Text("✕", color = MaterialTheme.colorScheme.error)
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * A work's own page.
+ *
+ * Details and chapters used to be the same screen, so there was nowhere to put
+ * a cover, a source, or a "start reading" action without burying them under a
+ * chapter list. This is that page, and the chapter list is its own thing.
+ */
+@Composable
+fun WorkDetailsScreen(
+    manga: MangaSummary,
+    sourceName: String,
+    inLibrary: Boolean,
+    onToggleLibrary: () -> Unit,
+    onReadLatest: (Chapter) -> Unit,
+    onOpenChapters: () -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+    loading: Boolean = false,
+    error: String? = null,
+) {
+    Column(modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(onClick = onBack) { Text(shura("common.back")) }
+            Text(
+                manga.title,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Column(Modifier.padding(horizontal = 20.dp)) {
+            Row {
+                CoverImage(
+                    source = manga.coverUrl,
+                    modifier = Modifier.size(width = 120.dp, height = 170.dp)
+                        .clip(RoundedCornerShape(10.dp)),
+                    contentDescription = manga.title,
+                    retryLabel = shura("common.retry"),
+                )
+                Spacer(Modifier.width(16.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(manga.title, style = MaterialTheme.typography.titleLarge)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        sourceName,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedButton(onClick = onToggleLibrary) {
+                        Text(if (inLibrary) shura("library.delete") else shura("library.title"))
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = onOpenChapters,
+                        enabled = !loading,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(shura("discover.chapters")) }
+                }
+            }
+        }
+        when {
+            error != null -> StatePanel(shura("common.error"), error)
+            loading -> Box(Modifier.fillMaxWidth().padding(24.dp), Alignment.Center) {
+                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
             }
         }
     }

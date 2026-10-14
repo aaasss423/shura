@@ -35,7 +35,9 @@ import app.shura.manga.ui.shura
 import app.shura.manga.ui.theme.Ink
 import app.shura.manga.ui.theme.LocalUiLanguage
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import app.shura.manga.ui.image.ImageStore
 
 /**
  * The manga reader.
@@ -201,7 +203,7 @@ private fun ReaderPage(
                 )
             }
         }
-        PageImage(uri, scale, transform)
+        PageImage(uri, index, pageCount, scale, transform, onRetry = { uri })
         if (!translation.isNullOrBlank()) {
             Surface(
                 color = MaterialTheme.colorScheme.surfaceVariant,
@@ -219,53 +221,86 @@ private fun ReaderPage(
 }
 
 /**
- * Decodes off the main thread and down-samples to something a phone can hold.
+ * One page, decoded once and kept.
  *
- * A full-resolution manga page is tens of megabytes decoded; a scrolling list
- * of those is an out-of-memory kill, not a slow list. Sampled to roughly a
- * screen's worth of pixels, which is what is actually drawn.
+ * Three things this fixes, all of them the difference between a reader that
+ * works and one that does not:
+ *
+ *  - **The displayed image must match the page number.** The state is keyed by
+ *    the page's own URI, so scrolling from page 1 to page 2 shows page 2's
+ *    bytes. Keyed by position instead, a recycled row keeps the previous
+ *    bitmap and the number runs ahead of the picture - which is exactly the
+ *    "the number changes but the image does not" symptom.
+ *  - **Work must stop when the reader moves on.** Decoding is cancelled when
+ *    the key changes, so a fast scroll does not queue every page it passed.
+ *  - **Coming back must be instant.** Decoded bitmaps live in [ImageStore], so
+ *    a page shown once is not decoded again.
+ *
+ * The box keeps the page's own aspect ratio once it is known, so the list does
+ * not jump and no page is stretched.
  */
 @Composable
-private fun PageImage(uri: Uri, scale: Float, transform: androidx.compose.foundation.gestures.TransformableState) {
+private fun PageImage(
+    uri: Uri,
+    index: Int,
+    pageCount: Int,
+    scale: Float,
+    transform: androidx.compose.foundation.gestures.TransformableState,
+    onRetry: () -> Unit,
+) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val bitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, uri) {
-        value = withContext(Dispatchers.IO) {
-            runCatching {
-                val bounds = android.graphics.BitmapFactory.Options().apply {
-                    inJustDecodeBounds = true
-                }
-                context.contentResolver.openInputStream(uri)?.use {
-                    android.graphics.BitmapFactory.decodeStream(it, null, bounds)
-                }
-                if (bounds.outWidth <= 0) return@runCatching null
-                val options = android.graphics.BitmapFactory.Options().apply {
-                    inSampleSize = 1
-                    while (bounds.outWidth / inSampleSize > MAX_EDGE ||
-                        bounds.outHeight / inSampleSize > MAX_EDGE * 2
-                    ) inSampleSize *= 2
-                }
-                context.contentResolver.openInputStream(uri)?.use {
-                    android.graphics.BitmapFactory.decodeStream(it, null, options)
-                }?.let { bmp -> bmp.asImageBitmap() }
-            }.getOrNull()
+    var bitmap by remember(uri) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    var loading by remember(uri) { mutableStateOf(true) }
+    var failed by remember(uri) { mutableStateOf(false) }
+    var ratio by remember(uri) { mutableFloatStateOf(0f) }
+    var attempt by remember(uri) { mutableStateOf(0) }
+
+    LaunchedEffect(uri, attempt) {
+        loading = true
+        failed = false
+        val cached: android.graphics.Bitmap? = ImageStore.cached(uri.toString())
+        val decoded: android.graphics.Bitmap? =
+            cached ?: ImageStore.decode(context, uri.toString(), MAX_EDGE)
+                ?.also { ImageStore.put(uri.toString(), it) }
+        ensureActive()
+        if (decoded != null) {
+            bitmap = decoded.asImageBitmap()
+            ratio = if (decoded.height > 0) decoded.width.toFloat() / decoded.height else 0f
+        } else {
+            failed = true
         }
+        loading = false
     }
+
+    val image = bitmap
     Box(
-        Modifier.fillMaxWidth().heightIn(min = 360.dp),
+        Modifier.fillMaxWidth()
+            .then(
+                if (ratio > 0f) Modifier.aspectRatio(ratio) else Modifier.heightIn(min = 200.dp)
+            ),
         contentAlignment = Alignment.Center,
     ) {
-        val image = bitmap
-        if (image != null) {
-            androidx.compose.foundation.Image(
+        when {
+            image != null -> androidx.compose.foundation.Image(
                 bitmap = image,
                 contentDescription = null,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxSize()
                     .graphicsLayer { scaleX = scale; scaleY = scale }
                     .transformable(transform),
-                contentScale = ContentScale.FillWidth,
+                contentScale = ContentScale.Fit,
             )
-        } else {
-            LinearProgressIndicator(Modifier.fillMaxWidth())
+            failed -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    shura("common.error"),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                TextButton(onClick = { attempt++ }) { Text(shura("common.retry")) }
+            }
+            else -> CircularProgressIndicator(
+                strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.primary,
+            )
         }
     }
 }
