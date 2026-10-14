@@ -461,6 +461,38 @@ android {{
     }}
 }}
 
+// Publisher signing, supplied entirely by the build that holds the key.
+//
+// Shura refuses an extension whose certificate it does not trust, so an
+// extension has to be signed by a publisher the app was built to trust. The
+// keystore is never committed and the passwords never appear here: the build
+// reads them from properties or the environment. Without them it falls back to
+// the debug key, which produces an artifact the app will refuse - visibly,
+// with a message naming the missing publisher, rather than one that quietly
+// loads under somebody else's identity.
+def publisherSigning() {{
+    def ks = project.findProperty('shura.publisher.ks') ?: System.getenv('SHURA_PUBLISHER_KS')
+    if (!ks) return null
+    def storePass = project.findProperty('shura.publisher.storePass') ?: System.getenv('SHURA_PUBLISHER_STORE_PASS')
+    def keyPass = project.findProperty('shura.publisher.keyPass') ?: System.getenv('SHURA_PUBLISHER_KEY_PASS')
+    if (!storePass || !keyPass) {{
+        throw new GradleException('shura.publisher.ks was given without its passwords; ' +
+            'set them as -Pshura.publisher.storePass / -Pshura.publisher.keyPass, ' +
+            'or SHURA_PUBLISHER_STORE_PASS / SHURA_PUBLISHER_KEY_PASS in the environment')
+    }}
+    return android.signingConfigs.create('publisher') {{
+        storeFile file(ks)
+        storePassword storePass
+        keyAlias (project.findProperty('shura.publisher.alias') ?: System.getenv('SHURA_PUBLISHER_ALIAS') ?: 'publisher')
+        keyPassword keyPass
+    }}
+}}
+def publisher = publisherSigning()
+if (publisher) {{
+    android.buildTypes.debug.signingConfig publisher
+    android.buildTypes.release.signingConfig publisher
+}}
+
 // GENERATED. The engine that reads this site lives in :shura-source-site and is
 // compileOnly: the eu.kanade.tachiyomi.* ABI layer and okhttp are supplied by
 // the host application at runtime, not bundled into the APK.
