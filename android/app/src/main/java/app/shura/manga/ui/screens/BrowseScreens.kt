@@ -249,6 +249,13 @@ fun LibraryScreen(
                     Modifier.fillMaxWidth().padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    CoverImage(
+                        source = entry.coverUrl,
+                        modifier = Modifier.size(width = 52.dp, height = 74.dp)
+                            .clip(RoundedCornerShape(6.dp)),
+                        retryLabel = shura("common.retry"),
+                    )
+                    Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(entry.title, style = MaterialTheme.typography.titleMedium, maxLines = 2)
                         Text(

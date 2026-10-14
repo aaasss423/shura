@@ -33,6 +33,14 @@ data class ReadingProgress(
     val page: Int,
     val pageCount: Int,
     val updatedAt: Long,
+    /**
+     * The work's cover, as the source gave it.
+     *
+     * Carried so "continue reading" can show the actual work rather than a bare
+     * title. Empty is normal - an older entry, or a source that offered no
+     * cover - and renders as a placeholder rather than invented art.
+     */
+    val coverUrl: String = "",
 ) {
     val key: String get() = "$sourceId|$mangaId|$chapterId"
 }
@@ -80,6 +88,7 @@ class ReadingProgressStore(private val prefs: KeyValueStore) {
     fun save(progress: ReadingProgress) {
         prefs.putString(keyOf(progress.sourceId, progress.mangaTitle, progress.chapterId),
             JSONObject()
+                .put("coverUrl", progress.coverUrl)
                 .put("page", progress.page)
                 .put("pageCount", progress.pageCount)
                 .put("chapterName", progress.chapterName)
@@ -108,6 +117,7 @@ class ReadingProgressStore(private val prefs: KeyValueStore) {
                 sourceId = entry.optString("sourceId"),
                 mangaTitle = entry.optString("mangaTitle"),
                 mangaId = entry.optString("mangaId"),
+                coverUrl = entry.optString("coverUrl"),
                 chapterId = entry.optString("chapterId"),
                 chapterName = entry.optString("chapterName"),
                 page = entry.optInt("page"),
@@ -116,6 +126,17 @@ class ReadingProgressStore(private val prefs: KeyValueStore) {
             )
         }.sortedByDescending { it.updatedAt }.take(limit)
     }
+
+    /**
+     * The cover of a work, taken from its most recent reading position.
+     *
+     * Survives a cold start, which the in-session lookup in [ProgressLookup]
+     * cannot: the library and "continue reading" both open works whose search
+     * result is long gone. Empty when the work has never been read.
+     */
+    fun coverFor(sourceId: String, mangaTitle: String): String =
+        history().firstOrNull { it.sourceId == sourceId && it.mangaTitle == mangaTitle }
+            ?.coverUrl.orEmpty()
 
     fun clearHistory() {
         prefs.putString(KEY_HISTORY, null)
@@ -137,6 +158,7 @@ class ReadingProgressStore(private val prefs: KeyValueStore) {
                 .put("sourceId", item.sourceId)
                 .put("mangaTitle", item.mangaTitle)
                 .put("mangaId", item.mangaId)
+                .put("coverUrl", item.coverUrl)
                 .put("chapterId", item.chapterId)
                 .put("chapterName", item.chapterName)
                 .put("page", item.page)

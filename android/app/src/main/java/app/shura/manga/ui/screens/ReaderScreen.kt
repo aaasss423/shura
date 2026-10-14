@@ -58,6 +58,8 @@ fun ReaderScreen(
     sourceId: String,
     chapterId: String,
     chapterTitle: String,
+    /** The work's cover, for the reader's own header. */
+    cover: String = "",
     savedPage: Int,
     onProgress: (Int) -> Unit,
     onPrevChapter: (() -> Unit)?,
@@ -149,6 +151,7 @@ fun ReaderScreen(
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
             ReaderBar(
+                cover = cover,
                 chapterTitle = chapterTitle,
                 currentPage = listState.firstVisibleItemIndex + 1,
                 pageCount = pages.size,
@@ -310,6 +313,7 @@ private const val MAX_EDGE = 1600
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ReaderBar(
+    cover: String,
     chapterTitle: String,
     currentPage: Int,
     pageCount: Int,

@@ -13,6 +13,8 @@ data class StoredChapter(
     val mangaId: String,
     val chapterId: String,
     val title: String,
+    /** The work's cover, when the source provided one. Empty renders a placeholder. */
+    val coverUrl: String,
     val pageUris: List<Uri>,
 )
 
@@ -31,6 +33,7 @@ fun persistStoredChapter(
     chapterId: String,
     title: String,
     files: List<File>,
+    coverUrl: String = "",
 ): StoredChapter {
     val dir = File(store, chapterId.replace(Regex("[^A-Za-z0-9_.-]"), "_"))
     dir.mkdirs()
@@ -40,6 +43,7 @@ fun persistStoredChapter(
         .put("mangaId", mangaId)
         .put("chapterId", chapterId)
         .put("title", title)
+        .put("coverUrl", coverUrl)
         .put("pages", JSONArray(files.map(File::getName)))
     File(dir, "manifest.json").writeText(manifest.toString())
     return readManifest(dir) ?: error("failed to persist chapter")
@@ -57,5 +61,6 @@ private fun readManifest(dir: File): StoredChapter? {
     val uris = (0 until pageArray.length()).map { Uri.fromFile(File(dir, pageArray.optString(it))) }
     if (uris.isEmpty()) return null
     return StoredChapter(dir, json.optString("sourceId"), json.optString("mangaId"),
-        json.optString("chapterId"), json.optString("title"), uris)
+        json.optString("chapterId"), json.optString("title"),
+        json.optString("coverUrl"), uris)
 }

@@ -17,6 +17,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.shura.manga.reader.ReadingProgress
 import app.shura.manga.ui.shura
+import app.shura.manga.ui.image.CoverImage
+import androidx.compose.foundation.layout.size
 
 /**
  * Home: what to read next, and what was read recently.
@@ -54,19 +56,49 @@ fun HomeScreen(
                     accent = true,
                     onClick = { onOpenEntry(continueEntry) },
                 ) {
-                    Text(
-                        continueEntry.mangaTitle,
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        "${continueEntry.chapterName} · " +
-                            shura("reader.pages", (continueEntry.page + 1).coerceAtLeast(1),
-                                continueEntry.pageCount.coerceAtLeast(1)),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Row {
+                        // The work's real cover. Keyed by its own URL, so a fast
+                        // scroll cannot leave one work's cover on another's card.
+                        CoverImage(
+                            source = continueEntry.coverUrl,
+                            modifier = Modifier.size(width = 64.dp, height = 92.dp)
+                                .clip(RoundedCornerShape(8.dp)),
+                            retryLabel = shura("common.retry"),
+                        )
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                continueEntry.mangaTitle,
+                                style = MaterialTheme.typography.titleMedium,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                continueEntry.chapterName,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            // Where the reader stopped, as a bar: at a glance,
+                            // without reading a number.
+                            val fraction = if (continueEntry.pageCount <= 1) 0f
+                            else (continueEntry.page + 1).toFloat() / continueEntry.pageCount
+                            LinearProgressIndicator(
+                                progress = { fraction },
+                                modifier = Modifier.fillMaxWidth().height(3.dp),
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                shura("reader.pages", (continueEntry.page + 1).coerceAtLeast(1),
+                                    continueEntry.pageCount.coerceAtLeast(1)),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -154,7 +186,14 @@ private fun RecentCard(entry: ReadingProgress, onClick: () -> Unit) {
         color = MaterialTheme.colorScheme.surfaceVariant,
         shape = RoundedCornerShape(12.dp),
     ) {
-        Column(Modifier.padding(14.dp)) {
+        Column(Modifier.padding(12.dp)) {
+            CoverImage(
+                source = entry.coverUrl,
+                modifier = Modifier.fillMaxWidth().height(190.dp)
+                    .clip(RoundedCornerShape(8.dp)),
+                retryLabel = shura("common.retry"),
+            )
+            Spacer(Modifier.height(8.dp))
             // Progress as a filled bar: at a glance where the reader stopped,
             // without reading a number.
             LinearProgressIndicator(
