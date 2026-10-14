@@ -465,8 +465,14 @@ android {{
 // compileOnly: the eu.kanade.tachiyomi.* ABI layer and okhttp are supplied by
 // the host application at runtime, not bundled into the APK.
 dependencies {{
+    // Not bundled at runtime - the host supplies these types - but present for
+    // the unit tests, which instantiate the source and check its ABI for real
+    // rather than by reading the generated file.
     compileOnly project(':shura-extension-runtime')
     compileOnly project(':shura-source-site')
+    testImplementation project(':shura-extension-runtime')
+    testImplementation project(':shura-source-site')
+    testImplementation 'junit:junit:4.13.2'
 }}
 '''
 
