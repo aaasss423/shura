@@ -2,11 +2,20 @@ package app.shura.manga.ui
 
 import android.net.Uri
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.*
@@ -79,6 +88,7 @@ sealed interface ShuraScreen {
     data object Sources : ShuraScreen
     data object Library : ShuraScreen
     data object Settings : ShuraScreen
+    data object Extensions : ShuraScreen
     data class Search(val sourceId: String) : ShuraScreen
     data class Details(val sourceId: String, val manga: MangaSummary) : ShuraScreen
     data class Chapters(val sourceId: String, val manga: MangaSummary) : ShuraScreen
@@ -114,6 +124,11 @@ fun ShuraRoot(
     repositoryNotice: String?,
     onImport: () -> Unit,
     onInstallRepository: () -> Unit,
+    extensions: List<app.shura.manga.ExtensionEntry> = emptyList(),
+    /** Bumped on removal so the source list is re-read rather than cached. */
+    sourcesVersion: Int = 0,
+    extensionCatalog: app.shura.manga.ExtensionCatalog? = null,
+    onRemoveExtension: (app.shura.manga.ExtensionEntry) -> Unit = {},
     /**
      * Starts fetching a chapter's pages. Navigation is owned here, so the
      * reader's route always names the chapter whose pages are on screen -
@@ -222,7 +237,7 @@ fun ShuraRoot(
                         )
 
                         is ShuraScreen.Sources -> SourcePickerScreen(
-                            sources = nav.sourceHost.all(),
+                            sources = remember(sourcesVersion) { nav.sourceHost.all() },
                             onPick = { route = ShuraScreen.Search(it.id) },
                             onOpenSettings = { route = ShuraScreen.Settings },
                         )
@@ -265,7 +280,31 @@ fun ShuraRoot(
                             onDark = onDark,
                             repositoryNotice = repositoryNotice,
                             onInstallRepository = onInstallRepository,
+                            onOpenStore = { route = ShuraScreen.Extensions },
                         )
+
+                        is ShuraScreen.Extensions -> {
+                            val catalog = extensionCatalog
+                            Column(Modifier.fillMaxSize()) {
+                                Row(
+                                    Modifier.fillMaxWidth().padding(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    TextButton(onClick = { route = ShuraScreen.Settings }) {
+                                        Text(shura("common.back"))
+                                    }
+                                }
+                                if (catalog == null) {
+                                    StatePanel(shura("common.error"), "")
+                                } else {
+                                    ExtensionStoreScreen(
+                                        entries = extensions,
+                                        catalog = catalog,
+                                        onRemove = onRemoveExtension,
+                                    )
+                                }
+                            }
+                        }
 
                         is ShuraScreen.Search -> {
                             val source = sourceOf(screen.sourceId)

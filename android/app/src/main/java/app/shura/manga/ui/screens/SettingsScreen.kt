@@ -19,6 +19,7 @@ fun SettingsScreen(
     onDark: (Boolean) -> Unit,
     repositoryNotice: String?,
     onInstallRepository: () -> Unit,
+    onOpenStore: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -67,8 +68,13 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(10.dp))
-            Button(onClick = onInstallRepository) {
-                Text(shura("settings.installRepository"))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onInstallRepository) {
+                    Text(shura("settings.installRepository"))
+                }
+                OutlinedButton(onClick = onOpenStore) {
+                    Text(shura("store.open"))
+                }
             }
         }
     }

@@ -62,6 +62,16 @@ object Strings {
         "settings.repository" to "المستودع",
         "settings.installRepository" to "تثبيت مستودع من التخزين",
         "settings.noRepository" to "لا يوجد مستودع مثبت.",
+        "store.title" to "ال إضافات",
+        "store.trusted" to "موثوق",
+        "store.unknownPublisher" to "ناشر غير موثوق",
+        "store.outOfScope" to "خارج النطاق",
+        "store.notDownloaded" to "غير موجود على الجهاز",
+        "store.runnable" to "%d من %d إضافة تعمل في هذه النسخة",
+        "store.open" to "إدارة الإضافات",
+        "store.empty" to "لا يقدّم هذا المستودع أي إضافات.",
+        "store.remove" to "إزالة",
+        "store.removed" to "تمت إزالة %s. أُزيلت مصادره من التطبيق.",
         "error.generic" to "تعذّر إكمال العملية.",
     )
 
@@ -111,6 +121,16 @@ object Strings {
         "settings.repository" to "Repository",
         "settings.installRepository" to "Install repository from storage",
         "settings.noRepository" to "No repository installed.",
+        "store.title" to "Extensions",
+        "store.trusted" to "Trusted",
+        "store.unknownPublisher" to "Untrusted publisher",
+        "store.outOfScope" to "Out of scope",
+        "store.notDownloaded" to "Not on device",
+        "store.runnable" to "%d of %d extensions can run in this build",
+        "store.open" to "Manage extensions",
+        "store.empty" to "This repository offers no extensions.",
+        "store.remove" to "Remove",
+        "store.removed" to "Removed %s. Its sources are gone from the app.",
         "error.generic" to "That did not work.",
     )
 

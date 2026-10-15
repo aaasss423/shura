@@ -20,6 +20,7 @@ import app.shura.manga.reader.translation.TranslationSettingsStore
 import app.shura.manga.ui.ChapterDownloader
 import app.shura.manga.ui.ShuraNav
 import app.shura.manga.ui.ShuraRoot
+import app.shura.manga.ui.Strings
 import app.shura.manga.ui.theme.UiLanguage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -151,6 +152,15 @@ private fun ShuraApp() {
             translationEngineAvailable = BuildConfig.TRANSLATION_ENABLED,
         )
     }
+
+    // The extension store reads the installed repository's index and applies
+    // this build's trust policy to each entry. Rebuilt whenever the repository
+    // changes or a screen is entered, so a removal shows up immediately.
+    var storeVersion by remember { mutableIntStateOf(0) }
+    // Bumped when extensions are removed, so the source list is re-read.
+    var sourcesVersion by remember { mutableIntStateOf(0) }
+    val catalog = remember(storeVersion) { ExtensionCatalog.forBuild(context) }
+    val extensions = remember(storeVersion, catalog) { catalog.describe(catalog.directory) }
 
     val history = remember(historyVersion) { progressStore.history() }
     val library = remember(libraryVersion) { indexStoredChapters(chapterStore(context)) }
@@ -303,6 +313,29 @@ private fun ShuraApp() {
         },
         library = library,
         repositoryNotice = repositoryNotice,
+        extensions = extensions,
+        sourcesVersion = sourcesVersion,
+        extensionCatalog = catalog,
+        onRemoveExtension = { entry ->
+            scope.launch {
+                val name = entry.identity
+                val removed = withContext(Dispatchers.IO) {
+                    File(catalog.directory, entry.apkPath).delete()
+                }
+                val failures = withContext(Dispatchers.IO) {
+                    ShuraRepository.reload(sourceHost, context)
+                }
+                repositoryNotice = buildString {
+                    val key = if (removed) "store.removed" else "error.generic"
+                    append(Strings.t(key, language, name))
+                    failures.forEach { append("\n$it") }
+                }
+                // Bumping both re-reads the store and the source list, so a
+                // removal is visible immediately rather than at next launch.
+                storeVersion++
+                sourcesVersion++
+            }
+        },
         onImport = { picker.launch(arrayOf("image/*")) },
         onInstallRepository = { repositoryPicker.launch(null) },
     )
