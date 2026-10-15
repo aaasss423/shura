@@ -13,6 +13,8 @@ import app.shura.host.MangaDexChapterDownloader
 import app.shura.host.MangaDexSource
 import app.shura.host.SourceHost
 import app.shura.manga.reader.ProgressivePageLoader
+import app.shura.manga.reader.ReaderSettings
+import app.shura.manga.reader.ReaderSettingsStore
 import app.shura.manga.reader.ReadingProgress
 import app.shura.manga.reader.ReadingProgressStore
 import app.shura.manga.reader.translation.TranslationCache
@@ -172,6 +174,9 @@ private fun ShuraApp() {
     // The chapter's real page count. The reader shows "3 of 40" even though
     // only 3 have downloaded: the count is the chapter's, not the download's.
     var chapterPageTotal by remember { mutableIntStateOf(0) }
+    // The reading layout, kept between launches - see ReaderSettings.
+    val readerSettingsStore = remember { ReaderSettingsStore(context) }
+    var readerMode by remember { mutableStateOf(readerSettingsStore.load().mode) }
 
     val openChapter: (app.shura.source.ShuraSource, app.shura.source.Chapter, String) -> Unit =
         { source, chapter, cover ->
@@ -249,6 +254,11 @@ private fun ShuraApp() {
         onPageVisible = { index -> loader?.ensure(index) },
         onRetryPage = { index -> loader?.retry(index) },
         totalPages = { chapterPageTotal.takeIf { it > 0 } },
+        readerMode = readerMode,
+        onReaderModeChange = { chosen ->
+            readerMode = chosen
+            readerSettingsStore.save(ReaderSettings(chosen))
+        },
         isLoading = isLoading,
         loadError = loadError,
         onFetchChapter = { source, chapter, cover -> openChapter(source, chapter, cover) },

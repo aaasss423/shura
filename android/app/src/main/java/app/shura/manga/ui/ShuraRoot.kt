@@ -114,6 +114,9 @@ fun ShuraRoot(
     onRetryPage: (Int) -> Unit = {},
     /** The chapter's full page count, while [pages] holds only what has loaded. */
     totalPages: () -> Int? = { null },
+    /** The reader's saved layout, vertical or one page at a time. */
+    readerMode: app.shura.manga.reader.ReaderMode = app.shura.manga.reader.ReaderMode.VERTICAL,
+    onReaderModeChange: (app.shura.manga.reader.ReaderMode) -> Unit = {},
     isLoading: Boolean,
     loadError: String?,
     onRetry: () -> Unit,
@@ -374,6 +377,8 @@ fun ShuraRoot(
                                 onPageVisible = onPageVisible,
                                 onRetryPage = onRetryPage,
                                 totalPages = total,
+                                mode = readerMode,
+                                onModeChange = onReaderModeChange,
 
                                 onPrevChapter = previous?.let { c ->
                                     { openChapter(screen.sourceId, screen.mangaTitle, source, c, screen.chapters) }

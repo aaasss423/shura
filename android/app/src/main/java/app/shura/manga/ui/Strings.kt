@@ -72,6 +72,8 @@ object Strings {
         "store.empty" to "لا يقدّم هذا المستودع أي إضافات.",
         "store.remove" to "إزالة",
         "store.removed" to "تمت إزالة %s. أُزيلت مصادره من التطبيق.",
+        "reader.mode.vertical" to "شريط",
+        "reader.mode.paged" to "صفحات",
         "error.generic" to "تعذّر إكمال العملية.",
     )
 
@@ -131,6 +133,8 @@ object Strings {
         "store.empty" to "This repository offers no extensions.",
         "store.remove" to "Remove",
         "store.removed" to "Removed %s. Its sources are gone from the app.",
+        "reader.mode.vertical" to "Strip",
+        "reader.mode.paged" to "Paged",
         "error.generic" to "That did not work.",
     )
 

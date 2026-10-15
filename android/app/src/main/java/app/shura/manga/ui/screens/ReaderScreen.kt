@@ -10,10 +10,13 @@ import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
@@ -29,6 +32,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import app.shura.manga.reader.translation.TranslationCache
+import app.shura.manga.reader.ReaderMode
 import app.shura.manga.reader.translation.TranslationMode
 import app.shura.manga.reader.translation.TranslationSettings
 import app.shura.manga.ui.shura
@@ -78,6 +82,9 @@ fun ReaderScreen(
      * counts itself correctly.
      */
     totalPages: Int? = null,
+    /** Vertical strip, or one page at a time. Kept between sessions. */
+    mode: ReaderMode = ReaderMode.VERTICAL,
+    onModeChange: (ReaderMode) -> Unit = {},
     onPrevChapter: (() -> Unit)?,
     onNextChapter: (() -> Unit)?,
     onBack: () -> Unit,
@@ -99,22 +106,39 @@ fun ReaderScreen(
     val listState = rememberLazyListState(
         initialFirstVisibleItemIndex = savedPage.coerceIn(0, (pages.size - 1).coerceAtLeast(0))
     )
+    val pagerState = rememberPagerState(
+        initialPage = savedPage.coerceIn(0, (pages.size - 1).coerceAtLeast(0))
+    ) { pages.size.coerceAtLeast(1) }
 
-    LaunchedEffect(listState, pages.size) {
-        androidx.compose.runtime.snapshotFlow { listState.firstVisibleItemIndex }
-            .collect {
+    // Both modes report through one path, so progress is saved and downloads
+    // are pulled in identically whichever layout is showing.
+    val paged = mode == ReaderMode.PAGED
+    val currentIndex = if (paged) pagerState.currentPage else listState.firstVisibleItemIndex
+    val seek: (Int) -> Unit = { index ->
+        val target = index.coerceIn(0, pages.lastIndex.coerceAtLeast(0))
+        if (paged) scope.launch { pagerState.scrollToPage(target) }
+        else scope.launch { listState.scrollToItem(target) }
+    }
+
+    LaunchedEffect(paged, pages.size) {
+        if (paged) {
+            snapshotFlow { pagerState.currentPage }.collect {
                 onProgress(it)
                 onPageVisible(it)
             }
+        } else {
+            snapshotFlow { listState.firstVisibleItemIndex }.collect {
+                onProgress(it)
+                onPageVisible(it)
+            }
+        }
     }
 
     // Keep the chapter's own place when the page list arrives late: the reader
     // opens at the stored page, not at page 1.
     LaunchedEffect(pages.size) {
-        if (pages.isNotEmpty() && savedPage in 0 until pages.size &&
-            listState.firstVisibleItemIndex == 0
-        ) {
-            listState.scrollToItem(savedPage)
+        if (pages.isNotEmpty() && savedPage in 0 until pages.size && currentIndex == 0) {
+            seek(savedPage)
         }
     }
 
@@ -141,6 +165,22 @@ fun ReaderScreen(
                 actionLabel = onOpenNextChapter?.let { shura("reader.next") },
                 onAction = { onOpenNextChapter?.invoke() },
             )
+            paged -> HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize().testTag("reader-pages"),
+            ) { index ->
+                ReaderPage(
+                    uri = pages[index],
+                    index = index,
+                    pageCount = totalPages ?: pages.size,
+                    translation = translationCache?.pagesFor(sourceId, chapterId)
+                        ?.getOrNull(index),
+                    translationPending = translationSettings.mode != TranslationMode.OFF &&
+                        !translationEngineAvailable,
+                    onTap = { barVisible = !barVisible },
+                )
+            }
+
             else -> LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize().testTag("reader-pages"),
@@ -172,13 +212,13 @@ fun ReaderScreen(
             ReaderBar(
                 cover = cover,
                 chapterTitle = chapterTitle,
-                currentPage = listState.firstVisibleItemIndex + 1,
+                currentPage = currentIndex + 1,
                 pageCount = totalPages ?: pages.size,
                 rtl = rtl,
                 onBack = onBack,
-                onProgress = { index ->
-                    scope.launch { listState.scrollToItem(index.coerceIn(0, pages.lastIndex)) }
-                },
+                onProgress = seek,
+                layoutMode = mode,
+                onLayoutModeChange = onModeChange,
                 onPrevChapter = onPrevChapter,
                 onNextChapter = onNextChapter,
                 translationSettings = translationSettings,
@@ -329,6 +369,24 @@ private fun PageImage(
 
 private const val MAX_EDGE = 1600
 
+/**
+ * Switches between the continuous strip and one page at a time.
+ *
+ * Offered inside the reader rather than in settings: the moment someone wants
+ * to change it is the moment they are reading, and burying it in settings means
+ * they simply do not.
+ */
+@Composable
+private fun LayoutToggle(current: ReaderMode, onChange: (ReaderMode) -> Unit) {
+    val other = if (current == ReaderMode.VERTICAL) ReaderMode.PAGED else ReaderMode.VERTICAL
+    TextButton(onClick = { onChange(other) }) {
+        Text(
+            shura(if (current == ReaderMode.VERTICAL) "reader.mode.paged" else "reader.mode.vertical"),
+            style = MaterialTheme.typography.labelSmall,
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ReaderBar(
@@ -344,6 +402,9 @@ private fun ReaderBar(
     translationSettings: TranslationSettings,
     onTranslationSettingsChange: (TranslationSettings) -> Unit,
     engineAvailable: Boolean,
+    /** The layout the reader is currently in, so the control can offer the other. */
+    layoutMode: ReaderMode,
+    onLayoutModeChange: (ReaderMode) -> Unit,
 ) {
     Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -368,6 +429,8 @@ private fun ReaderBar(
                     shura("reader.pages", currentPage, pageCount),
                     style = MaterialTheme.typography.labelSmall,
                 )
+                Spacer(Modifier.width(10.dp))
+                LayoutToggle(layoutMode, onLayoutModeChange)
                 Spacer(Modifier.weight(1f))
                 TranslationControl(
                     settings = translationSettings,
