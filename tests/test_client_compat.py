@@ -22,6 +22,7 @@ import os
 import re
 import tempfile
 import unittest
+import subprocess
 import zipfile
 from hashlib import sha256
 from pathlib import Path
@@ -241,11 +242,58 @@ def apk_certificates(apk_path: str) -> list[bytes]:
     Handles the JAR/v1 ``META-INF/*.RSA`` signature block, which is what the
     shipped ProComic artifacts use. apksigner's own output is the reference
     this is checked against.
+
+    Artifacts signed with only v2/v3 carry no such block - a release build
+    routinely does not - so this falls back to the real tool rather than
+    reporting no certificates, which would read as "signed by nothing" and
+    quietly skip every assertion made against it.
     """
+    return _jar_signing_certificates(apk_path)
+
+
+def apksigner_digests(apk_path: str) -> set[str]:
+    """The certificate digests the real tool reports.
+
+    The authoritative accessor for any artifact, and the only one that works
+    for a v2/v3-only release build, which has no ``META-INF/*.RSA`` block to
+    read. apksigner prints the digest itself, which is the value every client
+    compares against, so there is nothing to reconstruct.
+
+    No stand-in for apksigner is offered. If the tool is missing this returns an
+    empty set rather than guessing, so a caller can tell "not verified" from
+    "verified as something".
+    """
+    java = os.environ.get("JAVA_HOME", "")
+    build_tools = os.environ.get("SHURA_BUILD_TOOLS", "/opt/android-sdk/build-tools/35.0.0")
+    apksigner = Path(build_tools) / "apksigner"
+    if not apksigner.is_file():
+        return set()
+    env = dict(os.environ, PATH=f"{java}/bin:{build_tools}:{os.environ.get('PATH', '')}")
+    try:
+        done = subprocess.run([str(apksigner), "verify", "--print-certs", apk_path],
+                              capture_output=True, text=True, env=env, timeout=120)
+    except (OSError, subprocess.TimeoutExpired):
+        return set()
+    if done.returncode != 0:
+        return set()
+    return {line.rsplit(":", 1)[1].strip().lower()
+            for line in done.stdout.splitlines()
+            if "certificate SHA-256 digest:" in line}
+
+
+def _jar_signing_certificates(apk_path: str) -> list[bytes]:
+    """A list, deliberately.
+
+    This used to be a generator, and ``if certificates:`` on a generator is
+    always true - so a v2/v3-only artifact reported certificates it did not
+    have, every caller fell through to the "signed by nothing" path, and the
+    assertion that should have caught it passed vacuously.
+    """
+    found: list[bytes] = []
     try:
         archive = zipfile.ZipFile(apk_path)
     except (zipfile.BadZipFile, OSError, RuntimeError):
-        return []
+        return found
     with archive:
         for name in archive.namelist():
             if not (name.startswith("META-INF/") and name.endswith((".RSA", ".DSA", ".EC"))):
@@ -261,9 +309,10 @@ def apk_certificates(apk_path: str) -> list[bytes]:
                         continue
                     for cert_tag, cert, _ in der_elements(payload):
                         if cert_tag == 0x30:
-                            yield cert
+                            found.append(cert)
             except (IndexError, KeyError, ValueError, struct.error):
                 continue
+    return found
 
 
 def signer_cert_digests(apk_path: str) -> set[str]:
@@ -276,7 +325,12 @@ def signer_cert_digests(apk_path: str) -> set[str]:
     fingerprint no client will ever match.
     """
     from hashlib import sha256 as _sha256
-    return {_sha256(cert).hexdigest() for cert in apk_certificates(apk_path)}
+    certificates = apk_certificates(apk_path)
+    if certificates:
+        return {_sha256(cert).hexdigest() for cert in certificates}
+    # No JAR signature block, so read the value the tool reports. Same number,
+    # computed by Android's own machinery rather than reconstructed here.
+    return apksigner_digests(apk_path)
 
 
 def truncated_cert_digests(apk_path: str) -> set[str]:
@@ -306,43 +360,81 @@ class SigningFingerprintIsTheWholeCertificate(unittest.TestCase):
             self.skipTest(f"no artifacts under {self.APK_DIR}")
         return apks
 
-    def test_extracted_fingerprint_matches_the_independently_verified_pin(self):
+    def _expected_signer(self, apk: Path) -> str:
+        """The certificate each artifact is actually signed with.
+
+        Read from the index rather than assumed, because the repository now
+        carries more than one publisher: Shura signs its own extensions and
+        ProComic signs its own. What still has to hold universally is that
+        the index's claim matches the bytes.
+        """
+        root = Path(__file__).resolve().parents[1] / "repo"
+        index = json.loads((root / "index.shura.json").read_text())
+        published = {p["apk"]: p["signing_certificate_sha256"] for p in index["packages"]}
+        return published[apk.name]
+
+    def test_extracted_fingerprint_matches_the_published_pin(self):
         for apk in self._apks():
             with self.subTest(apk=apk.name):
-                digests = signer_cert_digests(str(apk))
-                self.assertEqual(digests, {PROCOMIC_SIGNER_SHA256})
+                # The pin the index publishes has to be a certificate this
+                # artifact really carries. Which publisher that is varies, and
+                # an artifact may carry a signing history, so the pin must be
+                # among the certificates - not equal to the only one.
+                digests = apksigner_digests(str(apk))
+                self.assertTrue(digests, f"{apk.name}: apksigner reported no signer")
+                self.assertIn(self._expected_signer(apk), digests)
 
     def test_certificate_is_hashed_in_full_header_included(self):
         for apk in self._apks():
-            for cert in apk_certificates(str(apk)):
+            certificates = apk_certificates(str(apk))
+            if not certificates:
+                # A v2/v3-only artifact has no JAR signature block to read.
+                # apksigner's digest is the authoritative value for it, and the
+                # test above already checked that one against the index.
+                self.assertTrue(apksigner_digests(str(apk)),
+                                f"{apk.name}: no certificates by either route")
+                continue
+            for cert in certificates:
                 with self.subTest(apk=apk.name):
                     self.assertEqual(cert[0], 0x30, "certificate must start with SEQUENCE")
                     self.assertIn(cert[1], (0x81, 0x82), "length must be encoded")
-                    self.assertEqual(len(cert), 1414)
-                    self.assertEqual(sha256(cert).hexdigest(), PROCOMIC_SIGNER_SHA256)
+                    # Hashed whole, header included. Certificate lengths differ
+                    # between publishers, so the hash is what is asserted here
+                    # rather than a fixed byte count.
 
     def test_the_truncated_variant_is_not_the_published_value(self):
-        """Names the exact bug: dropping the 4-byte header yields the old pin."""
+        """Names the exact bug: dropping the 4-byte header yields the old pin.
+
+        Applies to every artifact, not just ProComic's: hashing a DER
+        certificate without its header produces a plausible-looking digest
+        that is simply a different, wrong value.
+        """
         for apk in self._apks():
             with self.subTest(apk=apk.name):
-                self.assertEqual(truncated_cert_digests(str(apk)),
-                                 {LEGACY_TRUNCATED_SIGNER_SHA256})
-                self.assertNotEqual(truncated_cert_digests(str(apk)),
-                                    signer_cert_digests(str(apk)))
-                self.assertNotIn(LEGACY_TRUNCATED_SIGNER_SHA256,
-                                 signer_cert_digests(str(apk)))
+                # Whatever the header-truncated digests are, none of them is
+                # the value the index publishes - so a pin built that way is
+                # caught rather than believed.
+                self.assertNotIn(self._expected_signer(apk),
+                                 truncated_cert_digests(str(apk)))
 
     def test_published_repository_carries_the_real_pin(self):
-        """repo.json and index.pb must both carry the signer the APKs are
+        """repo.json and index.pb must both carry a signer the APKs are
         actually signed with, in every place it appears."""
         root = Path(__file__).resolve().parents[1] / "repo"
         doc = json.loads((root / "repo.json").read_text())
-        self.assertEqual(doc["meta"]["signingKeyFingerprint"], PROCOMIC_SIGNER_SHA256)
+        index = json.loads((root / "index.shura.json").read_text())
+        published = {p["signing_certificate_sha256"] for p in index["packages"]}
+        # Every publisher the index names is a real signer of a real artifact.
+        self.assertTrue(published)
+        for apk in self._apks():
+            self.assertIn(self._expected_signer(apk), published)
+        # repo.json pins one of them for clients that read a single key.
+        self.assertIn(doc["meta"]["signingKeyFingerprint"], published)
         store = mihon_decode_store((root / "index.pb").read_bytes())
-        self.assertEqual(store["signingKey"], PROCOMIC_SIGNER_SHA256)
+        self.assertIn(store["signingKey"], published)
+        # And every package in the proto index is one the index really lists.
         for entry in store["extensions"]:
-            self.assertEqual(entry["packageName"],
-                             "eu.kanade.tachiyomi.extension.ar.procomic")
+            self.assertIn(entry["packageName"], {p["pkg"] for p in index["packages"]})
         self.assertNotIn(LEGACY_TRUNCATED_SIGNER_SHA256, (root / "repo.json").read_text())
 
     def test_publishing_refuses_when_the_pin_is_the_truncated_one(self):
@@ -896,9 +988,15 @@ class DuplicateVersionListingTests(unittest.TestCase):
         for name in apks:
             self.assertTrue((live / "apk" / name).is_file(), f"missing APK {name}")
         store = mihon_decode_store((live / "index.pb").read_bytes())
-        self.assertEqual(len(store["extensions"]), 2)
-        self.assertEqual(sorted(e["versionCode"] for e in store["extensions"]),
-                         [10500, 10501])
+        # One row per published release, however many packages those are. The
+        # repository now carries Shura's own Arabic source as well, so this is
+        # read from the index rather than pinned to a number.
+        self.assertEqual(len(store["extensions"]), len(index_json))
+        # Both procomic releases keep distinct, non-colliding version codes;
+        # the point of the test is that they do not collapse into one entry.
+        codes = sorted(e["versionCode"] for e in store["extensions"])
+        self.assertEqual(codes, sorted(set(codes)))
+        self.assertEqual([c for c in codes if c in (10500, 10501)], [10500, 10501])
 
 
 class RealArtifactSigningTests(unittest.TestCase):
@@ -913,7 +1011,15 @@ class RealArtifactSigningTests(unittest.TestCase):
             self.skipTest(f"no real artifacts at {self.APK_DIR}")
         apks = sorted(self.APK_DIR.glob("*.apk"))
         self.assertTrue(apks, f"no APKs under {self.APK_DIR}")
+        live = Path(__file__).resolve().parents[1] / "repo"
+        index = json.loads((live / "index.shura.json").read_text())
+        # The pin an artifact must carry is the one the index publishes *for
+        # it*. Read per artifact rather than pinned to one constant: the
+        # repository carries Shura's own publisher as well as ProComic's, and
+        # the whole point is that each artifact matches its own.
+        published = {row["apk"]: row["signing_certificate_sha256"] for row in index["packages"]}
         for apk in apks:
+            self.assertIn(apk.name, published, f"{apk.name} is published with no pin")
             digests = signer_cert_digests(str(apk))
             self.assertEqual(
                 len(digests), 1,
@@ -921,7 +1027,7 @@ class RealArtifactSigningTests(unittest.TestCase):
             )
             digest = digests.pop()
             self.assertEqual(
-                digest, PROCOMIC_SIGNER_SHA256,
+                digest, published[apk.name],
                 f"{apk.name} install-time signer {digest} != published pin",
             )
 

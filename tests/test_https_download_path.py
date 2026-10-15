@@ -21,6 +21,7 @@ import http.server
 import json
 import os
 import ssl
+from datetime import datetime
 import tempfile
 import threading
 import unittest
@@ -48,8 +49,28 @@ def _artifact():
 
 
 def _ca():
-    path = Path("/tmp/opencode/tlscerts/cert.pem")
-    return path if path.is_file() else None
+    """The TLS certificate this test serves, if it is usable.
+
+    Existence is not enough. This fixture lives outside the repository and
+    expires, so a stale one used to turn a skip into a hard
+    CERTIFICATE_VERIFY_FAILED error four times over - a self-inflicted CI
+    hazard that had nothing to do with the code under test.
+    """
+    path = Path(os.environ.get("SHURA_TEST_CA", "/tmp/opencode/tlscerts/cert.pem"))
+    if not path.is_file():
+        return None
+    try:
+        cert = ssl._ssl._test_decode_cert(str(path))
+    except Exception:
+        return None
+    not_after = cert.get("notAfter")
+    if not not_after:
+        return None
+    try:
+        expiry = datetime.strptime(not_after, "%b %d %H:%M:%S %Y %Z")
+    except ValueError:
+        return None
+    return path if expiry > datetime.utcnow() else None
 
 
 def ensure_verification_tools():
