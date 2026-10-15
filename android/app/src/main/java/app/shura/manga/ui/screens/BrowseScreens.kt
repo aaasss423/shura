@@ -17,6 +17,9 @@ import androidx.compose.ui.unit.dp
 import app.shura.source.Chapter
 import app.shura.source.MangaSummary
 import app.shura.source.ShuraSource
+import app.shura.manga.StoredChapter
+import app.shura.manga.directorySize
+import app.shura.manga.formatBytes
 import app.shura.manga.ui.Strings
 import app.shura.manga.ui.image.CoverImage
 import androidx.compose.foundation.layout.size
@@ -258,11 +261,21 @@ fun LibraryScreen(
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(entry.title, style = MaterialTheme.typography.titleMedium, maxLines = 2)
+                        // What is actually on the device, in words. A bare
+                        // number with no unit reads as a glitch, not a count.
                         Text(
-                            "${entry.pageUris.size}",
+                            shura("library.pages", entry.pageUris.size),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        val size = remember(entry.dir) { directorySize(entry.dir) }
+                        if (size > 0L) {
+                            Text(
+                                shura("library.size", formatBytes(size)),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                     TextButton(onClick = { onRead(entry) }) { Text(shura("library.read")) }
                     IconButton(onClick = { onDelete(entry) }) {

@@ -18,6 +18,29 @@ data class StoredChapter(
     val pageUris: List<Uri>,
 )
 
+/**
+ * How much space a saved chapter occupies.
+ *
+ * Walks the files rather than trusting a recorded figure, so a page removed by
+ * hand is reflected instead of leaving the library claiming space it no longer
+ * holds.
+ */
+fun directorySize(dir: File): Long =
+    dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+
+/** Sizes in units a person reads, not bytes. */
+fun formatBytes(bytes: Long): String {
+    val units = arrayOf("B", "KB", "MB", "GB")
+    var value = bytes.toDouble()
+    var unit = 0
+    while (value >= 1024 && unit < units.lastIndex) {
+        value /= 1024
+        unit++
+    }
+    return if (unit == 0) "${value.toInt()} ${units[unit]}"
+    else String.format("%.1f %s", value, units[unit])
+}
+
 /** Persistent offline chapter store under app-internal filesDir. */
 fun chapterStore(context: Context): File = File(context.filesDir, "chapters")
 

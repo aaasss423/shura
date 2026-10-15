@@ -1,5 +1,6 @@
 package app.shura.manga
 
+import app.shura.manga.formatBytes
 import app.shura.manga.reader.ReaderMode
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -33,6 +34,16 @@ class ReaderModeTest {
         // An older or newer build's stored value must not stop the app opening.
         assertEquals(ReaderMode.VERTICAL, ReaderMode.parse("CONTINUOUS_STRIP"))
         assertEquals(ReaderMode.VERTICAL, ReaderMode.parse(""))
+    }
+
+    @Test
+    fun `a chapter on disk is measured in units a person reads`() {
+        // The library used to show a bare number with no unit. These are the
+        // units it shows now, and none of them is "bytes".
+        assertEquals("512 B", formatBytes(512))
+        assertEquals("1.0 KB", formatBytes(1024))
+        assertEquals("1.5 MB", formatBytes(1024L * 1024 * 3 / 2))
+        assertEquals("2.0 GB", formatBytes(2L * 1024 * 1024 * 1024))
     }
 
     @Test
