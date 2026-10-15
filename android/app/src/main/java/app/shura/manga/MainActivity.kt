@@ -368,11 +368,9 @@ private fun ShuraApp() {
         isLoading = isLoading,
         loadError = loadError,
         onFetchChapter = { source, chapter, cover -> openChapter(source, chapter, cover) },
-        // Suspends off the main thread: a resume refetches the whole list, and
-        // doing that on the UI thread is a dropped-frame freeze on every tap.
+        // Off the main thread: a resume refetches the whole list, and doing
+        // that inline freezes the tap that asked for it.
         fetchChapters = { source, mangaId ->
-            // Off the main thread: a resume refetches the whole list, and
-            // doing that inline freezes the tap that asked for it.
             withContext(Dispatchers.IO) {
                 runCatching { source.chapters(mangaId) }.getOrNull()
             }
@@ -464,7 +462,6 @@ private fun ShuraApp() {
                 sourcesVersion++
             }
         },
-        onImport = { picker.launch(arrayOf("image/*")) },
         onInstallRepository = { repositoryPicker.launch(null) },
     )
 }

@@ -225,68 +225,6 @@ fun ChapterListScreen(
 }
 
 /** Saved chapters, with read and delete. */
-@Composable
-fun LibraryScreen(
-    stored: List<app.shura.manga.StoredChapter>,
-    onRead: (app.shura.manga.StoredChapter) -> Unit,
-    onDelete: (app.shura.manga.StoredChapter) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    if (stored.isEmpty()) {
-        StatePanel(shura("library.empty"), "")
-        return
-    }
-    LazyColumn(
-        modifier.fillMaxSize(),
-        contentPadding = PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        item { Text(shura("library.title"), style = MaterialTheme.typography.titleLarge) }
-        items(stored, key = { it.chapterId }) { entry ->
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Row(
-                    Modifier.fillMaxWidth().padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    CoverImage(
-                        source = entry.coverUrl,
-                        modifier = Modifier.size(width = 52.dp, height = 74.dp)
-                            .clip(RoundedCornerShape(6.dp)),
-                        retryLabel = shura("common.retry"),
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(entry.title, style = MaterialTheme.typography.titleMedium, maxLines = 2)
-                        // What is actually on the device, in words. A bare
-                        // number with no unit reads as a glitch, not a count.
-                        Text(
-                            shura("library.pages", entry.pageUris.size),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        val size = remember(entry.dir) { directorySize(entry.dir) }
-                        if (size > 0L) {
-                            Text(
-                                shura("library.size", formatBytes(size)),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    TextButton(onClick = { onRead(entry) }) { Text(shura("library.read")) }
-                    IconButton(onClick = { onDelete(entry) }) {
-                        Text("✕", color = MaterialTheme.colorScheme.error)
-                    }
-                }
-            }
-        }
-    }
-}
-
 /**
  * A work's own page.
  *

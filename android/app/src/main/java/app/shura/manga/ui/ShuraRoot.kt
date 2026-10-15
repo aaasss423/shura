@@ -127,7 +127,6 @@ fun ShuraRoot(
     onProgressChanged: (Int) -> Unit,
     library: List<StoredChapter>,
     repositoryNotice: String?,
-    onImport: () -> Unit,
     onInstallRepository: () -> Unit,
     extensions: List<app.shura.manga.ui.screens.ExtensionRowState> = emptyList(),
     /** Downloads and verifies one extension, then makes it available. */
@@ -269,7 +268,6 @@ fun ShuraRoot(
                             },
                             onBrowse = { go(ShuraScreen.Sources) },
                             onOpenLibrary = { go(ShuraScreen.Library) },
-                            onImport = onImport,
                         )
 
                         is ShuraScreen.Sources -> SourcePickerScreen(
@@ -279,6 +277,7 @@ fun ShuraRoot(
                         )
 
                         is ShuraScreen.Library -> LibraryScreen(
+                            history = history,
                             stored = libraryState,
                             onRead = { entry ->
                                 onOpenStored(entry)
@@ -400,6 +399,14 @@ fun ShuraRoot(
                             val next = ChapterNavigation.next(screen.chapters, screen.chapter.id)
                             val source = sourceOf(screen.sourceId)
                             val cover = nav.coverFor(screen.sourceId, screen.mangaTitle)
+                            // No extra back handler here on purpose: a sheet
+                            // is a dialog in its own right and consumes back
+                            // itself, closing before anything else can see the
+                            // press. Adding a handler on top would fight it,
+                            // and the usual result is a sheet that ignores back
+                            // or a chapter that exits with the sheet still up.
+                            // The screen's stack handler is the only one, and
+                            // the reader is never a dead end.
                             ReaderScreen(
                                 pages = pages,
                                 sourceId = screen.sourceId,
@@ -409,6 +416,13 @@ fun ShuraRoot(
                                 savedPage = saved,
                                 onProgress = onProgressChanged,
                                 onPageVisible = onPageVisible,
+                                chapters = screen.chapters,
+                                onJumpToChapter = { chosen ->
+                                    openChapter(
+                                        screen.sourceId, screen.mangaTitle, source,
+                                        chosen, screen.chapters, cover,
+                                    )
+                                },
                                 onRetryPage = onRetryPage,
                                 totalPages = total,
                                 mode = readerMode,

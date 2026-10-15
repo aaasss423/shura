@@ -33,14 +33,13 @@ fun HomeScreen(
     onOpenEntry: (ReadingProgress) -> Unit,
     onBrowse: () -> Unit,
     onOpenLibrary: () -> Unit,
-    onImport: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val continueEntry = progress.firstOrNull()
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
             Text(
@@ -112,11 +111,6 @@ fun HomeScreen(
             }
         }
         item {
-            // Offline reading stays reachable: images already on the device
-            // need no source, no repository and no network.
-            OutlinedButton(onClick = onImport) { Text("Import chapter images") }
-        }
-        item {
             Text(shura("home.recent"), style = MaterialTheme.typography.titleMedium)
         }
         if (progress.isEmpty()) {
@@ -133,11 +127,8 @@ fun HomeScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Spacer(Modifier.height(16.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = onBrowse) { Text(shura("nav.discover")) }
-                        OutlinedButton(onClick = onImport) { Text("Import images") }
-                    }
+                    Spacer(Modifier.height(12.dp))
+                    Button(onClick = onBrowse) { Text(shura("nav.discover")) }
                 }
             }
         } else {

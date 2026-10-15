@@ -5,7 +5,9 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.*
@@ -25,6 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
@@ -33,6 +36,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import app.shura.manga.reader.translation.TranslationCache
 import app.shura.manga.reader.ReaderMode
+import app.shura.source.Chapter
 import app.shura.manga.reader.translation.TranslationMode
 import app.shura.manga.reader.translation.TranslationSettings
 import app.shura.manga.ui.shura
@@ -85,6 +89,10 @@ fun ReaderScreen(
     /** Vertical strip, or one page at a time. Kept between sessions. */
     mode: ReaderMode = ReaderMode.VERTICAL,
     onModeChange: (ReaderMode) -> Unit = {},
+    /** The chapter list the reader can open, so it can be stepped through. */
+    chapters: List<Chapter> = emptyList(),
+    /** Opens a different chapter from the reader's own chapter list. */
+    onJumpToChapter: ((Chapter) -> Unit)? = null,
     onPrevChapter: (() -> Unit)?,
     onNextChapter: (() -> Unit)?,
     onBack: () -> Unit,
@@ -102,7 +110,16 @@ fun ReaderScreen(
 ) {
     val scope = rememberCoroutineScope()
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
-    var barVisible by remember { mutableStateOf(true) }
+    // Tools are hidden until asked for. They used to start visible, which put
+    // a fixed bar over the bottom of every page from the moment a chapter
+    // opened - the opposite of a reading surface.
+    var barVisible by remember { mutableStateOf(false) }
+    // A sheet, when open, takes the tools' place: two overlapping sets of
+    // controls is how a reader becomes unusable on a phone.
+    var sheet by remember { mutableStateOf<ReaderSheet?>(null) }
+    // While the reader is being configured, the tools must not fade out from
+    // under the finger that is using them.
+    var interacting by remember { mutableStateOf(false) }
     val listState = rememberLazyListState(
         initialFirstVisibleItemIndex = savedPage.coerceIn(0, (pages.size - 1).coerceAtLeast(0))
     )
@@ -142,7 +159,30 @@ fun ReaderScreen(
         }
     }
 
-    Box(modifier.fillMaxSize().background(Ink)) {
+    // Auto-hide, but only while nobody is using the tools. Fading them out in
+    // the middle of a tap on a setting is the kind of small betrayal that
+    // makes an app feel broken rather than considered.
+    LaunchedEffect(barVisible, sheet, interacting) {
+        if (barVisible && sheet == null && !interacting) {
+            kotlinx.coroutines.delay(TOOLS_LINGER_MS)
+            barVisible = false
+        }
+    }
+
+    // The tap detector. Deliberately on the container rather than on each page
+    // or on a transparent overlay above them: an overlay would swallow the
+    // drags the scroll container and the pager need, which is what made
+    // scrolling feel broken. This one does not consume movement, so a drag is
+    // still a drag and only a tap toggles the tools.
+    val surfaceModifier = Modifier.pointerInput(Unit) {
+        detectTapGestures(
+            onTap = {
+                if (sheet != null) sheet = null else barVisible = !barVisible
+            },
+        )
+    }
+
+    Box(modifier.fillMaxSize().background(Ink).then(surfaceModifier)) {
         when {
             loadError != null -> ReaderMessage(
                 title = shura("common.error"),
@@ -184,32 +224,38 @@ fun ReaderScreen(
             else -> LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize().testTag("reader-pages"),
-                contentPadding = PaddingValues(bottom = if (barVisible) 96.dp else 24.dp),
+                // Nothing is reserved. The tools float over the page and are
+                // gone when not wanted, so the strip runs edge to edge; a
+                // permanent inset here is the black band the reader had.
+                contentPadding = PaddingValues(bottom = 0.dp),
             ) {
                 items(count = pages.size, key = { index -> "$index:${pages[index]}" }) { index ->
                     ReaderPage(
                         uri = pages[index],
                         index = index,
-                        pageCount = pages.size,
+                        pageCount = totalPages ?: pages.size,
                         translation = translationCache?.pagesFor(sourceId, chapterId)
                             ?.getOrNull(index),
                         translationPending = translationSettings.mode != TranslationMode.OFF &&
                             !translationEngineAvailable,
-                        onTap = { barVisible = !barVisible },
                     )
                 }
             }
         }
 
-        // The bar. Dismissable so the page can be read unobstructed, and it is
-        // a sibling of the pages rather than something drawn on top of them.
+        // The tools. Shown on a tap and gone again on the next, and they are a
+        // sibling of the pages rather than something drawn over them, so
+        // hiding them gives the page the whole screen back.
         AnimatedVisibility(
-            visible = barVisible && pages.isNotEmpty(),
+            visible = barVisible && sheet == null && pages.isNotEmpty(),
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
             ReaderBar(
+                onOpenChapters = { sheet = ReaderSheet.CHAPTERS },
+                onOpenSettings = { sheet = ReaderSheet.SETTINGS },
+                onInteractionChanged = { interacting = it },
                 cover = cover,
                 chapterTitle = chapterTitle,
                 currentPage = currentIndex + 1,
@@ -226,8 +272,32 @@ fun ReaderScreen(
                 engineAvailable = translationEngineAvailable,
             )
         }
+
+        // A sheet replaces the tools rather than stacking on them. Two sets of
+        // controls on one phone screen is how a reader stops being readable.
+        sheet?.let { open ->
+            ReaderSheetHost(
+                sheet = open,
+                chapters = chapters,
+                currentChapterId = chapterId,
+                totalPages = totalPages ?: pages.size,
+                mode = mode,
+                onModeChange = onModeChange,
+                onOpenChapter = { chapter ->
+                    sheet = null
+                    onJumpToChapter?.invoke(chapter)
+                },
+                onDismiss = { sheet = null },
+            )
+        }
     }
 }
+
+/** The panels the tools can open, one at a time. */
+enum class ReaderSheet { CHAPTERS, SETTINGS }
+
+/** How long the tools stay up when nobody is using them. */
+private const val TOOLS_LINGER_MS = 3_500L
 
 /** One page, its label, and any translated text beside it. */
 @Composable
@@ -237,16 +307,18 @@ private fun ReaderPage(
     pageCount: Int,
     translation: String?,
     translationPending: Boolean,
-    onTap: () -> Unit,
+    /** Tapping the page, as opposed to dragging it. */
+    onTap: () -> Unit = {},
 ) {
     var scale by remember(uri) { mutableFloatStateOf(1f) }
+    // Zoom is per page and never inherited from the one before it: opening a
+    // new page at 3x because the last one was zoomed reads as a bug.
     val transform = rememberTransformableState { zoom, _, _ ->
         scale = (scale * zoom).coerceIn(1f, 4f)
     }
     Column(
         Modifier
             .fillMaxWidth()
-            .pointerInput(Unit) { detectTapGestures(onTap = { onTap() }) },
     ) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
@@ -265,7 +337,16 @@ private fun ReaderPage(
                 )
             }
         }
-        PageImage(uri, index, pageCount, scale, transform, onRetry = { uri })
+        PageImage(
+            uri = uri,
+            index = index,
+            pageCount = pageCount,
+            scale = scale,
+            transform = transform,
+            onToggleZoom = { scale = if (scale > 1.01f) 1f else 2.5f },
+            onTap = onTap,
+            onRetry = { uri },
+        )
         if (!translation.isNullOrBlank()) {
             Surface(
                 color = MaterialTheme.colorScheme.surfaceVariant,
@@ -308,6 +389,9 @@ private fun PageImage(
     pageCount: Int,
     scale: Float,
     transform: androidx.compose.foundation.gestures.TransformableState,
+    /** Zoom belongs to the page, so the toggle is a request rather than a write. */
+    onToggleZoom: () -> Unit,
+    onTap: () -> Unit,
     onRetry: () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -348,7 +432,26 @@ private fun PageImage(
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize()
                     .graphicsLayer { scaleX = scale; scaleY = scale }
-                    .transformable(transform),
+                    // The zoom gesture is attached ONLY while zoomed in.
+                    //
+                    // It used to be attached unconditionally, which meant every
+                    // drag anywhere on a page was claimed as a zoom and the
+                    // scroll container and the pager never saw it. That is why
+                    // the strip would not scroll and a horizontal swipe would
+                    // not turn the page: not a layout problem, a gesture one.
+                    // At normal size the page hands every drag back, so
+                    // scrolling, paging and the back edge-swipe all work.
+                    .then(
+                        if (scale > 1.01f) Modifier.transformable(transform) else Modifier
+                    )
+                    // A double tap zooms, and a second one puts it back. It
+                    // only exists while there is something to zoom out of.
+                    .pointerInput(Unit) {
+                        detectTapGestures(
+                            onDoubleTap = { onToggleZoom() },
+                            onTap = { onTap() },
+                        )
+                    },
                 contentScale = ContentScale.Fit,
             )
             failed -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -405,11 +508,33 @@ private fun ReaderBar(
     /** The layout the reader is currently in, so the control can offer the other. */
     layoutMode: ReaderMode,
     onLayoutModeChange: (ReaderMode) -> Unit,
+    onOpenChapters: () -> Unit,
+    onOpenSettings: () -> Unit,
+    /** Lets the tools know a finger is on them, so they do not fade away. */
+    onInteractionChanged: (Boolean) -> Unit,
 ) {
     Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+                // While a finger is down on the tools they must not vanish
+                // under it. Released again on lift, so they can fade once
+                // reading has resumed - a flag that is only ever set would
+                // pin them open for good.
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false)
+                        onInteractionChanged(true)
+                        waitForUpOrCancellation()
+                        onInteractionChanged(false)
+                    }
+                }
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onBack) { Text(shura("common.back")) }
+                // The in-reader arrow. Independent of the system back button:
+                // both must work, and neither substitutes for the other.
+                TextButton(onClick = onBack) { Text("←") }
                 Text(
                     chapterTitle,
                     Modifier.weight(1f),
@@ -417,6 +542,9 @@ private fun ReaderBar(
                     style = MaterialTheme.typography.titleMedium,
                     textAlign = TextAlign.Center,
                 )
+                // The chapter list, reachable without leaving the chapter.
+                TextButton(onClick = onOpenChapters) { Text(shura("reader.chapters")) }
+                TextButton(onClick = onOpenSettings) { Text("⚙") }
                 // Chapter navigation follows reading order, which is the reverse
                 // of the visual direction in RTL - so the arrows are placed by
                 // reading order, not by text direction.
