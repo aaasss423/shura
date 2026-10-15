@@ -1,5 +1,7 @@
 from __future__ import annotations
 import re
+import shutil
+from pathlib import Path
 from shura_core.models import Candidate
 from shura_core.security.artifacts import ArtifactScanner,ScanVerdict
 from shura_core.security.malware import MalwareScanner
@@ -159,10 +161,23 @@ class CandidateProcessor:
         if not download:return {"verdict":"PENDING","reason":"artifact download deferred"}
         try:
             source=self.store.get_source(c.source_id);hosts=set(source.configuration.get("allowed_hosts",[])) if source else set(self.expected_hosts)
-            from shura_core.security.network import SafeHTTP
-            http=self.http_factory(hosts,timeout=30,max_bytes=self.scanner.max_size)
-            data,_,_=http.get(c.apk_url,max_bytes=self.scanner.max_size)
-            path=self.dir/(c.source_id.replace("/","_")+"-"+c.identity.replace("/","_")+".apk");path.write_bytes(data)
+            # An artifact this project built is already on disk, and there is
+            # nothing to fetch. Without this the processor downloaded the
+            # source's *website* and tried to scan that as an APK - which is
+            # how a locally built extension could never be published. The file
+            # is still scanned, malware-scanned and accepted below, so it goes
+            # through exactly the same gates as a downloaded one.
+            local=(c.metadata or {}).get("_artifact_path")
+            local_path=Path(local) if local else None
+            if local_path is not None and local_path.is_file():
+                path=self.dir/(c.source_id.replace("/","_")+"-"+c.identity.replace("/","_")+".apk")
+                if path.resolve()!=local_path.resolve():
+                    shutil.copyfile(local_path,path)
+            else:
+                from shura_core.security.network import SafeHTTP
+                http=self.http_factory(hosts,timeout=30,max_bytes=self.scanner.max_size)
+                data,_,_=http.get(c.apk_url,max_bytes=self.scanner.max_size)
+                path=self.dir/(c.source_id.replace("/","_")+"-"+c.identity.replace("/","_")+".apk");path.write_bytes(data)
             source=self.store.get_source(c.source_id)
             result=self.scanner.scan(path,expected_package=c.package,expected_certificate=source.configuration.get("signing_key"))
             if result.verdict!=ScanVerdict.CLEAN:

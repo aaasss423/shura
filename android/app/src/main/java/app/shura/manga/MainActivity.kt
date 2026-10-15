@@ -37,6 +37,32 @@ class MainActivity : ComponentActivity() {
 }
 
 private const val KEY_LANGUAGE = "ui-language"
+
+/**
+ * What an install row is doing right now.
+ *
+ * Named rather than a triple because it is read in a `when` in the store and
+ * a positional `Triple` there would be unreadable at exactly the moment it
+ * matters - deciding what a row is showing and why.
+ */
+private data class InstallProgress(
+    /** 0..1 while downloading; null when nothing is in flight. */
+    val fraction: Float? = null,
+    /** The real failure reason, shown next to the button that retries it. */
+    val message: String? = null,
+    val failed: Boolean = false,
+)
+
+/**
+ * Where extension artifacts are fetched from.
+ *
+ * A repository served over plain HTTP would be refused by the app's own
+ * `usesCleartextTraffic="false"`, so the base URL must be HTTPS. Nothing is
+ * installed until the bytes have been hashed and the certificate read out of
+ * the APK, so a wrong or hostile host here costs the user a failed download
+ * and nothing else.
+ */
+private const val REPOSITORY_BASE_URL = "https://shura.app/repository"
 private const val KEY_DARK = "ui-dark"
 
 @androidx.compose.runtime.Composable
@@ -47,8 +73,11 @@ private fun ShuraApp() {
 
     var language by remember {
         mutableStateOf(
-            runCatching { UiLanguage.valueOf(preferences.getString(KEY_LANGUAGE, "en") ?: "en") }
-                .getOrDefault(UiLanguage.ENGLISH)
+            // Arabic is Shura's first language. English is chosen, not
+            // defaulted: a user who wants it switches in Settings once.
+            runCatching {
+                UiLanguage.valueOf(preferences.getString(KEY_LANGUAGE, "ar") ?: "ar")
+            }.getOrDefault(UiLanguage.ARABIC)
         )
     }
     var dark by remember { mutableStateOf(preferences.getBoolean(KEY_DARK, true)) }
@@ -107,6 +136,65 @@ private fun ShuraApp() {
         }
     }
 
+
+    /**
+     * Downloads, verifies and installs one extension, reporting progress on
+     * its own row.
+     *
+     * The row is cleared of progress whatever happens, and a failure leaves the
+     * reason next to the button rather than only in a banner: a spinner that
+     * stops with no explanation is the least useful thing an install can do.
+     */
+    fun installExtension(
+        entry: app.shura.manga.ExtensionEntry,
+        state: MutableMap<String, InstallProgress>,
+        onChanged: () -> Unit,
+    ) {
+        val repositoryPackage = app.shura.runtime.RepositoryPackage(
+            pkg = entry.pkg,
+            version = entry.version,
+            apk = entry.artifactName,
+            lang = entry.lang,
+            identity = entry.identity,
+            artifactSha256 = entry.publishedSha256,
+            signingCertificateSha256 = entry.signer,
+            indexVersionCode = entry.versionCode,
+            indexExtensionLib = null,
+        )
+        scope.launch {
+            state[entry.pkg] = InstallProgress(fraction = 0f)
+            val installer = ExtensionInstaller(context, ShuraExtensions.policy)
+            val result = installer.install(
+                repositoryPackage,
+                REPOSITORY_BASE_URL,
+            ) { done, total ->
+                if (total > 0) {
+                    state[entry.pkg] = InstallProgress(
+                        fraction = (done.toFloat() / total).coerceIn(0f, 1f),
+                    )
+                }
+            }
+            state[entry.pkg] = when (result) {
+                is app.shura.manga.InstallResult.Installed -> {
+                    // Only now, after the bytes are on disk and verified, is
+                    // the source actually registered. Saying "installed"
+                    // before this point is the lie the store must not tell.
+                    val failures = withContext(Dispatchers.IO) {
+                        ShuraRepository.reload(sourceHost, context)
+                    }
+                    onChanged()
+                    if (failures.isEmpty()) InstallProgress()
+                    else InstallProgress(message = failures.joinToString("\n"), failed = true)
+                }
+                is app.shura.manga.InstallResult.DownloadFailed ->
+                    InstallProgress(message = result.reason, failed = true)
+                is app.shura.manga.InstallResult.Refused ->
+                    InstallProgress(message = result.reason, failed = true)
+            }
+            onChanged()
+        }
+    }
+
     val repositoryPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
     ) { tree ->
@@ -161,8 +249,26 @@ private fun ShuraApp() {
     var storeVersion by remember { mutableIntStateOf(0) }
     // Bumped when extensions are removed, so the source list is re-read.
     var sourcesVersion by remember { mutableIntStateOf(0) }
+
+    // The repository this build ships, unpacked once so the store has real
+    // extensions to show instead of an empty list.
+    LaunchedEffect(Unit) {
+        if (RepositorySeed.seed(context)) {
+            val failures = withContext(Dispatchers.IO) {
+                ShuraRepository.reload(sourceHost, context)
+            }
+            repositoryNotice = failures.takeIf { it.isNotEmpty() }?.joinToString("\n")
+            storeVersion++
+        }
+    }
+
+
     val catalog = remember(storeVersion) { ExtensionCatalog.forBuild(context) }
-    val extensions = remember(storeVersion, catalog) { catalog.describe(catalog.directory) }
+    val extensions = remember(storeVersion, catalog) {
+        ExtensionCatalog.rowStates(catalog.describe(catalog.directory))
+    }
+    // Progress and failure text for the row being installed, keyed by package.
+    val installState = remember { mutableStateMapOf<String, InstallProgress>() }
 
     val history = remember(historyVersion) { progressStore.history() }
     val library = remember(libraryVersion) { indexStoredChapters(chapterStore(context)) }
@@ -323,14 +429,26 @@ private fun ShuraApp() {
         },
         library = library,
         repositoryNotice = repositoryNotice,
-        extensions = extensions,
+        extensions = remember(extensions, installState) {
+            extensions.map { row ->
+                val progress = installState[row.entry.pkg] ?: InstallProgress()
+                row.copy(
+                    progress = progress.fraction,
+                    message = progress.message,
+                    failed = progress.failed,
+                )
+            }
+        },
+        onInstallExtension = { entry -> installExtension(entry, installState) { storeVersion += 1 } },
         sourcesVersion = sourcesVersion,
         extensionCatalog = catalog,
         onRemoveExtension = { entry ->
             scope.launch {
                 val name = entry.identity
+                // Deletes the artifact the catalogue actually resolved, not a
+                // path rebuilt from the index - which would silently miss.
                 val removed = withContext(Dispatchers.IO) {
-                    File(catalog.directory, entry.apkPath).delete()
+                    entry.artifactPath?.let { File(it).delete() } ?: false
                 }
                 val failures = withContext(Dispatchers.IO) {
                     ShuraRepository.reload(sourceHost, context)

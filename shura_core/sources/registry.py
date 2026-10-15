@@ -7,7 +7,7 @@ from shura_core.security.network import validate_url
 
 class SourceConfigurationError(ValueError):pass
 class SourceRegistry:
-    KINDS={"index","github-releases","html"}
+    KINDS={"index","github-releases","html","local-artifact"}
     def __init__(self,store):self.store=store
     @classmethod
     def parse_file(cls,path):

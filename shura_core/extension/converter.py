@@ -224,11 +224,21 @@ def build_plan(descriptor, *, observed_hrefs: list[str] | None = None,
             plan.blockers.append(
                 "the images this site served did not match the page image pattern, "
                 "so reading pages could not be located")
-        elif not plan.page_image_prefix:
-            plan.blockers.append(
-                "the images this site served share no path that identifies the "
-                "chapter they belong to, so a cover or a logo could not be told "
-                "apart from a reading page")
+    # Unconditional, not only when pages were observed.
+    #
+    # The guard used to sit in an `elif observed_pages:` branch, so a site that
+    # served no pages at all skipped it and produced a module whose page prefix
+    # was the empty pattern - which matches every string, so the reader would
+    # have accepted a logo as a chapter page. And when the prefix was missing
+    # entirely the generated Kotlin did not compile, which is how a module came
+    # to be "built" without ever having worked. Refusing here is the only place
+    # both failures are visible before they reach a build.
+    if not plan.page_image_prefix:
+        plan.blockers.append(
+            "no page path prefix could be established for this site, so a "
+            "reading page could not be told apart from a cover or a logo, and "
+            "the module would not compile. Prove the prefix from this site's "
+            "own chapter pages before building it.")
     observed = list(observed_hrefs or [])
     if not observed:
         plan.blockers.append(

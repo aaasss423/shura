@@ -3,26 +3,62 @@ package app.shura.runtime
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** `repo.json`: the repository trust anchor. */
+/**
+ * `repo.json`: the repository's own trust anchor.
+ *
+ * [signingKeyFingerprints] is every publisher whose artifacts this repository
+ * carries. It started as a single field and became a list because a repository
+ * that can only speak for one key can only ever contain one publisher's
+ * extensions: Shura signs its own with its own key and a third-party Arabic
+ * source with theirs, so a single-key index structurally cannot hold both. That
+ * is the mechanical reason the store showed exactly one extension.
+ *
+ * The anchor still means what it meant. It is pinned out of band and is never
+ * read from the repository it certifies. What changed is that each artifact is
+ * checked against the publisher trusted for *its own package*, and the
+ * repository only has to declare that it carries that publisher.
+ */
 data class RepositoryMeta(
     val name: String,
     val website: String,
     val signingKeyFingerprint: String,
+    val signingKeyFingerprints: List<String> = listOf(signingKeyFingerprint),
 ) {
     companion object {
+        private val HEX = Regex("[0-9a-fA-F]{64}")
+
         fun parse(text: String): RepositoryMeta {
             val meta = JSONObject(text).optJSONObject("meta")
                 ?: throw LoadFailure.Manifest("repo.json has no meta object")
-            val fingerprint = meta.optString("signingKeyFingerprint")
-            if (!fingerprint.matches(Regex("[0-9a-fA-F]{64}"))) {
+            val legacy = meta.optString("signingKeyFingerprint")
+            if (!legacy.matches(HEX)) {
                 throw LoadFailure.Manifest(
-                    "repo.json signingKeyFingerprint '$fingerprint' is not a 64-hex certificate digest"
+                    "repo.json signingKeyFingerprint '$legacy' is not a 64-hex certificate digest"
+                )
+            }
+            val declared = meta.optJSONArray("signingKeyFingerprints")
+                ?.let { array -> (0 until array.length()).map { array.optString(it).lowercase() } }
+                .orEmpty()
+            // A malformed entry is refused rather than skipped: a repository
+            // that declares a key it cannot spell is not one to read loosely.
+            val publishers = (declared.ifEmpty { listOf(legacy.lowercase()) }).map {
+                if (!it.matches(HEX)) {
+                    throw LoadFailure.Manifest(
+                        "repo.json signingKeyFingerprints entry '$it' is not a 64-hex digest"
+                    )
+                }
+                it
+            }
+            if (legacy.lowercase() !in publishers) {
+                throw LoadFailure.Manifest(
+                    "repo.json declares $legacy but does not list it among its publishers"
                 )
             }
             return RepositoryMeta(
                 meta.optString("name"),
                 meta.optString("website"),
-                fingerprint.lowercase(),
+                legacy.lowercase(),
+                publishers.distinct(),
             )
         }
     }
@@ -64,8 +100,48 @@ data class RepositoryPackage(
     }
 }
 
+/**
+ * An index, and the set of publishers whose artifacts it carries.
+ *
+ * The publisher set travels with the index rather than living in repo.json
+ * because repo.json is the Keiyoushi-compatible shape, whose exact keys are a
+ * contract other clients read. index.shura.json is Shura's own file.
+ */
+data class ParsedRepositoryIndex(
+    val packages: List<RepositoryPackage>,
+    val publishers: List<String>,
+)
+
 object RepositoryIndex {
+    private val HEX64 = Regex("[0-9a-fA-F]{64}")
+
     fun parse(text: String): List<RepositoryPackage> = RepositoryPackage.parseAll(text)
+
+    /**
+     * Parses the packages and the declared publishers.
+     *
+     * An index with no publisher list falls back to its own singular
+     * fingerprint, so a repository written before multi-publisher support still
+     * parses. One with neither falls back to [fallbackPublishers] - and if that
+     * is empty too, the anchor check refuses everything rather than trusting a
+     * repository that never said who signs for it.
+     */
+    fun parseIndex(text: String, fallbackPublishers: List<String> = emptyList()): ParsedRepositoryIndex {
+        val declared = try {
+            JSONObject(text).optJSONArray("signing_key_fingerprints")
+                ?.let { array -> (0 until array.length()).map { array.optString(it).lowercase() } }
+                .orEmpty()
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val legacy = JSONObject(text).optString("signing_key_fingerprint").lowercase()
+        val publishers = when {
+            declared.isNotEmpty() -> declared
+            HEX64.matches(legacy) -> listOf(legacy)
+            else -> fallbackPublishers
+        }.filter { HEX64.matches(it) }.distinct()
+        return ParsedRepositoryIndex(RepositoryPackage.parseAll(text), publishers)
+    }
 }
 
 /**

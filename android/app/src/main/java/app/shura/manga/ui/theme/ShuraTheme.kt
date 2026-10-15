@@ -75,7 +75,7 @@ private val ShuraLight = lightColorScheme(
 /** The language the UI is currently speaking, for layout direction. */
 enum class UiLanguage(val code: String) { ARABIC("ar"), ENGLISH("en") }
 
-val LocalUiLanguage = compositionLocalOf { UiLanguage.ENGLISH }
+val LocalUiLanguage = compositionLocalOf { UiLanguage.ARABIC }
 
 /** True when the UI should lay out right-to-left. */
 val LocalIsRtl: Boolean

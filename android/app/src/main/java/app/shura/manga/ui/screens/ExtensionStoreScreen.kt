@@ -13,8 +13,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.Surface
@@ -29,6 +32,22 @@ import app.shura.manga.ExtensionEntry
 import app.shura.manga.ExtensionTrust
 import app.shura.manga.ui.shura
 
+/** Where a row is right now in its own lifecycle. */
+enum class ExtensionAction { INSTALL, UPDATE, REMOVE }
+
+/** One row's action, plus where it is in progress. */
+data class ExtensionRowState(
+    val entry: ExtensionEntry,
+    val action: ExtensionAction,
+    val installedVersion: String?,
+    val progress: Float?,
+    val message: String?,
+    val failed: Boolean,
+) {
+    /** The one thing this row can be asked to do right now. */
+    val isBusy: Boolean get() = progress != null
+}
+
 /**
  * The extension store.
  *
@@ -37,17 +56,20 @@ import app.shura.manga.ui.shura
  * [ExtensionCatalog], which uses the same [app.shura.manga.ShuraExtensions.policy]
  * the loader enforces - so a row never promises something load will refuse.
  *
- * Remove is the only action. Installing an extension needs bytes this app
- * cannot fetch on its own today, and a button that does nothing is worse than
- * its absence: it would say the app agreed to run something it has not.
+ * Every row states one action, and it is the action that is actually true:
+ * install when nothing is on the device, update when what is there is older
+ * than the index, remove when it is current. A row that offers "install" for
+ * something already installed is how a store starts lying.
  */
 @Composable
 fun ExtensionStoreScreen(
-    entries: List<ExtensionEntry>,
+    rows: List<ExtensionRowState>,
     catalog: ExtensionCatalog,
+    onInstall: (ExtensionEntry) -> Unit,
     onRemove: (ExtensionEntry) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val entries = rows.map { it.entry }
     LazyColumn(
         modifier.fillMaxSize().padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -76,11 +98,14 @@ fun ExtensionStoreScreen(
             }
         }
 
-        items(entries, key = { it.pkg }) { entry ->
+        items(rows, key = { row -> "${row.entry.pkg}@${row.entry.version}" }) { row ->
             ExtensionRow(
-                entry = entry,
-                whyNot = catalog.whyNot(entries, entry.pkg),
-                onRemove = { onRemove(entry) },
+                row = row,
+                // The reason for this exact row, not for whichever version of
+                // the same package happened to sort first.
+                whyNot = catalog.whyNot(entries, row.entry),
+                onInstall = { onInstall(row.entry) },
+                onRemove = { onRemove(row.entry) },
             )
         }
     }
@@ -88,10 +113,12 @@ fun ExtensionStoreScreen(
 
 @Composable
 private fun ExtensionRow(
-    entry: ExtensionEntry,
+    row: ExtensionRowState,
     whyNot: String?,
+    onInstall: () -> Unit,
     onRemove: () -> Unit,
 ) {
+    val entry = row.entry
     Card(
         colors = CardDefaults.cardColors(
             containerColor = if (entry.trust == ExtensionTrust.TRUSTED)
@@ -121,8 +148,52 @@ private fun ExtensionRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(8.dp))
-            Row {
-                TextButton(onClick = onRemove) { Text(shura("store.remove")) }
+            // The failure reason is shown where it happened, next to the
+            // button that retries it, rather than only in a banner the user
+            // may have scrolled past.
+            row.message?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (row.failed) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(6.dp))
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (row.progress != null) {
+                    LinearProgressIndicator(
+                        progress = { row.progress },
+                        modifier = Modifier.weight(1f),
+                    )
+                } else {
+                    when (row.action) {
+                        ExtensionAction.INSTALL -> Button(onClick = onInstall) {
+                            Text(shura("store.install"))
+                        }
+                        ExtensionAction.UPDATE -> Button(onClick = onInstall) {
+                            Text(shura("store.update"))
+                        }
+                        ExtensionAction.REMOVE -> OutlinedButton(onClick = onRemove) {
+                            Text(shura("store.remove"))
+                        }
+                    }
+                    // Remove stays available while an extension is installed,
+                    // so an unwanted source can always be taken off the list.
+                    if (row.action != ExtensionAction.REMOVE && entry.artifactPresent) {
+                        TextButton(onClick = onRemove) { Text(shura("store.remove")) }
+                    }
+                }
+            }
+            row.installedVersion?.let {
+                Text(
+                    shura("store.installed", it),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }

@@ -8,3 +8,4 @@ from .arabic import (ArabicSiteDiscovery,SeedFileFinder,SearchFinder,SearchProvi
 from .review import (record_review,reopen,candidate_records,candidate_status,
                      pending_candidates,decided_candidates,deferred_candidates,
                      ReviewError)
+from .local import LocalArtifactCrawler

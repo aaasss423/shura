@@ -14,12 +14,33 @@
         "objects.githubusercontent.com",
         "release-assets.githubusercontent.com"
       ],
-      "repository_url": "https://github.com/LoneVertex/mihon-extension-ar-procomic",
       "package": "eu.kanade.tachiyomi.extension.ar.procomic",
       "signing_key": "b655a474503f4471fdaf6ba35b9385f71d144669f3c28602c5b60b062022c41d",
+      "repository_url": "https://github.com/LoneVertex/mihon-extension-ar-procomic",
       "library": "tachiyomi",
-      "operator_notes": "accepted after operator review: v1.5.1 sha256 matches published release checksum 07e6788f...; package verified via aapt. Signing certificate digest (b655a474...) re-verified independently with apksigner verify --print-certs and keytool -printcert over the v1 META-INF certificate. The previously published pin (efd9a7f5...) was sha256 of that certificate with its 4-byte SEQUENCE header removed, which is not the fingerprint Android or any signing tool reports.",
-      "scan_policy": "malware_clamav_fail_closed_v2"
+      "operator_notes": "Third-party Arabic source. Its own certificate is pinned and is scoped only to its own package, so it cannot sign for anything else."
+    }
+  },
+  {
+    "source_id": "site:www.asurascans.com",
+    "name": "Asura Scans",
+    "url": "https://www.asurascans.com",
+    "kind": "local-artifact",
+    "language": "ar",
+    "region": "ar",
+    "enabled": true,
+    "configuration": {
+      "allowed_hosts": [
+        "asurascans.com",
+        "www.asurascans.com",
+        "cdn.asurascans.com"
+      ],
+      "package": "app.shura.extension.asurascans",
+      "signing_key": "9f02ca8a8946e77b0cd768b085cafa0037ffd598d5772f08690f862683118a18",
+      "repository_url": "https://www.asurascans.com",
+      "library": "shura",
+      "artifact_path": "android/shura-extension-asurascans/build/outputs/apk/release/shura-extension-asurascans-release.apk",
+      "operator_notes": "Shura's own Arabic source, built from this project's generator and signed with the Shura publisher key. The signing key here is the operator's, held out of Git and injected at build time; it is the same digest the app pins, which is what lets this artifact run at all."
     }
   }
 ]

@@ -43,15 +43,32 @@ class ExtensionCatalogTest {
         return dir
     }
 
-    private fun row(pkg: String, signer: String, identity: String = "Work") =
-        """{"pkg":"$pkg","version":"1.0","apk":"apk/$pkg.apk","lang":"en",
+    /**
+     * Written the way the real publisher writes it: a bare artifact name, with
+     * the APK sitting under `apk/`. An earlier version of this test used
+     * "apk/<name>", a shape the publisher never emits, and so hid a bug that
+     * made every extension read as "not on device".
+     */
+    private fun row(
+        pkg: String,
+        signer: String,
+        identity: String = "Work",
+        version: String = "1.0",
+        code: String = "1",
+    ) = """{"pkg":"$pkg","version":"$version","apk":"$pkg-$version.apk","lang":"en",
             "identity":"$identity","artifact_sha256":"${"d".repeat(64)}",
-            "signing_certificate_sha256":"$signer","index_version_code":"1"}"""
+            "signing_certificate_sha256":"$signer","index_version_code":"$code"}"""
+
+    /** Puts an artifact where the installer actually puts one. */
+    private fun publish(dir: File, pkg: String, version: String = "1.0") {
+        File(dir, "apk").mkdirs()
+        File(dir, "apk/$pkg-$version.apk").writeText("apk")
+    }
 
     @Test
     fun `an extension signed by a pinned publisher in scope is trusted`() {
         val dir = index(row("eu.kanade.tachiyomi.extension.ar.procomic", procomicSigner))
-        File(dir, "apk/eu.kanade.tachiyomi.extension.ar.procomic.apk").writeText("apk")
+        publish(dir, "eu.kanade.tachiyomi.extension.ar.procomic")
 
         val entry = ExtensionCatalog(policy(), dir).describe(dir).single()
         assertEquals(ExtensionTrust.TRUSTED, entry.trust)
@@ -62,7 +79,7 @@ class ExtensionCatalogTest {
         // The signature is genuine. The authority simply does not cover this
         // package - which is the whole point of scoping a publisher.
         val dir = index(row("app.shura.extension.evil", procomicSigner))
-        File(dir, "apk/app.shura.extension.evil.apk").writeText("apk")
+        publish(dir, "app.shura.extension.evil")
 
         val entry = ExtensionCatalog(policy(), dir).describe(dir).single()
         assertEquals(ExtensionTrust.OUT_OF_SCOPE, entry.trust)
@@ -71,13 +88,13 @@ class ExtensionCatalogTest {
     @Test
     fun `an unknown signer is refused`() {
         val dir = index(row("app.shura.extension.asurascans", strangerSigner))
-        File(dir, "apk/app.shura.extension.asurascans.apk").writeText("apk")
+        publish(dir, "app.shura.extension.asurascans")
 
         val catalog = ExtensionCatalog(policy(), dir)
         val entry = catalog.describe(dir).single()
         assertEquals(ExtensionTrust.UNKNOWN_PUBLISHER, entry.trust)
         // And the store must say why, rather than just greying the row out.
-        assertTrue(catalog.whyNot(listOf(entry), entry.pkg)!!.contains("does not trust"))
+        assertTrue(catalog.whyNot(listOf(entry), entry)!!.contains("does not trust"))
     }
 
     @Test
@@ -95,7 +112,7 @@ class ExtensionCatalogTest {
         // No publishers at all: the build has no Shura key. Every extension must
         // read as untrusted, not as trusted-by-omission.
         val dir = index(row("app.shura.extension.asurascans", shuraSigner))
-        File(dir, "apk/app.shura.extension.asurascans.apk").writeText("apk")
+        publish(dir, "app.shura.extension.asurascans")
         val empty = TrustPolicy(TrustAnchor("f".repeat(64)), emptyList())
 
         val catalog = ExtensionCatalog(empty, dir)
@@ -122,11 +139,47 @@ class ExtensionCatalogTest {
             row("eu.kanade.tachiyomi.extension.ar.procomic", procomicSigner, "ProComic"),
             row("app.shura.extension.asurascans", strangerSigner, "Asura"),
         )
-        File(dir, "apk/eu.kanade.tachiyomi.extension.ar.procomic.apk").writeText("apk")
-        File(dir, "apk/app.shura.extension.asurascans.apk").writeText("apk")
+        publish(dir, "eu.kanade.tachiyomi.extension.ar.procomic")
+        publish(dir, "app.shura.extension.asurascans")
 
         val catalog = ExtensionCatalog(policy(), dir)
         val entries = catalog.describe(dir)
         assertEquals(listOf("ProComic"), catalog.runnable(entries).map { it.identity })
+    }
+
+    @Test
+    fun `two versions of one package are an update, not two extensions`() {
+        val pkg = "eu.kanade.tachiyomi.extension.ar.procomic"
+        val dir = index(
+            row(pkg, procomicSigner, "ProComic", "v1.5.0", "6"),
+            row(pkg, procomicSigner, "ProComic", "v1.5.1", "7"),
+        )
+        publish(dir, pkg, "v1.5.0")
+
+        val catalog = ExtensionCatalog(policy(), dir)
+        val entries = catalog.describe(dir)
+        // Both rows exist in the index...
+        assertEquals(2, entries.size)
+        // ...but the store shows one, at the newest version, which is exactly
+        // the "only one extension" symptom the real repository produced.
+        val shown = ExtensionCatalog.newestPerPackage(entries)
+        assertEquals(1, shown.size)
+        assertEquals("v1.5.1", shown.single().version)
+    }
+
+    @Test
+    fun `an artifact name cannot escape the apk directory`() {
+        // The index is remote input. A traversal there would let a repository
+        // address a file outside the directory it was installed into.
+        val pkg = "app.shura.extension.evil"
+        val dir = index(row(pkg, strangerSigner))
+        File(dir, ExtensionCatalog.INDEX_FILE).writeText(
+            """{"packages":[{"pkg":"$pkg","version":"1.0","apk":"../../etc/passwd","lang":"en",
+                "identity":"x","artifact_sha256":"","signing_certificate_sha256":"$strangerSigner",
+                "index_version_code":"1"}]}"""
+        )
+        val entry = ExtensionCatalog(policy(), dir).describe(dir).single()
+        assertEquals(ExtensionTrust.NOT_DOWNLOADED, entry.trust)
+        assertEquals(null, entry.artifactPath)
     }
 }

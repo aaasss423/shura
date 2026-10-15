@@ -1,7 +1,7 @@
 from collections import Counter
 from time import monotonic
 from urllib.parse import urlparse
-from shura_core.crawler import IndexCrawler,GitHubReleasesCrawler,HtmlListingCrawler
+from shura_core.crawler import IndexCrawler,GitHubReleasesCrawler,HtmlListingCrawler,LocalArtifactCrawler
 from shura_core.security.network import SafeHTTP
 
 class CrawlCoordinator:
@@ -20,10 +20,10 @@ class CrawlCoordinator:
                 hosts=set(source.configuration.get("allowed_hosts",[]))
                 if not hosts:raise ValueError("source must configure explicit allowed_hosts")
                 http=self.http_factory(hosts,timeout=source.configuration.get("timeout",15),max_bytes=source.configuration.get("max_response_bytes",8_000_000))
-                crawler={"index":IndexCrawler,"github-releases":GitHubReleasesCrawler,"html":HtmlListingCrawler}.get(source.kind)
+                crawler={"index":IndexCrawler,"github-releases":GitHubReleasesCrawler,"html":HtmlListingCrawler,"local-artifact":LocalArtifactCrawler}.get(source.kind)
                 if not crawler:raise ValueError(f"unsupported source kind: {source.kind}")
                 page_left=max(0,self.max_pages-self.counters["pages"]);candidate_left=max(0,self.max_candidates-self.counters["discovered"])
-                instance=crawler(http) if source.kind!="html" else crawler(http,page_left)
+                instance=crawler(http) if source.kind not in ("html",) else crawler(http,page_left)
                 result=instance.crawl(source,{"max_pages":page_left,"max_candidates":candidate_left})
                 self.counters.update(result.counters);self.counters["pages"]+=result.pages
                 fresh=[]

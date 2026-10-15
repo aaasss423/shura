@@ -52,26 +52,35 @@ class ShuraRepositoryClient(
     fun trustAnchor(): String = expectedAnchor.require()
 
     /**
-     * Rejects the repository outright when its declared anchor is not the one
-     * configured. Checked before any entry is looked at.
+     * Rejects the repository outright when this build's anchor is not among the
+     * publishers it declares. Checked before any entry is looked at.
+     *
+     * The check is membership, not equality, because a repository legitimately
+     * carries more than one publisher's extensions. It is no weaker than the
+     * equality it replaces: the configured anchor still has to be declared by
+     * the repository, it is still never read from the repository, and every
+     * individual artifact is still checked against the publisher trusted for
+     * its own package.
      */
-    private fun requireAnchorMatches(): String {
-        val expected = expectedAnchor.require()
-        val declared = repoMeta.signingKeyFingerprint
-        if (declared.lowercase() != expected.lowercase()) {
+    private fun requireAnchorMatches(publishers: List<String>): String {
+        val expected = expectedAnchor.require().lowercase()
+        val declared = publishers.map { it.lowercase() }
+        if (expected !in declared) {
             throw LoadFailure.NotVerified(
-                "repository anchor mismatch: it declares $declared but $expected was configured. " +
-                    "Either the repository is not the one this build trusts, or its metadata was replaced."
+                "repository anchor mismatch: this build trusts $expected but the repository " +
+                    "declares ${declared.joinToString()}. Either the repository is not the one this " +
+                    "build trusts, or its metadata was replaced."
             )
         }
-        return declared
+        return expected
     }
 
     fun entries(): List<RepositoryPackage> {
-        requireAnchorMatches()
         val text = File(root, "index.shura.json").takeIf { it.isFile }?.readText()
             ?: throw LoadFailure.Manifest("index.shura.json is missing under $root")
-        return RepositoryIndex.parse(text)
+        val index = RepositoryIndex.parseIndex(text, repoMeta.signingKeyFingerprints)
+        requireAnchorMatches(index.publishers)
+        return index.packages
     }
 
     /**
@@ -85,6 +94,14 @@ class ShuraRepositoryClient(
      * are all read from the copy -- the exact bytes the class loader is handed.
      */
     fun verify(entry: RepositoryPackage): VerifiedExtension {
+        // The repository's anchor is checked once, before any artifact is
+        // touched, and its publisher set is read from the same parse.
+        val index = RepositoryIndex.parseIndex(
+            File(root, "index.shura.json").takeIf { it.isFile }?.readText()
+                ?: throw LoadFailure.Manifest("index.shura.json is missing under $root"),
+            repoMeta.signingKeyFingerprints,
+        )
+        requireAnchorMatches(index.publishers)
         // `apk` comes from the index, which comes from the network. Resolving it
         // unchecked let a repository name "../../../somewhere/else" and the read,
         // the digest and the later delete would all happen outside the

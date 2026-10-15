@@ -18,7 +18,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.runtime.*
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.Composable
@@ -127,7 +129,9 @@ fun ShuraRoot(
     repositoryNotice: String?,
     onImport: () -> Unit,
     onInstallRepository: () -> Unit,
-    extensions: List<app.shura.manga.ExtensionEntry> = emptyList(),
+    extensions: List<app.shura.manga.ui.screens.ExtensionRowState> = emptyList(),
+    /** Downloads and verifies one extension, then makes it available. */
+    onInstallExtension: (app.shura.manga.ExtensionEntry) -> Unit = {},
     /** Bumped on removal so the source list is re-read rather than cached. */
     sourcesVersion: Int = 0,
     extensionCatalog: app.shura.manga.ExtensionCatalog? = null,
@@ -159,7 +163,32 @@ fun ShuraRoot(
                     androidx.compose.ui.unit.LayoutDirection.Rtl
                 else androidx.compose.ui.unit.LayoutDirection.Ltr,
         ) {
-            var route by remember { mutableStateOf<ShuraScreen>(ShuraScreen.Home) }
+            // A real back stack, not one screen with a name.
+            //
+            // The reader used to be `route = Reader(...)` on a single state
+            // variable, which means there was nowhere to go *back* to: Android's
+            // back button had no handler at all and either did nothing or left
+            // the app, so a chapter could only be left through Shura's own
+            // arrow. Every navigation now pushes, and back pops.
+            val backStack = remember { mutableStateListOf<ShuraScreen>(ShuraScreen.Home) }
+            val route = backStack.last()
+
+            fun go(target: ShuraScreen) {
+                if (backStack.last() == target) return
+                backStack.add(target)
+            }
+
+            /** Pops to the previous screen. False when Home is already showing. */
+            fun back(): Boolean {
+                if (backStack.size <= 1) return false
+                backStack.removeAt(backStack.lastIndex)
+                return true
+            }
+
+            // The system back button and the edge-swipe gesture both arrive
+            // here. Reader included, and regardless of whether its tools are
+            // showing - the chapter is not a trap either way.
+            androidx.activity.compose.BackHandler(enabled = backStack.size > 1) { back() }
             var settings by remember { mutableStateOf(nav.settingsStore.load()) }
             var libraryState by remember { mutableStateOf(library) }
             // The chapters the list screen fetched, carried into the reader so
@@ -180,7 +209,7 @@ fun ShuraRoot(
                 cover: String = "",
             ) {
                 if (source == null) return
-                route = ShuraScreen.Reader(sourceId, mangaTitle, chapter, chapters)
+                go(ShuraScreen.Reader(sourceId, mangaTitle, chapter, chapters))
                 onFetchChapter(source, chapter, cover)
             }
 
@@ -194,12 +223,16 @@ fun ShuraRoot(
                     ShuraBottomBar(
                         current = route,
                         onNavigate = { target ->
-                            route = when (target) {
+                            // A tab is a root, so it replaces the stack rather
+                            // than growing it; otherwise back would walk out of
+                            // the app through every tab ever visited.
+                            backStack.clear()
+                            go(when (target) {
                                 ShuraScreen.Home -> ShuraScreen.Home
                                 ShuraScreen.Sources -> ShuraScreen.Sources
                                 ShuraScreen.Library -> ShuraScreen.Library
                                 else -> ShuraScreen.Settings
-                            }
+                            })
                         },
                     )
                 },
@@ -234,15 +267,15 @@ fun ShuraRoot(
                                     }
                                 }
                             },
-                            onBrowse = { route = ShuraScreen.Sources },
-                            onOpenLibrary = { route = ShuraScreen.Library },
+                            onBrowse = { go(ShuraScreen.Sources) },
+                            onOpenLibrary = { go(ShuraScreen.Library) },
                             onImport = onImport,
                         )
 
                         is ShuraScreen.Sources -> SourcePickerScreen(
                             sources = remember(sourcesVersion) { nav.sourceHost.all() },
-                            onPick = { route = ShuraScreen.Search(it.id) },
-                            onOpenSettings = { route = ShuraScreen.Settings },
+                            onPick = { go(ShuraScreen.Search(it.id)) },
+                            onOpenSettings = { go(ShuraScreen.Settings) },
                         )
 
                         is ShuraScreen.Library -> LibraryScreen(
@@ -259,15 +292,15 @@ fun ShuraRoot(
                                         val resolved = ChapterResume.resolve(
                                             stored, fetchChapters(source, entry.mangaId),
                                         )
-                                        route = ShuraScreen.Reader(
+                                        go(ShuraScreen.Reader(
                                             entry.sourceId, entry.title,
                                             resolved.chapter, resolved.chapters,
-                                        )
+                                        ))
                                     }
                                 } else {
-                                    route = ShuraScreen.Reader(
+                                    go(ShuraScreen.Reader(
                                         entry.sourceId, entry.title, stored, emptyList(),
-                                    )
+                                    ))
                                 }
                             },
                             onDelete = { entry ->
@@ -283,7 +316,7 @@ fun ShuraRoot(
                             onDark = onDark,
                             repositoryNotice = repositoryNotice,
                             onInstallRepository = onInstallRepository,
-                            onOpenStore = { route = ShuraScreen.Extensions },
+                            onOpenStore = { go(ShuraScreen.Extensions) },
                         )
 
                         is ShuraScreen.Extensions -> {
@@ -293,7 +326,7 @@ fun ShuraRoot(
                                     Modifier.fillMaxWidth().padding(8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    TextButton(onClick = { route = ShuraScreen.Settings }) {
+                                    TextButton(onClick = { back() }) {
                                         Text(shura("common.back"))
                                     }
                                 }
@@ -301,8 +334,9 @@ fun ShuraRoot(
                                     StatePanel(shura("common.error"), "")
                                 } else {
                                     ExtensionStoreScreen(
-                                        entries = extensions,
+                                        rows = extensions,
                                         catalog = catalog,
+                                        onInstall = onInstallExtension,
                                         onRemove = onRemoveExtension,
                                     )
                                 }
@@ -316,9 +350,9 @@ fun ShuraRoot(
                                 source = source,
                                 onOpenManga = { manga ->
                                     nav.rememberCover(screen.sourceId, manga.title, manga.coverUrl)
-                                    route = ShuraScreen.Details(screen.sourceId, manga)
+                                    go(ShuraScreen.Details(screen.sourceId, manga))
                                 },
-                                onBack = { route = ShuraScreen.Sources },
+                                onBack = { back() },
                             )
                         }
 
@@ -332,9 +366,9 @@ fun ShuraRoot(
                                 onToggleLibrary = { /* library holds chapters, not works */ },
                                 onReadLatest = { },
                                 onOpenChapters = {
-                                    route = ShuraScreen.Chapters(screen.sourceId, screen.manga)
+                                    go(ShuraScreen.Chapters(screen.sourceId, screen.manga))
                                 },
-                                onBack = { route = ShuraScreen.Search(screen.sourceId) },
+                                onBack = { back() },
                             )
                         }
 
@@ -350,7 +384,7 @@ fun ShuraRoot(
                                         chapter, loadedChapters, screen.manga.coverUrl.orEmpty())
                                 },
                                 onChaptersLoaded = { loadedChapters = it },
-                                onBack = { route = ShuraScreen.Search(screen.sourceId) },
+                                onBack = { back() },
                             )
                         }
 

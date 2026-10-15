@@ -153,12 +153,23 @@ class RepositoryPublisher:
                 str(item.get("version", ""))),
         }
 
-    def _signing_fingerprint(self, items: list[dict]) -> str:
+    def _signing_fingerprint(self, items: list[dict]) -> tuple[str, list[str]]:
         """Derive the repository signing key and fail closed on any absence or
-        disagreement. Mihon/Keiyoushi trust one SHA-256 certificate fingerprint
-        per repository (``meta.signingKeyFingerprint`` / proto ``signingKey``),
-        so every published APK must share the same signer."""
+        disagreement.
+
+        Returns the primary fingerprint and the full set of publishers the
+        repository carries.
+
+        The single-fingerprint rule came from Mihon/Keiyoushi, which trust one
+        key per repository. Shura is not Mihon: its client checks each artifact
+        against the publisher trusted for that artifact's own package, and the
+        repository anchor only has to be one of the publishers it declares. That
+        distinction is what lets one repository carry both Shura's own signed
+        extensions and a third-party Arabic source, instead of structurally
+        being able to hold exactly one publisher's work.
+        """
         fingerprints = set()
+        fingerprints_count: dict[str, int] = {}
         for item in items:
             security = (item.get("metadata", {}) or {}).get("_security", {}) or {}
             certificate = str(security.get("certificate") or "").lower().replace(":", "")
@@ -175,12 +186,13 @@ class RepositoryPublisher:
                     f"certificate {certificate} differs from configured signing_key {expected}"
                 )
             fingerprints.add(certificate)
-        if len(fingerprints) > 1:
-            raise PublishRefused(
-                "refusing to publish: repository contains APKs signed by multiple keys "
-                f"{', '.join(sorted(fingerprints))}; Mihon/Keiyoushi trust exactly one signing fingerprint per repo"
-            )
-        return fingerprints.pop()
+            fingerprints_count[certificate] = fingerprints_count.get(certificate, 0) + 1
+        ordered = sorted(fingerprints)
+        # The primary is the one that signs the majority, so a repository that
+        # is mostly Shura's own work still pins Shura's key first and stays
+        # compatible with a client that reads the singular field.
+        primary = max(ordered, key=lambda f: fingerprints_count.get(f, 0))
+        return primary, ordered
 
     def _content_gate(self, items: list[dict]) -> None:
         """Final publication gate on the content classification.
@@ -255,7 +267,7 @@ class RepositoryPublisher:
 
         Returns ``(signing_key_fingerprint, rollback_callable)``.
         """
-        fingerprint = self._signing_fingerprint(items)
+        fingerprint, publishers = self._signing_fingerprint(items)
         self._content_gate(items)
         self._security_gate(items)
         base_url = os.getenv("SHURA_REPO_BASE_URL", "").rstrip("/")
@@ -313,6 +325,12 @@ class RepositoryPublisher:
             output[self.root / "index.min.json"] = json.dumps(entries, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
             audit = {
                 "repo": "Shura",
+                # The full set of publishers this repository carries. Kept here
+                # rather than in repo.json on purpose: repo.json is the
+                # Keiyoushi-compatible shape, which the client contract tests
+                # pin exactly, and adding a field to it would break that for
+                # every other client. index.shura.json is Shura's own file.
+                "signing_key_fingerprints": publishers,
                 "generated_at": generated_at,
                 "signing_key_fingerprint": fingerprint,
                 "packages": [self._audit_entry(x) for x in items],
@@ -322,6 +340,8 @@ class RepositoryPublisher:
                 "meta": {
                     "name": "Shura",
                     "website": website,
+                    # Kept for clients that read one key, and made the primary
+                    # publisher so it is never the empty or surprising value.
                     "signingKeyFingerprint": fingerprint,
                 }
             }

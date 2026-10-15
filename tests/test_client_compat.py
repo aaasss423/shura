@@ -441,17 +441,52 @@ class SigningGateTests(unittest.TestCase):
         self.assertIn("signing certificate fingerprint", str(ctx.exception))
         self.assertFalse((self.repo / "index.json").exists())
 
-    def test_multiple_signing_keys_fail_closed(self):
+    def test_a_repository_may_carry_more_than_one_publisher(self):
+        # Shura's client checks each artifact against the publisher trusted for
+        # its own package and reads the certificate out of the APK, so a
+        # repository does not have to hold exactly one key. Forbidding that
+        # here is what made the app's store structurally able to show only one
+        # extension: Shura signs its own, a third-party Arabic source signs
+        # theirs, and only one could ever be published.
+        second = Source("s2", "other", "https://example.org/other.json", "index", "ar",
+                        configuration={"allowed_hosts": ["example.org"], "signing_key": CERT_OTHER})
+        self.store.add_source(second)
+        self.accept_and_publish(
+            self.candidate("1.0", source_id="s1", certificate=CERT),
+            self.candidate("2.0", source_id="s2", certificate=CERT_OTHER),
+        )
+        # repo.json keeps its exact Keiyoushi shape - the other contract tests
+        # pin that and other clients read it - so the publisher set lives in
+        # Shura's own index instead.
+        repo_doc = json.loads((self.repo / "repo.json").read_text())
+        self.assertEqual(
+            {"name", "website", "signingKeyFingerprint"}, set(repo_doc["meta"].keys()))
+        self.assertIn(repo_doc["meta"]["signingKeyFingerprint"].lower(),
+                      {CERT.lower(), CERT_OTHER.lower()})
+        index = json.loads((self.repo / "index.shura.json").read_text())
+        self.assertEqual(2, len(index["packages"]))
+        self.assertEqual({CERT.lower(), CERT_OTHER.lower()},
+                         set(index["signing_key_fingerprints"]))
+        # Each entry still carries its own signer, so the per-package check the
+        # client performs is still possible.
+        self.assertEqual(
+            {CERT.lower(), CERT_OTHER.lower()},
+            {p["signing_certificate_sha256"] for p in index["packages"]},
+        )
+
+    def test_a_package_with_no_certificate_at_all_still_fails_closed(self):
+        # Mixing publishers must not weaken the per-artifact check: an artifact
+        # with no verified signer is still refused outright.
         second = Source("s2", "other", "https://example.org/other.json", "index", "ar",
                         configuration={"allowed_hosts": ["example.org"], "signing_key": CERT_OTHER})
         self.store.add_source(second)
         with self.assertRaises(PublishRefused) as ctx:
             self.accept_and_publish(
                 self.candidate("1.0", source_id="s1", certificate=CERT),
-                self.candidate("2.0", source_id="s2", certificate=CERT_OTHER),
+                self.candidate("2.0", source_id="s2", certificate=None),
             )
-        self.assertIn("multiple keys", str(ctx.exception))
-        self.assertFalse((self.repo / "index.json").exists())
+        self.assertIn("signing certificate fingerprint", str(ctx.exception))
+        self.assertFalse((self.repo / "index.shura.json").exists())
 
     def test_signing_key_mismatch_with_configured_key_fails_closed(self):
         with self.assertRaises(PublishRefused) as ctx:

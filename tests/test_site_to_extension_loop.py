@@ -22,6 +22,13 @@ from shura_core.extension.converter import (ExtensionPlan, build_plan,
 # Observed on www.mangaarabia.com/index.php/ar/node, the live Arabic catalogue.
 OBSERVED = [f"/index.php/ar/node/{n}" for n in (13026, 13101, 13604, 13671, 13916)]
 
+# Reading pages observed on a chapter page, of the shape the converter can
+# derive a prefix from. Generation is only allowed when this exists: a site
+# whose reading pages were never observed yields a module whose page pattern
+# matches everything, which the reader would fill with logos and covers.
+PAGES = [f"/sites/default/files/chapters/work-{n}/page-{i}.jpg"
+         for n in (13026,) for i in range(1, 19)]
+
 
 def _descriptor(**overrides) -> SiteDescriptor:
     fields = dict(
@@ -124,7 +131,7 @@ class RefusalIsARefusal(unittest.TestCase):
             self.assertRegex(src, PAGE_IMAGE)
         plan = plan_for(_descriptor(), observed_hrefs=OBSERVED, observed_page_images=chrome)
         self.assertFalse(plan.publishable)
-        self.assertIn("share no path that identifies the chapter", plan.reason())
+        self.assertIn("no page path prefix could be established", plan.reason())
 
     def test_pages_are_found_by_the_directory_they_share_not_by_extension(self):
         from shura_core.extension.converter import PAGE_IMAGE, build_plan as plan_for
@@ -141,6 +148,15 @@ class RefusalIsARefusal(unittest.TestCase):
         for cover in covers:
             self.assertRegex(cover, PAGE_IMAGE)
 
+    def test_a_site_whose_pages_were_never_observed_is_refused(self):
+        # No observed pages means no prefix could be derived, so there is
+        # nothing to tell a reading page from a logo. Generating anyway is what
+        # produced a module that matched every image and did not compile.
+        plan = build_plan(_descriptor(), observed_hrefs=OBSERVED,
+                          observed_page_images=[])
+        self.assertTrue(plan.blockers, plan.reason())
+        self.assertIn("page path prefix", plan.reason())
+
     def test_a_site_with_no_page_image_pattern_is_refused(self):
         plan = build_plan(_descriptor(), observed_hrefs=OBSERVED, page_image="")
         self.assertFalse(plan.publishable)
@@ -150,7 +166,8 @@ class RefusalIsARefusal(unittest.TestCase):
 class TheGeneratedModuleIsReal(unittest.TestCase):
 
     def setUp(self):
-        self.plan = build_plan(_descriptor(), observed_hrefs=OBSERVED)
+        self.plan = build_plan(_descriptor(), observed_hrefs=OBSERVED,
+                               observed_page_images=PAGES)
         self.files = render_module(self.plan)
 
     def test_it_generates_the_three_files_a_module_needs(self):
