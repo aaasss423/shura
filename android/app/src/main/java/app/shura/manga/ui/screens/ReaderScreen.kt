@@ -62,6 +62,22 @@ fun ReaderScreen(
     cover: String = "",
     savedPage: Int,
     onProgress: (Int) -> Unit,
+    /**
+     * The page now on screen.
+     *
+     * Downloads follow this: the reader asks for what it is showing plus a few
+     * pages ahead, so scrolling forward never waits and scrolling back is warm.
+     */
+    onPageVisible: (Int) -> Unit = {},
+    /** Re-fetches one page that failed, without disturbing the rest. */
+    onRetryPage: ((Int) -> Unit)? = null,
+    /**
+     * The chapter's page count, which may exceed the pages downloaded so far.
+     *
+     * Falls back to the loaded count, so a stored chapter with nothing pending
+     * counts itself correctly.
+     */
+    totalPages: Int? = null,
     onPrevChapter: (() -> Unit)?,
     onNextChapter: (() -> Unit)?,
     onBack: () -> Unit,
@@ -86,7 +102,10 @@ fun ReaderScreen(
 
     LaunchedEffect(listState, pages.size) {
         androidx.compose.runtime.snapshotFlow { listState.firstVisibleItemIndex }
-            .collect { onProgress(it) }
+            .collect {
+                onProgress(it)
+                onPageVisible(it)
+            }
     }
 
     // Keep the chapter's own place when the page list arrives late: the reader
@@ -154,7 +173,7 @@ fun ReaderScreen(
                 cover = cover,
                 chapterTitle = chapterTitle,
                 currentPage = listState.firstVisibleItemIndex + 1,
-                pageCount = pages.size,
+                pageCount = totalPages ?: pages.size,
                 rtl = rtl,
                 onBack = onBack,
                 onProgress = { index ->

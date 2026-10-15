@@ -28,6 +28,7 @@ import app.shura.manga.ui.theme.ShuraTheme
 import app.shura.manga.ui.theme.UiLanguage
 import app.shura.source.Chapter
 import app.shura.source.MangaSummary
+import app.shura.source.Page
 import app.shura.source.ShuraSource
 
 /**
@@ -38,9 +39,20 @@ import app.shura.source.ShuraSource
  * handed the state it needs and returns a decision, so navigation state lives
  * here rather than being smeared across the composables.
  */
-/** Fetches a chapter's pages as local files the reader can decode. */
+/**
+ * Fetches a chapter's pages as local files the reader can decode.
+ *
+ * [pageAt] is the one progressive loading needs: given one page's reference,
+ * produce that page's file. [pages] stays for callers that genuinely want the
+ * whole chapter at once, such as saving it to the library.
+ */
 fun interface ChapterDownloader {
-    suspend fun pages(source: ShuraSource, chapterId: String): List<Uri>
+    suspend fun pageAt(source: ShuraSource, chapterId: String, page: Page): Uri
+
+    suspend fun pages(source: ShuraSource, chapterId: String): List<Uri> {
+        val refs = source.pages(chapterId)
+        return refs.map { pageAt(source, chapterId, it) }
+    }
 }
 
 class ShuraNav(
@@ -86,6 +98,12 @@ fun ShuraRoot(
     dark: Boolean,
     onDark: (Boolean) -> Unit,
     pages: List<Uri>,
+    /** Called with the page now on screen, so downloads can stay ahead of it. */
+    onPageVisible: (Int) -> Unit = {},
+    /** Re-fetches one failed page in place. */
+    onRetryPage: (Int) -> Unit = {},
+    /** The chapter's full page count, while [pages] holds only what has loaded. */
+    totalPages: () -> Int? = { null },
     isLoading: Boolean,
     loadError: String?,
     onRetry: () -> Unit,
@@ -295,9 +313,10 @@ fun ShuraRoot(
                         }
 
                         is ShuraScreen.Reader -> {
+                            val total = totalPages() ?: pages.size
                             val saved = nav.progressStore.pageFor(
                                 screen.sourceId, screen.mangaTitle, screen.chapter.id,
-                                pages.size.coerceAtLeast(1),
+                                total.coerceAtLeast(1),
                             )
                             // Null where there is nowhere to go, so the bar hides
                             // the arrow rather than offering a dead step.
@@ -313,6 +332,10 @@ fun ShuraRoot(
                                 cover = cover,
                                 savedPage = saved,
                                 onProgress = onProgressChanged,
+                                onPageVisible = onPageVisible,
+                                onRetryPage = onRetryPage,
+                                totalPages = total,
+
                                 onPrevChapter = previous?.let { c ->
                                     { openChapter(screen.sourceId, screen.mangaTitle, source, c, screen.chapters) }
                                 },

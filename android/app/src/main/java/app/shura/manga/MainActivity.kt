@@ -12,6 +12,7 @@ import androidx.compose.ui.platform.LocalContext
 import app.shura.host.MangaDexChapterDownloader
 import app.shura.host.MangaDexSource
 import app.shura.host.SourceHost
+import app.shura.manga.reader.ProgressivePageLoader
 import app.shura.manga.reader.ReadingProgress
 import app.shura.manga.reader.ReadingProgressStore
 import app.shura.manga.reader.translation.TranslationCache
@@ -125,11 +126,17 @@ private fun ShuraApp() {
     // declared after this call site, so capturing it eagerly reads a null.
     var installRequested by remember { mutableIntStateOf(0) }
     val nav = remember {
-        val downloader = ChapterDownloader { source, chapterId ->
+        // One page per call, so the reader can show page 1 while the rest
+        // download. The cache directory is keyed by chapter and page name, so
+        // re-opening a chapter reuses what already landed.
+        val chapterReader = MangaDexChapterDownloader()
+        val downloader = ChapterDownloader { _, chapterId, page ->
             withContext(Dispatchers.IO) {
-                val pageRefs = source.pages(chapterId)
-                val dir = File(context.cacheDir, "reader-${chapterId}".replace(Regex("[^A-Za-z0-9_.-]"), "_"))
-                MangaDexChapterDownloader().downloadChapter(pageRefs, dir).map { Uri.fromFile(it) }
+                val dir = File(
+                    context.cacheDir,
+                    "reader-$chapterId".replace(Regex("[^A-Za-z0-9_.-]"), "_"),
+                )
+                Uri.fromFile(chapterReader.downloadPage(page, dir))
             }
         }
         ShuraNav(
@@ -149,30 +156,66 @@ private fun ShuraApp() {
     val library = remember(libraryVersion) { indexStoredChapters(chapterStore(context)) }
 
     // The reader's data source: the pages of whatever is open.
+    // The loader for the chapter currently open. Kept so switching chapters
+    // can cancel the previous one's downloads instead of racing it.
+    var loader by remember { mutableStateOf<ProgressivePageLoader<Uri>?>(null) }
+    // The chapter's real page count. The reader shows "3 of 40" even though
+    // only 3 have downloaded: the count is the chapter's, not the download's.
+    var chapterPageTotal by remember { mutableIntStateOf(0) }
+
     val openChapter: (app.shura.source.ShuraSource, app.shura.source.Chapter, String) -> Unit =
         { source, chapter, cover ->
             val sourceId = source.id
             val mangaTitle = readerMeta?.mangaTitle ?: source.name
             val mangaId = readerMeta?.mangaId ?: ""
             if (cover.isNotBlank()) coverUrl = cover
+            // Whatever the last chapter was still downloading stops here; its
+            // pages would otherwise land in the new chapter's list.
+            loader?.cancel()
+            loader = null
             scope.launch {
                 isLoading = true
                 loadError = null
                 pages.clear()
-                runCatching { nav.downloader.pages(source, chapter.id) }
-                    .onSuccess { fetched ->
+                val pageRefs = runCatching {
+                    withContext(Dispatchers.IO) { source.pages(chapter.id) }
+                }
+                pageRefs.onFailure {
+                    isLoading = false
+                    loadError = it.message ?: "Could not open this chapter."
+                }.onSuccess { refs ->
+                    if (refs.isEmpty()) {
+                        isLoading = false
+                        loadError = "This chapter returned no pages from ${source.name}."
+                        return@onSuccess
+                    }
+                    // The reader opens as soon as the page list is known, then
+                    // fills in underneath: page 1 shows while 2..N download.
+                    // Not a real path, so decoding fails and the reader shows
+                    // its own retryable error rather than a blank tile.
+                    val failedPage = Uri.parse("shura://page-unavailable")
+                    val fresh = ProgressivePageLoader<Uri>(
+                        pageCount = refs.size,
+                        failedPage = failedPage,
+                        fetch = { index ->
+                            runCatching {
+                                nav.downloader.pageAt(source, chapter.id, refs[index])
+                            }.getOrNull()
+                        },
+                    )
+                    // The loader grows its own page list; copy it into the
+                    // snapshot list the reader observes, whenever it changes.
+                    fresh.onChanged = {
+                        val snapshot = fresh.available
                         pages.clear()
-                        pages.addAll(fetched)
-                        readerMeta = ReaderMeta(sourceId, mangaTitle, mangaId, chapter, source.name, cover)
-                        isLoading = false
-                        if (fetched.isEmpty()) {
-                            loadError = "This chapter returned no pages from ${source.name}."
-                        }
+                        pages.addAll(snapshot)
                     }
-                    .onFailure {
-                        isLoading = false
-                        loadError = it.message ?: "Could not open this chapter."
-                    }
+                    loader = fresh
+                    chapterPageTotal = refs.size
+                    fresh.start(scope)
+                    readerMeta = ReaderMeta(sourceId, mangaTitle, mangaId, chapter, source.name, cover)
+                    isLoading = false
+                }
             }
         }
 
@@ -188,7 +231,14 @@ private fun ShuraApp() {
             dark = chosen
             preferences.edit().putBoolean(KEY_DARK, chosen).apply()
         },
+        // A chapter that is still downloading renders from the loader's own
+        // list, which grows as pages land. A stored or saved chapter has no
+        // loader, so it renders from the local list. Both are snapshot lists,
+        // so the reader redraws as either one changes.
         pages = pages,
+        onPageVisible = { index -> loader?.ensure(index) },
+        onRetryPage = { index -> loader?.retry(index) },
+        totalPages = { chapterPageTotal.takeIf { it > 0 } },
         isLoading = isLoading,
         loadError = loadError,
         onFetchChapter = { source, chapter, cover -> openChapter(source, chapter, cover) },
@@ -203,8 +253,11 @@ private fun ShuraApp() {
         },
         onOpenStored = { entry ->
             // The pages are local files; the reader points at them directly.
+            loader?.cancel()
+            loader = null
             pages.clear()
             pages.addAll(entry.pageUris)
+            chapterPageTotal = entry.pageUris.size
             readerMeta = ReaderMeta(entry.sourceId, entry.title, entry.mangaId, null, "library", entry.coverUrl)
             loadError = null
             isLoading = false
@@ -218,6 +271,9 @@ private fun ShuraApp() {
             }
         },
         onExitReader = {
+            loader?.cancel()
+            loader = null
+            chapterPageTotal = 0
             readerMeta = null
             pages.clear()
             historyVersion++
