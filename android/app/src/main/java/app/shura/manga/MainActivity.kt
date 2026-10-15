@@ -252,13 +252,33 @@ private fun ShuraApp() {
 
     // The repository this build ships, unpacked once so the store has real
     // extensions to show instead of an empty list.
+    // Unpacks the repository this build ships.
+    //
+    // Entirely off the main thread. This copies about 4.6 MB of assets out of
+    // the APK and installs them, and it was running inline - so the app froze
+    // for several seconds on every fresh install, long enough for Android to
+    // declare it not responding and close it. The symptom was "I open it and
+    // after a few seconds it is gone", not a crash, which is why it looked
+    // like the app was quitting on its own.
+    //
+    // Nothing here can take the app down: a failure leaves the repository
+    // alone and is reported in Settings instead, because extensions are not
+    // worth losing the app over.
     LaunchedEffect(Unit) {
-        if (RepositorySeed.seed(context)) {
-            val failures = withContext(Dispatchers.IO) {
-                ShuraRepository.reload(sourceHost, context)
+        val outcome = withContext(Dispatchers.IO) {
+            runCatching {
+                if (RepositorySeed.seed(context)) {
+                    ShuraRepository.reload(sourceHost, context)
+                } else {
+                    emptyList()
+                }
             }
+        }
+        outcome.onSuccess { failures ->
             repositoryNotice = failures.takeIf { it.isNotEmpty() }?.joinToString("\n")
-            storeVersion++
+            storeVersion += 1
+        }.onFailure { error ->
+            repositoryNotice = "The bundled extensions could not be prepared: ${error.message}"
         }
     }
 
