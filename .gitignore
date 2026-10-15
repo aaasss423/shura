@@ -11,6 +11,13 @@ dist/
 .gradle/
 local.properties
 *.apk
+# ...except the repository this build ships. The store lists what the index
+# names and marks each row "on device" only when the artifact is really there,
+# so an APK whose index is committed but whose artifacts are not would rebuild
+# into the exact bug this repository was fixed for: an index full of
+# extensions, none of them installed.
+!android/app/src/main/assets/repository/apk/*.apk
+!repo/apk/*.apk
 *.jks
 *.keystore
 .idea/
@@ -39,3 +46,5 @@ local.properties
 tests/test_protected_tile_decode.py
 
 /artifacts/
+Build artefacts that are part of what the app ships.
+android/.kotlin/
