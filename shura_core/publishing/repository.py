@@ -112,6 +112,33 @@ class RepositoryPublisher:
         return f"{str(item.get('package', '')).replace('.', '_')}-{version}.apk"
 
     @staticmethod
+    def _provenance_sources(item: dict) -> list[dict]:
+        """The sources the crawled index declared for this extension.
+
+        An index publishes them and this threw them away, so every entry went
+        out with an empty source list - a field a reader has always populated
+        for a working repository. Only what was actually crawled is emitted; an
+        extension whose index listed nothing stays empty rather than being given
+        an invented source.
+        """
+        provenance = item.get("metadata") or {}
+        raw = provenance.get("sources")
+        if not isinstance(raw, list):
+            return []
+        out = []
+        for source in raw:
+            if not isinstance(source, dict):
+                continue
+            name = str(source.get("name") or "").strip()
+            if not name:
+                continue
+            out.append({"id": source.get("id") or 0,
+                        "name": name,
+                        "language": str(source.get("language") or source.get("lang") or "und"),
+                        "home_url": str(source.get("homeUrl") or source.get("url") or "")})
+        return out
+
+    @staticmethod
     def _consumer_entry(item: dict, base_url: str = "") -> dict:
         """Legacy ``index.json``/``index.min.json`` entry exactly as Mihon's
         ``NetworkLegacyExtension`` reads it. Extra keys are avoided because
@@ -126,7 +153,7 @@ class RepositoryPublisher:
             "code": _version_code(item.get("version", "")),
             "version": _normalize_version(item.get("version", "")),
             "nsfw": 0,
-            "sources": [],
+            "sources": RepositoryPublisher._provenance_sources(item),
         }
 
     @staticmethod

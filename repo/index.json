@@ -37,7 +37,14 @@
     "code": 10656,
     "version": "1.6.56",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "2056490261402651047",
+        "name": "Anyone Manga",
+        "language": "ar",
+        "home_url": "https://anyonemanga.com"
+      }
+    ]
   },
   {
     "name": "Manga Bab",
@@ -47,7 +54,14 @@
     "code": 10602,
     "version": "1.6.2",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "6899943547168982381",
+        "name": "مانجا باب",
+        "language": "ar",
+        "home_url": "https://mangabab.com"
+      }
+    ]
   },
   {
     "name": "ArabManhwa",
@@ -57,7 +71,14 @@
     "code": 10656,
     "version": "1.6.56",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "5823096631874106406",
+        "name": "ArabManhwa",
+        "language": "ar",
+        "home_url": "https://arabmanhwa.com"
+      }
+    ]
   },
   {
     "name": "Arabs Hentai",
@@ -67,7 +88,14 @@
     "code": 10600,
     "version": "1.6.0",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "3472625749271868375",
+        "name": "هنتاي العرب",
+        "language": "ar",
+        "home_url": "https://arabshentai.com"
+      }
+    ]
   },
   {
     "name": "Arab Toons",
@@ -77,7 +105,14 @@
     "code": 10657,
     "version": "1.6.57",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "2424761902286195560",
+        "name": "عرب تونز",
+        "language": "ar",
+        "home_url": "https://arabtoons.net"
+      }
+    ]
   },
   {
     "name": "ArbxComix",
@@ -87,7 +122,14 @@
     "code": 10655,
     "version": "1.6.55",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "6405758918736185117",
+        "name": "ArbxComix",
+        "language": "ar",
+        "home_url": "https://arbxcomix.com"
+      }
+    ]
   },
   {
     "name": "Area Manga",
@@ -97,7 +139,14 @@
     "code": 10602,
     "version": "1.6.2",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "8112280317896333809",
+        "name": "أريا مانجا",
+        "language": "ar",
+        "home_url": "https://ar.kenmanga.com"
+      }
+    ]
   },
   {
     "name": "AR Hentai",
@@ -107,7 +156,14 @@
     "code": 10655,
     "version": "1.6.55",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "7652862112029693411",
+        "name": "آر هنتاي",
+        "language": "ar",
+        "home_url": "https://arhentai.net"
+      }
+    ]
   },
   {
     "name": "AriaToon",
@@ -117,7 +173,14 @@
     "code": 10601,
     "version": "1.6.1",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "8156789703798131884",
+        "name": "AriaToon",
+        "language": "ar",
+        "home_url": "https://ariatoon.com"
+      }
+    ]
   },
   {
     "name": "Azora",
@@ -127,7 +190,14 @@
     "code": 10673,
     "version": "1.6.73",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "2482399499047903203",
+        "name": "Azora",
+        "language": "ar",
+        "home_url": "https://azorafly.com"
+      }
+    ]
   },
   {
     "name": "Comic Verse",
@@ -137,7 +207,14 @@
     "code": 10617,
     "version": "1.6.17",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "7487319247633385575",
+        "name": "Comic Verse",
+        "language": "ar",
+        "home_url": "https://arcomixverse.blogspot.com"
+      }
+    ]
   },
   {
     "name": "Despair Manga",
@@ -147,7 +224,14 @@
     "code": 10601,
     "version": "1.6.1",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "886527590434722171",
+        "name": "Despair Manga",
+        "language": "ar",
+        "home_url": "https://despair-world.com"
+      }
+    ]
   },
   {
     "name": "Detective Conan Ar",
@@ -157,7 +241,14 @@
     "code": 10658,
     "version": "1.6.58",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "5702082694566979718",
+        "name": "شبكة كونان العربية",
+        "language": "ar",
+        "home_url": "https://manga.detectiveconanar.com"
+      }
+    ]
   },
   {
     "name": "Dilar",
@@ -167,7 +258,14 @@
     "code": 10618,
     "version": "1.6.18",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "7634600808243438399",
+        "name": "Dilar",
+        "language": "ar",
+        "home_url": "https://dilar.tube"
+      }
+    ]
   },
   {
     "name": "Duskoryvile",
@@ -177,7 +275,14 @@
     "code": 10601,
     "version": "1.6.1",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "4544396460505163576",
+        "name": "Duskoryvile",
+        "language": "ar",
+        "home_url": "https://duskoryvile.com"
+      }
+    ]
   },
   {
     "name": "Empire Webtoon",
@@ -187,7 +292,14 @@
     "code": 10661,
     "version": "1.6.61",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "2655166136445570124",
+        "name": "Empire Webtoon",
+        "language": "ar",
+        "home_url": "https://webtoonempire-bl.com"
+      }
+    ]
   },
   {
     "name": "EShadow",
@@ -197,7 +309,14 @@
     "code": 10601,
     "version": "1.6.1",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "8617573161604126293",
+        "name": "EShadow",
+        "language": "ar",
+        "home_url": "https://eshadow.net"
+      }
+    ]
   },
   {
     "name": "Goon Scans",
@@ -207,7 +326,14 @@
     "code": 10601,
     "version": "1.6.1",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "2899371341317171497",
+        "name": "Goon Scans",
+        "language": "ar",
+        "home_url": "https://goonscans.org"
+      }
+    ]
   },
   {
     "name": "Hentai Lek",
@@ -217,7 +343,14 @@
     "code": 10602,
     "version": "1.6.2",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "1258840903039841012",
+        "name": "هنتاي ليك",
+        "language": "ar",
+        "home_url": "https://hentailek.com"
+      }
+    ]
   },
   {
     "name": "HentaiMan",
@@ -227,7 +360,14 @@
     "code": 10600,
     "version": "1.6.0",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "4335920001580787887",
+        "name": "HentaiMan",
+        "language": "ar",
+        "home_url": "https://hentaiman.net"
+      }
+    ]
   },
   {
     "name": "Hentai Slayer",
@@ -237,7 +377,14 @@
     "code": 10600,
     "version": "1.6.0",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "1383489648660567366",
+        "name": "هنتاي سلاير",
+        "language": "ar",
+        "home_url": "https://hentaislayer.net"
+      }
+    ]
   },
   {
     "name": "Hijala",
@@ -247,7 +394,14 @@
     "code": 10603,
     "version": "1.6.3",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "917436262447415426",
+        "name": "Hijala",
+        "language": "ar",
+        "home_url": "https://hijala.com"
+      }
+    ]
   },
   {
     "name": "HizoManga",
@@ -257,7 +411,14 @@
     "code": 10656,
     "version": "1.6.56",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "4177563748162518441",
+        "name": "Hizo Manga",
+        "language": "ar",
+        "home_url": "https://hizomanga.net"
+      }
+    ]
   },
   {
     "name": "Kawii Manga",
@@ -267,7 +428,14 @@
     "code": 10602,
     "version": "1.6.2",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "5037404094705788694",
+        "name": "Kawii Manga",
+        "language": "ar",
+        "home_url": "https://kawaiimanga.org"
+      }
+    ]
   },
   {
     "name": "Lava Scans",
@@ -277,7 +445,14 @@
     "code": 10601,
     "version": "1.6.1",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "3209001028102012989",
+        "name": "Lava Scans",
+        "language": "ar",
+        "home_url": "https://lavascans.com"
+      }
+    ]
   },
   {
     "name": "Loner Translations",
@@ -287,7 +462,14 @@
     "code": 10614,
     "version": "1.6.14",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "323105186892383931",
+        "name": "Loner Translations",
+        "language": "ar",
+        "home_url": "https://loner-tl.blogspot.com"
+      }
+    ]
   },
   {
     "name": "3asq",
@@ -297,7 +479,14 @@
     "code": 10659,
     "version": "1.6.59",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "1073624495230267708",
+        "name": "مانجا العاشق",
+        "language": "ar",
+        "home_url": "https://3asq.online"
+      }
+    ]
   },
   {
     "name": "Manga Ai Land",
@@ -307,7 +496,14 @@
     "code": 10614,
     "version": "1.6.14",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "7109397520501699498",
+        "name": "Manga Ai Land",
+        "language": "ar",
+        "home_url": "https://manga-ai-land.blogspot.com"
+      }
+    ]
   },
   {
     "name": "MangaCloud",
@@ -317,7 +513,14 @@
     "code": 10601,
     "version": "1.6.1",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "1630897072449336068",
+        "name": "MangaCloud",
+        "language": "ar",
+        "home_url": "https://mangacloud.online"
+      }
+    ]
   },
   {
     "name": "MangaDar",
@@ -327,7 +530,14 @@
     "code": 10602,
     "version": "1.6.2",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "3975276517041363504",
+        "name": "MangaDar",
+        "language": "ar",
+        "home_url": "https://mangadar.com"
+      }
+    ]
   },
   {
     "name": "MangaHub",
@@ -337,7 +547,14 @@
     "code": 10616,
     "version": "1.6.16",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "9160891278578525988",
+        "name": "MangaHub",
+        "language": "ar",
+        "home_url": "https://www.mangaxhentai.com"
+      }
+    ]
   },
   {
     "name": "Mangalek",
@@ -347,7 +564,14 @@
     "code": 10668,
     "version": "1.6.68",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "918460697583900080",
+        "name": "مانجا ليك",
+        "language": "ar",
+        "home_url": "https://mangalik.net"
+      }
+    ]
   },
   {
     "name": "Mangalink",
@@ -357,7 +581,14 @@
     "code": 10660,
     "version": "1.6.60",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "3568795724496898351",
+        "name": "مانجا لينك",
+        "language": "ar",
+        "home_url": "https://link-manga.net"
+      }
+    ]
   },
   {
     "name": "MangaLionz",
@@ -367,7 +598,14 @@
     "code": 10660,
     "version": "1.6.60",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "2589550143244611118",
+        "name": "MangaLionz",
+        "language": "ar",
+        "home_url": "https://manga-lionz.org"
+      }
+    ]
   },
   {
     "name": "MangaSpark",
@@ -377,7 +615,14 @@
     "code": 10663,
     "version": "1.6.63",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "2436176998646301840",
+        "name": "MangaSpark",
+        "language": "ar",
+        "home_url": "https://sparkmanga.net"
+      }
+    ]
   },
   {
     "name": "Manga Starz",
@@ -387,7 +632,14 @@
     "code": 10665,
     "version": "1.6.65",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "6058166507489091982",
+        "name": "Manga Starz",
+        "language": "ar",
+        "home_url": "https://starzmanga.com"
+      }
+    ]
   },
   {
     "name": "MangaSwat",
@@ -397,7 +649,14 @@
     "code": 10661,
     "version": "1.6.61",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "7657007209499352344",
+        "name": "MangaSwat",
+        "language": "ar",
+        "home_url": "https://meshmanga.com"
+      }
+    ]
   },
   {
     "name": "Manga Tales",
@@ -407,7 +666,14 @@
     "code": 10604,
     "version": "1.6.4",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "5218550345649535189",
+        "name": "Manga Tales",
+        "language": "ar",
+        "home_url": "https://www.mangatales.com"
+      }
+    ]
   },
   {
     "name": "MangaTek",
@@ -417,7 +683,14 @@
     "code": 10608,
     "version": "1.6.8",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "1011491016492324749",
+        "name": "MangaTek",
+        "language": "ar",
+        "home_url": "https://mangatek.com"
+      }
+    ]
   },
   {
     "name": "MangaTik",
@@ -427,7 +700,14 @@
     "code": 10601,
     "version": "1.6.1",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "7080835850401649994",
+        "name": "MangaTik",
+        "language": "ar",
+        "home_url": "https://mangatik.com"
+      }
+    ]
   },
   {
     "name": "MangaTime",
@@ -437,7 +717,14 @@
     "code": 10601,
     "version": "1.6.1",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "215553151312092548",
+        "name": "MangaTime",
+        "language": "ar",
+        "home_url": "https://mangatime.org"
+      }
+    ]
   },
   {
     "name": "MangaTuk",
@@ -447,7 +734,14 @@
     "code": 10600,
     "version": "1.6.0",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "6924751245735287034",
+        "name": "MangaTuk",
+        "language": "ar",
+        "home_url": "https://mangatuk.com"
+      }
+    ]
   },
   {
     "name": "Manhatok",
@@ -457,7 +751,14 @@
     "code": 10615,
     "version": "1.6.15",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "743599002989616408",
+        "name": "Manhatok",
+        "language": "ar",
+        "home_url": "https://manhatok.blogspot.com"
+      }
+    ]
   },
   {
     "name": "Murim",
@@ -467,7 +768,14 @@
     "code": 10615,
     "version": "1.6.15",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "4966914277555229831",
+        "name": "Murim",
+        "language": "ar",
+        "home_url": "https://www.murim.site"
+      }
+    ]
   },
   {
     "name": "NeverScans",
@@ -477,7 +785,14 @@
     "code": 10601,
     "version": "1.6.1",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "8433210273073845288",
+        "name": "NeverScans",
+        "language": "ar",
+        "home_url": "https://neverscans.com"
+      }
+    ]
   },
   {
     "name": "Oduto",
@@ -487,7 +802,14 @@
     "code": 10601,
     "version": "1.6.1",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "1862668423724227387",
+        "name": "Oduto",
+        "language": "ar",
+        "home_url": "https://nb19u.blogspot.com"
+      }
+    ]
   },
   {
     "name": "Onma",
@@ -497,7 +819,14 @@
     "code": 10600,
     "version": "1.6.0",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "335499577904379512",
+        "name": "مانجا اون لاين",
+        "language": "ar",
+        "home_url": "https://onma.top"
+      }
+    ]
   },
   {
     "name": "Orca Manga",
@@ -507,7 +836,14 @@
     "code": 10615,
     "version": "1.6.15",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "5634203247016722993",
+        "name": "Orca Manga",
+        "language": "ar",
+        "home_url": "https://infinity896.blogspot.com"
+      }
+    ]
   },
   {
     "name": "Paradise BL",
@@ -517,7 +853,14 @@
     "code": 10655,
     "version": "1.6.55",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "4957859168133378262",
+        "name": "Paradise BL",
+        "language": "ar",
+        "home_url": "https://paradise-bl.com"
+      }
+    ]
   },
   {
     "name": "Rocks Manga",
@@ -527,7 +870,14 @@
     "code": 10658,
     "version": "1.6.58",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "3301038340499911137",
+        "name": "Rocks Manga",
+        "language": "ar",
+        "home_url": "https://rocksmanga.com"
+      }
+    ]
   },
   {
     "name": "StellarSaber",
@@ -537,7 +887,14 @@
     "code": 10634,
     "version": "1.6.34",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "2142158598125421915",
+        "name": "StellarSaber",
+        "language": "ar",
+        "home_url": "https://stellarsaber.pro"
+      }
+    ]
   },
   {
     "name": "Team X",
@@ -547,7 +904,14 @@
     "code": 10633,
     "version": "1.6.33",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "4110737012647435874",
+        "name": "Team X",
+        "language": "ar",
+        "home_url": "https://olympustaff.com"
+      }
+    ]
   },
   {
     "name": "XSano Manga",
@@ -557,7 +921,14 @@
     "code": 10614,
     "version": "1.6.14",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "6170348197605244575",
+        "name": "XSano Manga",
+        "language": "ar",
+        "home_url": "https://www.xsano-manga.com"
+      }
+    ]
   },
   {
     "name": "Yokai",
@@ -567,7 +938,14 @@
     "code": 10616,
     "version": "1.6.16",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "4337506350787725909",
+        "name": "Yokai",
+        "language": "ar",
+        "home_url": "https://yokai-team.blogspot.com"
+      }
+    ]
   },
   {
     "name": "Yona Bar",
@@ -577,7 +955,14 @@
     "code": 10655,
     "version": "1.6.55",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "8019959770180418614",
+        "name": "Yona Bar",
+        "language": "ar",
+        "home_url": "https://yonaber.com"
+      }
+    ]
   },
   {
     "name": "Yuri Moon Sub",
@@ -587,6 +972,13 @@
     "code": 10616,
     "version": "1.6.16",
     "nsfw": 0,
-    "sources": []
+    "sources": [
+      {
+        "id": "7833471811016150678",
+        "name": "Yuri Moon Sub",
+        "language": "ar",
+        "home_url": "https://yurimoonsub.blogspot.com"
+      }
+    ]
   }
 ]

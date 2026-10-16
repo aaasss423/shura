@@ -103,9 +103,13 @@ def mihon_decode_store(data: bytes) -> dict:
                 ext["resources"] = {MHON_RESOURCES[k]: v for k, v in _scalars(fields[3][0]).items()}
             ext["sources"] = []
             for src_raw in fields.get(8, []):
-                src = pb.decode(src_raw)
-                source = {k: v for k, v in _scalars(src).items() if k != 5}
-                source["mirrorUrls"] = [x.decode("utf-8", "replace") for x in src.get(5, [])]
+                decoded = pb.decode(src_raw)
+                # _scalars takes the raw bytes, not the already-decoded map:
+                # passing the map through reached decode_varint with a dict and
+                # raised KeyError: 0. Only observable once an extension actually
+                # carries a source.
+                source = {k: v for k, v in _scalars(src_raw).items() if k != 5}
+                source["mirrorUrls"] = [x.decode("utf-8", "replace") for x in decoded.get(5, [])]
                 ext["sources"].append(source)
             extensions.append(ext)
     store["extensions"] = extensions
