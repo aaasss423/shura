@@ -39,8 +39,8 @@
       "signing_key": "9f02ca8a8946e77b0cd768b085cafa0037ffd598d5772f08690f862683118a18",
       "repository_url": "https://www.asurascans.com",
       "library": "shura",
-      "artifact_path": "android/shura-extension-asurascans/build/outputs/apk/release/shura-extension-asurascans-release.apk",
-      "operator_notes": "Shura's own Arabic source, built from this project's generator and signed with the Shura publisher key. The signing key here is the operator's, held out of Git and injected at build time; it is the same digest the app pins, which is what lets this artifact run at all."
+      "artifact_path": "repo/apk/app_shura_extension_asurascans-1.0.apk",
+      "operator_notes": "Shura's own Arabic source, built from this project's generator and signed with the Shura publisher key. The signing key here is the operator's, held out of Git and injected at build time; it is the same digest the app pins, which is what lets this artifact run at all. artifact_path points at the committed signed copy rather than the Gradle release output: build/ is gitignored and is wiped by clean, so a path into it silently yields no candidates on any machine that has not just run a release build."
     }
   }
 ]

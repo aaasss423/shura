@@ -27,13 +27,40 @@ _PRIVATE_NETWORKS=tuple(ip_network(n) for n in (
 _READ_CHUNK = 64 * 1024
 
 def is_private_host(host):
-    """True for loopback/link-local/private/reserved IP literals and localhost names."""
+    """True for loopback/link-local/private/reserved IP literals and localhost names.
+
+    Written to resist the ways a URL can spell a private address without
+    spelling it directly: an IPv4-mapped IPv6 literal (``::ffff:127.0.0.1``) and
+    the integer/hex/octal forms ``urlparse`` leaves alone (``2130706433`` is
+    ``127.0.0.1``). Each of those reached the reader as an "external" CDN host
+    while pointing back at the machine or the cloud metadata service."""
     h=(host or "").strip("[]").lower()
     if not h:return True
     if h=="localhost" or h.endswith(".localhost"):return True
-    try:ip=ip_address(h)
-    except ValueError:return False
-    return any(ip in network for network in _PRIVATE_NETWORKS)
+    # Cloud metadata has hostnames as well as addresses, and resolving a name is
+    # not something a content gate should do to decide whether to trust it.
+    if h in _METADATA_NAMES or h.endswith(_METADATA_NAMES):return True
+    for candidate in _ip_forms(h):
+        if any(candidate in network for network in _PRIVATE_NETWORKS):return True
+    return False
+
+#: Hostnames that are private by definition rather than by resolution.
+_METADATA_NAMES=("metadata.google.internal","metadata.goog","instance-data.ec2.internal")
+
+def _ip_forms(h):
+    """Every IP literal ``h`` could denote, in the forms a URL is allowed to use."""
+    forms=[]
+    try: forms.append(ip_address(h))
+    except ValueError: pass
+    # ::ffff:127.0.0.1 and friends: an IPv4 address wearing an IPv6 hat.
+    if h.startswith("::ffff:") and "." in h:
+        try: forms.append(ip_address(h[len("::ffff:"):]))
+        except ValueError: pass
+    # Whole-number IPv4: 2130706433, 0x7f000001, 017700000001.
+    for base in (10,16,8):
+        try: forms.append(ip_address(int(h,base)))
+        except ValueError: pass
+    return forms
 
 class SafeRedirect(HTTPRedirectHandler):
     def __init__(self,allowed,max_redirects,https_only=True,allow_nonstandard_ports=False,allow_private_hosts=False,seed_url=None): self.allowed=set(allowed);self.max_redirects=max_redirects;self.https_only=https_only;self.allow_nonstandard_ports=allow_nonstandard_ports;self.allow_private_hosts=allow_private_hosts;self.count=0;self.seen={seed_url} if seed_url else set()

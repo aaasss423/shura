@@ -2,7 +2,7 @@
 
 Date of last real run attempt: 2026-10-07
 Dataset: `eval/` v1.0.0 — 196 items, 49 per source language (ja, zh, ko, en) → ar
-Suite: **597 passing, 0 failing** (`npm run verify`)
+Suite: **623 backend passing, 0 failing** (`npm run verify`). `npm run apk:test`: **54 methods, 48 passed, 6 skipped, 0 failed**.
 
 This file exists so the model decision in `docs/model-selection.md` cannot be
 mistaken for a decision that has already been validated. It records what was
@@ -55,13 +55,17 @@ numbers and reports each engine as `SKIPPED: preflight not met: …`.
 | Pre-benchmark gate (9 conditions) | `src/platform/serving/preflight.ts` | idem |
 | Run provenance (weights digest, build, GPU, sampling) | `src/platform/serving/provenance.ts` | idem |
 | Runtime-reported tokens/sec (never estimated) | `src/platform/serving/httpClient.ts` | idem |
+| Stability (repeat agreement, chrF spread) | `src/platform/benchmark/stability.ts` | `test/platform/stability.test.ts` |
+| Validated human judgement loader | `src/platform/benchmark/runner.ts` | `test/platform/eval.test.ts` |
+| Judgement template | `eval/judgements-test.template.json` | idem |
+| Decision record (all cells NOT MEASURED) | `docs/model-selection.md` | — |
 | Serve CLI (start / readiness / warm-up / drain) | `src/scripts/serve.ts` | manual run below |
 | Preflight CLI | `src/scripts/preflight.ts` | manual run below |
 | Benchmark CLI | `src/scripts/benchmark.ts` | manual run below |
 | Serving plan CLI | `src/scripts/servingPlan.ts` | manual run below |
 | Runbook | `docs/model-serving-runbook.md` | — |
 
-Suite: **597 passing, 0 failing** (`npm run verify`).
+Suite: **623 backend passing, 0 failing** (`npm run verify`). `npm run apk:test`: **54 methods, 48 passed, 6 skipped, 0 failed**.
 
 Serving-layer tests run against a **mock inference server** whose output is prefixed
 `MOCK` and whose child process is scripted. They verify protocol and lifecycle
@@ -205,6 +209,81 @@ Found while building the pre-benchmark gate:
     tokens/sec was silently lost under exactly the batching configuration used for
     throughput measurement — the report said "no request has completed yet" after
     six successful ones. Regression test added.
+18. `loadJudgements` discarded a malformed file and returned an empty list, so a
+    completed human review with a typo in it was indistinguishable from no review —
+    and a model selection rests on that file being real. The loader now validates
+    entries and reports a problem, and the benchmark prints it.
+19. Stability counted only the rows present in each repeat, so a corpus that was
+    half skipped reported a clean run. The denominator is now the union of item ids.
+20. `--repeat` was coerced with `Math.max(1, Number(...))`, so a non-numeric value
+    became `NaN`, the run loop executed **zero** times, and the benchmark reported on
+    a run that never happened (`runs[runs.length - 1]!` typed as a report and
+    returned `undefined`). The count is now parsed by `parseRepeats`, which refuses
+    anything that is not a positive integer before any engine work starts.
+21. `runEval` declared a `stability` option and never forwarded it to `buildReport`,
+    so a caller passing one got a report — and a JSON file — with no stability in it.
+    It is now recorded like `provenance` and `tokensPerSecond`.
+
+Found in the Android client (`docs/android-client.md`):
+
+22. Cleartext HTTP is refused by default from API 28, and `targetSdk` is 34, so the
+    client's own default address `http://127.0.0.1:8787` failed on every device on
+    API 28+ with "CLEARTEXT communication to 127.0.0.1 not permitted by network
+    security policy". The app could not reach any server with its default settings,
+    and no JVM test could see it, because the refusal is enforced by the Android
+    framework rather than by `HttpURLConnection`. Fixed with a network security
+    config that permits cleartext on loopback only, and a test asserting both the
+    exception and that the manifest applies it.
+23. `waitUntilReady(timeoutMs)` was not bounded by its own timeout: the probe kept a
+    flat 3s budget, so a 500ms wait could not return for 3.5s, and a stalled server
+    consumed the whole budget on one probe instead of being re-probed inside it. The
+    probe now gets what is left of the budget. Measured: 3523ms → inside 500ms.
+24. `waits through a loading window…` was flaky on a loaded host — 2 failures in 10
+    full-suite runs. The mock server and the client share one event loop, so a 503
+    probe round measured ~1.9s, and a 5s budget expired after three of the four
+    probes needed, reporting "not ready" for a server that was about to be ready.
+    Production already waits 120s (`readinessTimeoutMs`); the test now waits 15s.
+    Every readiness assertion now carries `readiness.detail`, which is what made this
+    diagnosable instead of a bare `false !== true`. 8 consecutive full-suite runs
+    green after the change.
+25. `npm run apk:release` never built anything. The publish task is a `Copy` with no
+    dependency on `assembleRelease`, so it copied whatever happened to sit in the
+    output directory — on this host that was an APK from 8 October — renamed it and
+    reported success. It is why `release/` held a month-old file while the sources
+    were a month newer. The task now depends on the assembling task, and the rebuilt
+    APK was verified to carry the policy.
+26. Debug and release were signed with **different keys**, so neither could be
+    installed over the other: `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, which reaches the
+    user as "App not installed" the moment they take the other link. One app now has
+    one signature, and `release/` carries one APK. Both were verified to present the
+    same certificate (`a12e92f7…`).
+27. `res/values/themes.xml` redefined `Theme.Material3.DayNight.NoActionBar` with
+    `parent="Theme.Material3.DayNight"`, shadowing the library's own style and dropping
+    its `windowActionBar=false` / `windowNoTitle=true`. The window kept its own action
+    bar and the app's toolbar was never installed as one. The override is deleted; the
+    manifest uses the library's style.
+28. The manifest declared no `android:icon`, so the app had no launcher icon at all and
+    several launchers render nothing for it. A vector icon is now declared.
+
+**Still unverified:** that the app opens. There is no device, no emulator (`/dev/kvm`
+absent) and Robolectric cannot start here — its Conscrypt native library has no build
+for this Alpine JDK on aarch64, so an activity-launch test was written, failed on that,
+and was removed rather than left red. "Does it open" is therefore still a device
+question, and the user reported that it did not.
+
+## Verification state
+
+- **Backend:** `npm run typecheck` and `npm run test` green, **623 passing**, 8 consecutive full-suite runs.
+- **Android JVM suite: green.** `npm run apk:test` — 54 methods, 48 passed, 6 skipped
+  (the `SHURA_E2E_URL`-gated live tests), 0 failed, including all 5
+  `NetworkSecurityPolicyTest` cases. JDK 17 must be selected explicitly; the default
+  JDK 21 on this host cannot start.
+- **APKs rebuilt from this tree** with `npm run apk:release` / `npm run apk:debug`.
+  The release APK was checked, not assumed: its binary manifest carries
+  `networkSecurityConfig`, and the compiled policy inside it lists exactly
+  `127.0.0.1`, `localhost`, `10.0.2.2`.
+- **No model has been run** anywhere in this project. Every cell in
+  `docs/model-selection.md` is still NOT MEASURED.
 
 ## To unblock
 

@@ -433,8 +433,8 @@ _SKIP_PATH = re.compile(r"(login|signin|sign-in|register|account|captcha|privacy
 
 #: Link shapes that mean "this is a work" and "this is a chapter". Deliberately
 #: about structure: these are URL paths, not page wording.
-_WORK_LINK = re.compile(r"/(?:manga|manhwa|series|work|works|book|books|novel|"
-                        r"title|titles|story|stories)[-/]", re.I)
+_WORK_LINK = re.compile(r"/(?:manga|manhwa|comics|series|work|works|book|books|novel|"
+                        r"title|titles|story|stories)[-/]",re.I)
 _CHAPTER_LINK = re.compile(r"/(?:chapter|chapters|ch|chap|episode|episodes|ep|vol|volume)[-/\d]",
                            re.I)
 

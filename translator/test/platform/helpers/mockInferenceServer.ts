@@ -31,6 +31,11 @@ export interface MockServerOptions {
    */
   reportTimings?: boolean;
   tokensPerSecond?: number;
+  /**
+   * Accepts the connection and never answers, so a client waits on its own timeout.
+   * Refusing the connection is a different failure and is covered by a closed port.
+   */
+  stall?: boolean;
 }
 
 export interface MockServer {
@@ -55,6 +60,12 @@ export async function startMockInferenceServer(options: MockServerOptions = {}):
   const server = http.createServer((req, res) => {
     requestCount += 1;
     const url = req.url ?? '';
+
+    // The socket stays open and no response is written: the client is left waiting
+    // on its own abort signal, which is the case a readiness budget has to survive.
+    if (options.stall === true) {
+      return;
+    }
 
     if (url === '/health' || url === '/props' || url === '/v1/models') {
       probes += 1;

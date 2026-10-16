@@ -77,10 +77,30 @@ class ExtensionInstaller(
         val apkDir = File(directory, ExtensionCatalog.APK_DIR).apply { mkdirs() }
         val staged = File.createTempFile("shura-ext-", ".apk", context.cacheDir)
         return try {
-            val url = URL(baseUrl.trimEnd('/') + "/" + entry.apk.trimStart('/'))
-            val declared = when (val head = fetch(url, staged, onProgress)) {
-                is Head.Failed -> return InstallResult.DownloadFailed(head.reason)
-                is Head.Done -> head.total
+            // The repository this build ships has already been unpacked onto the
+            // device, so its extensions are on disk before anything is installed.
+            // Fetching them over the network anyway meant an extension the app
+            // carries in its own APK could only be installed by reaching a server
+            // that may not exist - and an offline install refused for that reason is
+            // not a trust decision, it is a wiring bug.
+            //
+            // Only the transport changes. The hash, the signature and the scope
+            // checks below run exactly as they do for a downloaded file, because
+            // "it was already here" is not evidence that it is the right file.
+            val local = File(apkDir, entry.apk.substringAfterLast('/'))
+            val declared = when {
+                local.isFile && local.length() > 0L -> {
+                    local.copyTo(staged, overwrite = true)
+                    onProgress?.invoke(local.length(), local.length())
+                    local.length()
+                }
+                else -> {
+                    val url = URL(baseUrl.trimEnd('/') + "/" + entry.apk.trimStart('/'))
+                    when (val head = fetch(url, staged, onProgress)) {
+                        is Head.Failed -> return InstallResult.DownloadFailed(head.reason)
+                        is Head.Done -> head.total
+                    }
+                }
             }
             // The index says what the bytes should hash to. A mismatch means
             // the artifact is not the one that was published, whatever it is.

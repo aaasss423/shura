@@ -380,10 +380,43 @@ describe('serving engine against a mock inference server (MOCK, not a model)', (
     try {
       const engine = engineFor(mock.endpoint);
       const started = Date.now();
-      const readiness = await engine.waitUntilReady(5000);
-      assert.equal(readiness.ready, true);
+      // The budget is 15s, not 5s. The mock and the client share this process's event
+      // loop, and a 503 round measured ~1.9s on a loaded host: with a 5s budget the
+      // wait could expire after three probes, one short of the fourth that would have
+      // succeeded, and report "not ready" for a server that was about to be ready.
+      // Production waits 120s (`readinessTimeoutMs`); the assertions below are what
+      // carry the meaning, not the size of the budget.
+      const readiness = await engine.waitUntilReady(15000);
+      // The detail is in every message: a readiness wait that gives up says why in
+      // one field, and without it a failure on a loaded host is unprovable.
+      assert.equal(
+        readiness.ready,
+        true,
+        `not ready after ${readiness.waitedMs}ms: ${readiness.detail}`,
+      );
       assert.ok(readiness.waitedMs >= 1000, `waited ${readiness.waitedMs}ms, expected at least the 3 skipped probes`);
-      assert.ok(Date.now() - started >= 1000);
+      assert.ok(Date.now() - started >= 1000, `observed ${Date.now() - started}ms, expected at least the 3 skipped probes`);
+    } finally {
+      await mock.close();
+    }
+  });
+
+  it('gives up inside its own budget when the server accepts but never answers', async () => {
+    // The probe timeout used to be a flat 3s inside a wait that had a deadline, so a
+    // 500ms budget could not return for 3.5s (a 3s probe plus the 500ms poll
+    // interval) — measured at 3523ms. The probe now gets what is left of the budget.
+    // The ceiling below is above the busiest measurement of the fixed path (~2s on a
+    // loaded host, where the abort timer itself runs late) and below the floor of the
+    // broken one (~3.5s).
+    const mock = await startMockInferenceServer({ stall: true });
+    try {
+      const engine = engineFor(mock.endpoint);
+      const started = Date.now();
+      const readiness = await engine.waitUntilReady(500);
+      const elapsed = Date.now() - started;
+      assert.equal(readiness.ready, false);
+      assert.ok(elapsed < 3000, `a 500ms budget took ${elapsed}ms: ${readiness.detail}`);
+      assert.match(readiness.detail, /not ready within 500ms/);
     } finally {
       await mock.close();
     }

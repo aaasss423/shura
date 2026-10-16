@@ -98,7 +98,12 @@ object ImageStore {
                 }
                 if (decoded != null) put(source, decoded)
                 decoded
-            } catch (_: Exception) {
+            } catch (failure: Throwable) {
+                // Throwable, not Exception: an out-of-memory kill from a large bitmap
+                // is an Error, so this catch never saw it and the process died with
+                // no screen and no message. A cover that will not decode is a
+                // placeholder, not a crash.
+                if (failure is OutOfMemoryError) memory.evictAll()
                 null
             }
         }
@@ -114,7 +119,7 @@ object ImageStore {
         } else {
             context.contentResolver.openInputStream(Uri.parse(source))
         }
-    } catch (_: Exception) {
+    } catch (_: Throwable) {
         null
     }
 

@@ -21,6 +21,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -29,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import app.shura.manga.reader.ReaderMode
+import app.shura.manga.reader.ReaderPreferences
 import app.shura.manga.ui.shura
 import app.shura.source.Chapter
 
@@ -51,8 +54,13 @@ fun ReaderSheetHost(
     chapters: List<Chapter>,
     currentChapterId: String,
     totalPages: Int,
+    /** The page on screen, so the counter is the reader's position and not a guess. */
+    currentPage: Int,
     mode: ReaderMode,
     onModeChange: (ReaderMode) -> Unit,
+    /** Brightness, preload and screen-awake, kept between sessions. */
+    preferences: ReaderPreferences,
+    onPreferencesChange: (ReaderPreferences) -> Unit,
     onOpenChapter: (Chapter) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -71,6 +79,9 @@ fun ReaderSheetHost(
                 mode = mode,
                 onModeChange = onModeChange,
                 totalPages = totalPages,
+                currentPage = currentPage,
+                preferences = preferences,
+                onPreferencesChange = onPreferencesChange,
             )
         }
     }
@@ -144,6 +155,9 @@ private fun ReadingSettingsSheet(
     mode: ReaderMode,
     onModeChange: (ReaderMode) -> Unit,
     totalPages: Int,
+    currentPage: Int,
+    preferences: ReaderPreferences,
+    onPreferencesChange: (ReaderPreferences) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().padding(20.dp)) {
         Text(shura("reader.settings"), style = MaterialTheme.typography.titleMedium)
@@ -174,10 +188,84 @@ private fun ReadingSettingsSheet(
         Spacer(Modifier.height(20.dp))
         HorizontalDivider()
         Spacer(Modifier.height(16.dp))
+
+        Text(shura("reader.brightness"), style = MaterialTheme.typography.labelLarge)
+        Slider(
+            value = if (preferences.overridesBrightness) preferences.brightness else SYSTEM_SLIDER_VALUE,
+            onValueChange = { value ->
+                onPreferencesChange(
+                    preferences.copy(
+                        brightness = if (value == SYSTEM_SLIDER_VALUE) 0f else ReaderPreferences.brightnessOf(value),
+                    ),
+                )
+            },
+            valueRange = SYSTEM_SLIDER_VALUE..1f,
+            steps = 0,
+        )
         Text(
-            shura("reader.pages", totalPages.coerceAtLeast(1), totalPages.coerceAtLeast(1)),
+            // "System" is an explicit state, not a silent zero: a reader who cannot
+            // find the brightness control needs to know the app is not fighting them.
+            if (preferences.overridesBrightness) shura("reader.brightness")
+            else shura("reader.brightnessSystem"),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(16.dp))
+
+        Text(shura("reader.preload"), style = MaterialTheme.typography.labelLarge)
+        Slider(
+            value = preferences.preload.toFloat(),
+            onValueChange = { onPreferencesChange(preferences.copy(preloadPages = it.toInt())) },
+            valueRange = 0f..MAX_PRELOAD.toFloat(),
+            steps = MAX_PRELOAD - 1,
+        )
+        Text(
+            shura("reader.preloadPages", preferences.preload),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(16.dp))
+
+        Text(shura("reader.parallel"), style = MaterialTheme.typography.labelLarge)
+        Slider(
+            value = preferences.parallelism.toFloat(),
+            onValueChange = { onPreferencesChange(preferences.copy(parallelDownloads = it.toInt())) },
+            valueRange = 1f..MAX_PARALLEL.toFloat(),
+            steps = MAX_PARALLEL - 1,
+        )
+        Text(
+            shura("reader.preloadPages", preferences.parallelism),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(16.dp))
+
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                shura("reader.keepScreenOn"),
+                Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Switch(
+                checked = preferences.keepScreenOn,
+                onCheckedChange = { onPreferencesChange(preferences.copy(keepScreenOn = it)) },
+            )
+        }
+        Spacer(Modifier.height(16.dp))
+        HorizontalDivider()
+        Spacer(Modifier.height(8.dp))
+        Text(
+            shura("reader.pages", currentPage.coerceAtLeast(1), totalPages.coerceAtLeast(1)),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
+
+/** Slider position that means "follow the system", outside the real range. */
+private const val SYSTEM_SLIDER_VALUE = 0.01f
+private const val MAX_PRELOAD = 10
+private const val MAX_PARALLEL = 8

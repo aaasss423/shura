@@ -1,0 +1,91 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'app.shura.translator'
+    compileSdk 34
+    buildToolsVersion '35.0.0'
+
+    defaultConfig {
+        applicationId 'app.shura.translator'
+        minSdk 21
+        targetSdk 34
+        versionCode 1
+        versionName '0.1.0-beta1'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    signingConfigs {
+        // A development key, generated locally, so the release APK is installable.
+        // It is NOT a publishing key: anyone can install this build, so it must not be
+        // used for a store release. Generating it is a documented step, not a secret.
+        dev {
+            storeFile file('../keystore/shura-dev.jks')
+            storePassword 'shuradev'
+            keyAlias 'shura'
+            keyPassword 'shuradev'
+        }
+    }
+
+    buildTypes {
+        debug {
+            minifyEnabled false
+            // Same key as release, deliberately. Two APKs of one app signed with two
+            // different keys cannot be installed over each other: Android refuses with
+            // INSTALL_FAILED_UPDATE_INCOMPATIBLE, which reaches the user as "App not
+            // installed" on an upgrade. There is one app, so there is one signature.
+            signingConfig signingConfigs.dev
+        }
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.dev
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    lint {
+        abortOnError false
+    }
+
+    applicationVariants.configureEach { variant ->
+        // Deliverables are copied out of the build directory to ../release, because
+        // `npm run clean` removes the backend's dist/ and the APK must not live there.
+        tasks.register("publish${variant.buildType.name.capitalize()}Apk", Copy) {
+            // Without this the task copies whatever happens to be in the output
+            // directory: `npm run apk:release` then republishes the last APK that was
+            // built, whatever its date, and reports success.
+            dependsOn("assemble${variant.buildType.name.capitalize()}")
+            from(variant.outputs.first().outputFile)
+            into("${rootDir}/../release")
+            rename { "shura-translator-${variant.versionName}-${variant.buildType.name}.apk" }
+        }
+    }
+
+    testOptions {
+        unitTests.returnDefaultValues = true
+        unitTests.all {
+            // The live integration test is opt-in: the default suite stays hermetic.
+            //   SHURA_E2E_URL=http://127.0.0.1:8787 gradle :app:testDebugUnitTest
+            it.environment 'SHURA_E2E_URL', System.getenv('SHURA_E2E_URL') ?: ''
+            it.testLogging {
+                events 'passed', 'skipped', 'failed'
+            }
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.fragment:fragment:1.6.2'
+    implementation 'androidx.recyclerview:recyclerview:1.3.2'
+    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
+    implementation 'com.google.android.material:material:1.11.0'
+
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20231013'
+}

@@ -167,12 +167,12 @@ export class InferenceHttpClient {
   }
 
   /** Asks the server which model it loaded, so identity can be verified. */
-  async describe(): Promise<ServerSelfReport> {
+  async describe(timeoutMs = 3000): Promise<ServerSelfReport> {
     const path = this.options.servingStyle === 'ollama' ? '/api/tags' : '/props';
     try {
       const response = await this.fetchImpl(`${this.endpoint}${path}`, {
         method: 'GET',
-        signal: AbortSignal.timeout(3000),
+        signal: AbortSignal.timeout(timeoutMs),
       });
       const report = await selfReport(this.options.servingStyle, response);
       return { ...report, reachable: true, detail: `identity read from ${path}` };

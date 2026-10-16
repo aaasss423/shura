@@ -21,6 +21,7 @@
  */
 
 import * as fs from 'node:fs/promises';
+import { constants } from 'node:fs';
 
 import { EngineRegistry } from '../engine/registry';
 import { MyMemoryEngine } from '../engine/mymemory/engine';
@@ -38,7 +39,11 @@ import {
   renderModelComparison,
   renderComparison,
   loadJudgements,
+  loadJudgementFile,
   judgementsPath,
+  measureStability,
+  parseRepeats,
+  renderStability,
 } from '../platform/benchmark/runner';
 import type { BenchmarkReport } from '../platform/benchmark/runner';
 import type { TranslationEngine } from '../engine/engine';
@@ -53,13 +58,23 @@ function flag(name: string): boolean {
 }
 
 async function main(): Promise<void> {
+  // Parsed before anything else runs. A repeat count that is not a positive integer
+  // has to stop the benchmark here, not reach the run loop as NaN and produce zero
+  // repeats and a report on nothing.
+  const repeats = parseRepeats(arg('repeat'));
   const datasetRoot = arg('eval-root') ?? defaultEvalRoot();
   const dataset = loadDataset(datasetRoot);
   const split = (arg('split') ?? 'test') as EvalSplit;
   const all = filterDataset(dataset, { split });
   const limitArg = arg('limit');
   const items = limitArg ? all.slice(0, Number(limitArg)) : all;
-  const judgements = loadJudgements(judgementsPath(datasetRoot, split));
+  // A judgement file that exists but cannot be parsed is reported loudly. Silently
+  // dropping it would make a completed review look like no review at all.
+  const judgementFile = loadJudgementFile(judgementsPath(datasetRoot, split));
+  const judgements = judgementFile.judgements;
+  if (judgementFile.problem) {
+    process.stdout.write(`\nHUMAN REVIEW DATA PROBLEM: ${judgementFile.problem}\n`);
+  }
 
   const requested = (arg('engines') ?? MODEL_CATALOG.map((m) => m.id).join(',')).split(',').map((e) => e.trim());
 
@@ -88,12 +103,27 @@ async function main(): Promise<void> {
           probes: {
             gpu: async () => gpu,
             runtime: async () => runtime,
-            modelFiles: async () => ({
-              present: false,
-              detail:
-                'weights are not checked by the benchmark; if the server loaded them, its readiness ' +
-                'and identity checks below already prove it',
-            }),
+            // If the operator gave a weight path, check it for real: the digest that
+            // ties this run to specific weights is computed from this file, so an
+            // unreadable one would make the provenance line meaningless.
+            modelFiles: async () => {
+              const modelPath = arg('model-path');
+              if (modelPath === undefined) {
+                return {
+                  present: false,
+                  detail:
+                    'not checked: no --model-path given, so the weights cannot be tied to a digest. ' +
+                    'The server readiness and identity checks still apply, but a run without a ' +
+                    'digest is not reproducible.',
+                };
+              }
+              try {
+                await fs.access(modelPath, constants.R_OK);
+                return { present: true, detail: `weights readable at ${modelPath}` };
+              } catch {
+                return { present: false, detail: `--model-path is not readable: ${modelPath}` };
+              }
+            },
             warmUp: async () => {
               const readiness = await probeEngine.waitUntilReady(Number(arg('warmup-timeout-ms') ?? 60000));
               return readiness.ready
@@ -119,7 +149,7 @@ async function main(): Promise<void> {
         }
       }
     }
-    reports.push(await runOne(engineId, registry, dataset.manifest.version, items, split, judgements));
+    reports.push(await runOne(engineId, registry, dataset.manifest.version, items, split, judgements, repeats));
   }
 
   process.stdout.write(renderSummary(reports) + '\n');
@@ -181,6 +211,7 @@ async function runOne(
   items: ReturnType<typeof filterDataset>,
   split: EvalSplit,
   judgements: ReturnType<typeof loadJudgements>,
+  repeats: number,
 ): Promise<BenchmarkReport> {
   let engine: TranslationEngine;
   try {
@@ -249,19 +280,41 @@ async function runOne(
   }
 
   process.stdout.write(`running ${engineId} over ${items.length} item(s)…\n`);
-  const { result: report, resources } = await sampleResources(
-    () =>
-      runEval({
-        engine,
-        items,
-        datasetVersion,
-        split,
-        judgements,
-        ...(serving ? { serving } : {}),
-        ...(provenance ? { provenance } : {}),
-        ...(arg('budget-ms') !== undefined ? { budgetMs: Number(arg('budget-ms')) } : {}),
-      }),
-  );
+
+  // Stability: the same corpus more than once. One run cannot tell bit-stable
+  // output from a lucky one, and the spread is the error bar on any comparison.
+  const runs: BenchmarkReport[] = [];
+  const { result: report, resources } = await sampleResources(async () => {
+    for (let attempt = 1; attempt <= repeats; attempt += 1) {
+      if (repeats > 1) {
+        process.stdout.write(`  [${engineId}] repeat ${attempt}/${repeats}\n`);
+      }
+      runs.push(
+        await runEval({
+          engine,
+          items,
+          datasetVersion,
+          split,
+          judgements,
+          ...(serving ? { serving } : {}),
+          ...(provenance ? { provenance } : {}),
+          ...(arg('budget-ms') !== undefined ? { budgetMs: Number(arg('budget-ms')) } : {}),
+        }),
+      );
+    }
+    const last = runs[runs.length - 1];
+    if (!last) {
+      // Unreachable while repeats >= 1, which parseRepeats guarantees. Checked anyway:
+      // reporting on no run at all would print a comparison table with no numbers in it.
+      throw new Error(`${engineId} produced no benchmark run; refusing to report an empty measurement.`);
+    }
+    return last;
+  });
+
+  const stability = repeats > 1 ? measureStability(runs.map((r) => r.results)) : undefined;
+  if (stability) {
+    process.stdout.write(renderStability(stability) + '\n');
+  }
 
   const tokenStats = managed.stats?.().tokensPerSecond;
   if (tokenStats) {
@@ -277,7 +330,12 @@ async function runOne(
     process.stdout.write(`  [${engineId}] shutdown: ${shutdown.detail}\n`);
   }
 
-  return { ...report, resources, ...(tokenStats ? { tokensPerSecond: tokenStats } : {}) };
+  return {
+    ...report,
+    resources,
+    ...(tokenStats ? { tokensPerSecond: tokenStats } : {}),
+    ...(stability ? { stability } : {}),
+  };
 }
 
 function skippedReport(

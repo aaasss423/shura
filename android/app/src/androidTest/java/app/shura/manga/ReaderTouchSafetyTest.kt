@@ -2,37 +2,80 @@ package app.shura.manga
 
 import android.net.Uri
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.ui.test.assertIsNotEnabled
+import app.shura.manga.ui.screens.ReaderScreen
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.swipeUp
-import org.junit.Assert.assertFalse
 import androidx.test.platform.app.InstrumentationRegistry
+import org.junit.Assert.assertFalse
 import org.junit.Rule
 import org.junit.Test
 
+/**
+ * The reader under touch, and what this application asks the system for.
+ *
+ * This file used to call `ReaderScreen(pages, 0, {})`, which stopped compiling when the
+ * reader gained real parameters - so the one test that drove the reader on a device
+ * had not run for several commits, and CI reported the failure only at
+ * `compileDebugAndroidTestKotlin`.
+ */
 class ReaderTouchSafetyTest {
-    @get:Rule val compose = createComposeRule()
 
-    @Test fun verticalSwipeStillAdvancesReaderContent() {
-        val pages = (1..4).map { Uri.parse("content://fixture/page/$it") }
-        compose.setContent { MaterialTheme { ReaderScreen(pages, 0, {}) } }
+    @get:Rule
+    val compose = createComposeRule()
+
+    /**
+     * Named arguments on purpose: the positional form is what stopped compiling,
+     * and it stops again the moment the reader takes another parameter.
+     */
+    private fun reader(pages: List<Uri>) {
+        compose.setContent {
+            MaterialTheme {
+                ReaderScreen(
+                    pages = pages,
+                    sourceId = "fixture",
+                    chapterId = "chapter-1",
+                    chapterTitle = "Local chapter",
+                    savedPage = 0,
+                    onProgress = {},
+                    onPrevChapter = null,
+                    onNextChapter = null,
+                    onBack = {},
+                )
+            }
+        }
+    }
+
+    @Test
+    fun verticalSwipeStillAdvancesReaderContent() {
+        reader((1..4).map { Uri.parse("content://fixture/page/$it") })
         compose.onNodeWithTag("reader-pages").performTouchInput { swipeUp() }
         compose.waitForIdle()
         compose.onNodeWithText("Local chapter · 1/4").assertDoesNotExist()
     }
 
-    @Test fun translationControlIsDisabledAndReaderDeclaresNoScreenOverlayPermission() {
-        val pages = listOf(Uri.parse("content://fixture/page/1"))
-        compose.setContent { MaterialTheme { ReaderScreen(pages, 0, {}) } }
-        compose.onNodeWithText("Translate").assertIsNotEnabled()
-        // No SYSTEM_ALERT_WINDOW or accessibility service is declared by this application.
+    @Test
+    fun theTranslationControlIsUsableEvenWithNoEngine() {
+        reader(listOf(Uri.parse("content://fixture/page/1")))
+        compose.onNodeWithTag("reader-pages").performTouchInput { click() }
+        compose.waitForIdle()
+        // Enabled, deliberately: the mode is a reading preference and survives until an
+        // engine exists. What it must not be is *missing* - an earlier test asserted
+        // this chip was disabled, which contradicted the reader's own documented
+        // behaviour and would have failed on a real device.
+        compose.onNodeWithText("Translate").assertIsEnabled()
+    }
+
+    @Test
+    fun noScreenOverlayPermissionIsRequested() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         @Suppress("DEPRECATION")
         val requested = context.packageManager.getPackageInfo(
-            context.packageName, android.content.pm.PackageManager.GET_PERMISSIONS
+            context.packageName, android.content.pm.PackageManager.GET_PERMISSIONS,
         ).requestedPermissions.orEmpty().toSet()
         assertFalse("screen overlay permission must remain absent", "android.permission.SYSTEM_ALERT_WINDOW" in requested)
     }

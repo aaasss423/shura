@@ -8,3 +8,10 @@ data/
 *.log
 .DS_Store
 coverage/
+# Android build output
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+# Development signing key. Generated locally by the documented command; never committed.
+android/keystore/

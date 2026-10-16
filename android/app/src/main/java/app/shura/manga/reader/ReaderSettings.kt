@@ -37,9 +37,35 @@ class ReaderSettingsStore(context: Context) {
         preferences.edit().putString(KEY_MODE, settings.mode.name).apply()
     }
 
+    fun loadPreferences(): ReaderPreferences = ReaderPreferences(
+        brightness = preferences.getFloat(KEY_BRIGHTNESS, 0f),
+        preloadPages = preferences.getInt(KEY_PRELOAD, 3),
+        keepScreenOn = preferences.getBoolean(KEY_KEEP_ON, false),
+        parallelDownloads = preferences.getInt(KEY_PARALLEL, 4),
+    )
+
+    fun savePreferences(value: ReaderPreferences) {
+        preferences.edit()
+            .putFloat(KEY_BRIGHTNESS, ReaderPreferences.brightnessOf(value.brightness))
+            .putInt(KEY_PRELOAD, ReaderPreferences.preloadOf(value.preloadPages))
+            .putBoolean(KEY_KEEP_ON, value.keepScreenOn)
+            .putInt(KEY_PARALLEL, ReaderPreferences.parallelismOf(value.parallelDownloads))
+            .apply()
+    }
+
     private companion object {
         const val KEY_MODE = "reader-mode"
+        const val KEY_BRIGHTNESS = "reader-brightness"
+        const val KEY_PRELOAD = "reader-preload"
+        const val KEY_KEEP_ON = "reader-keep-screen-on"
+        const val KEY_PARALLEL = "reader-parallel"
     }
 }
 
 data class ReaderSettings(val mode: ReaderMode = ReaderMode.VERTICAL)
+
+/*
+ * The rest of the reader's configuration lives in ReaderPreferences.kt, stored by the
+ * same store so one save writes a coherent set: brightness, how far ahead pages are
+ * preloaded, whether the screen stays awake, and how many pages download at once.
+ */

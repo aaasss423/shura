@@ -1,5 +1,6 @@
 from __future__ import annotations
 import argparse,json,os,sys
+from pathlib import Path
 from shura_core.models import Source,SourceState
 from shura_core.state import StateStore
 from shura_core.coordinator import CrawlCoordinator
@@ -38,6 +39,9 @@ def main(argv=None):
  q=sub.add_parser("content-clear",description='Record an operator clearance decision. This command performs NO authentication: --decided-by is an attributed label written into the record, not a verified identity. Anyone who can run this command can record a decision.');q.add_argument("--content-dir",default=os.getenv("SHURA_CONTENT_DIR",".shura-content"));q.add_argument("--source-id",required=True);q.add_argument("--work-id",required=True);q.add_argument("--chapter-id",required=True);q.add_argument("--decision",required=True,choices=("CLEARED","WITHHELD","PENDING_REVIEW"));q.add_argument("--decided-by",required=True);q.add_argument("--evidence",default="");q.add_argument("--policy-version",default="manual")
  q=sub.add_parser("recheck-content");q.add_argument("--limit",type=int,default=250)
  q=sub.add_parser("security-preflight")
+ q=sub.add_parser("agent-run",help="run the site->extension loop over configured sources, remembering every attempt");q.add_argument("--config",default="sources.json");q.add_argument("--source-id",action="append");q.add_argument("--android-root",default="android");q.add_argument("--jdk",default=os.getenv("SHURA_JAVA_HOME",""));q.add_argument("--build-tools",default=os.getenv("SHURA_BUILD_TOOLS","/opt/android-sdk/build-tools/35.0.0"));q.add_argument("--works",type=int,default=3);q.add_argument("--chapters-per-work",type=int,default=2);q.add_argument("--pages-per-chapter",type=int,default=3);q.add_argument("--evidence-only",action="store_true",help="collect and diagnose evidence; do not build");q.add_argument("--timeout",type=int,default=1800)
+ q=sub.add_parser("agent-learn",help="what the loop has learned: causes, which gate each came from, and per-site history");q.add_argument("--source-id");q.add_argument("--limit",type=int,default=20)
+ q=sub.add_parser("build-extension",help="turn an accepted site into a real, buildable extension module");q.add_argument("source_id");q.add_argument("--config",default="sources.json");q.add_argument("--android-root",default="android");q.add_argument("--jdk",default=os.getenv("SHURA_JAVA_HOME") or "/usr/lib/jvm/java-17-openjdk");q.add_argument("--build-tools",default=os.getenv("SHURA_BUILD_TOOLS") or "/opt/android-sdk/build-tools/35.0.0");q.add_argument("--works",type=int,default=3);q.add_argument("--chapters-per-work",type=int,default=2);q.add_argument("--pages-per-chapter",type=int,default=3);q.add_argument("--write",action="store_true",help="also write the module and run gradle; without it the plan is only reported");q.add_argument("--timeout",type=int,default=1800)
  for cmd in ("status","stop","retry","forget","accept","pending","review-quarantine","accept-source"):
   q=sub.add_parser(cmd);q.add_argument("source_id",nargs="?");q.add_argument("--source-id",dest="source_id_option");
   if cmd=="stop":q.add_argument("--reason",required=True)
@@ -92,6 +96,80 @@ def main(argv=None):
    result=RepositoryPublisher(store,args.repo).publish(args.stage,args.release);print(json.dumps(result))
    if result.get("published"):TelegramNotifier(os.getenv("SHURA_TELEGRAM_TOKEN"),os.getenv("SHURA_TELEGRAM_CHAT_ID")).send(f"Shura publication succeeded: {result['published']} entries")
    return 3 if result.get("refused") else 0
+  elif args.command=="agent-run":
+   from shura_core.agent import AgentLoop
+   configured={s.source_id:s for s in SourceRegistry.parse_file(args.config)}
+   wanted={sid for item in (args.source_id or []) for sid in item.split(",") if sid}
+   targets=[s for sid,s in configured.items() if not wanted or sid in wanted]
+   if not targets:print(f"no sources matched {sorted(wanted)} in {args.config}",file=sys.stderr);return 2
+   loop=AgentLoop(store,sources_path=args.config,android_root=args.android_root,
+                  jdk=args.jdk or None,build_tools=args.build_tools,works=args.works,
+                  chapters_per_work=args.chapters_per_work,pages_per_chapter=args.pages_per_chapter,
+                  timeout=args.timeout,evidence_only=args.evidence_only)
+   report=loop.run(targets)
+   print(json.dumps(report,ensure_ascii=False,indent=2))
+   return 0 if report["succeeded"] or not report["attempted"] else 1
+  elif args.command=="agent-learn":
+   from shura_core.agent import Knowledge
+   k=Knowledge(store)
+   if args.source_id:
+    report={"source_id":args.source_id,"attempts":[a.as_dict() for a in k.attempts(args.source_id,args.limit)],
+            "retry":k.is_worth_retrying(args.source_id)[0],"reason":k.is_worth_retrying(args.source_id)[1]}
+   else:
+    report={"blame":k.blame(),"causes":k.cause_histogram()}
+   print(json.dumps(report,ensure_ascii=False,indent=2));return 0
+  elif args.command=="build-extension":
+   from shura_core.content.htmlsite import HtmlCatalogueSource,SiteDescriptor
+   from shura_core.extension.converter import build_plan,write_module
+   from shura_core.extension.builder import build_extension,BuildFailure
+   from shura_core.security.network import SafeHTTP as _SafeHTTP
+   configured={s.source_id:s for s in SourceRegistry.parse_file(args.config)}
+   source=configured.get(args.source_id)
+   if source is None:
+    print(f"source {args.source_id!r} is not in {args.config}",file=sys.stderr);return 2
+   cfg=source.configuration or {}
+   hosts=[str(h) for h in (cfg.get("allowed_hosts") or [])]
+   if not hosts:
+    print("the source names no allowed_hosts; the site cannot be read without a trust list",file=sys.stderr);return 2
+   # The host is the one the catalogue URL actually names. Taking it from the
+   # trust list instead would break on any source whose URL redirects to a
+   # different-but-allowed name, and the reader would refuse every page.
+   from urllib.parse import urlparse as _urlparse
+   site_host=_urlparse(source.url).hostname or ""
+   descriptor=SiteDescriptor.from_record({"source_id":source.source_id,"name":source.name,
+                                          "language":source.language,"url":source.url,
+                                          "discovery_evidence":{"url":source.url,"domain":site_host,"origin":source.url}},
+                                         source_id=source.source_id)
+   reader=HtmlCatalogueSource(descriptor,_SafeHTTP(hosts,timeout=cfg.get("timeout",15),max_bytes=2_000_000))
+   # Evidence, not guesswork: what the site actually served is what the spec is
+   # derived from. A site that proves nothing yields a refused plan, not a module.
+   hrefs=[];chapter_urls=[];page_images=[];work_url="";chapter_url=""
+   for work in reader.works(limit=max(1,args.works)):
+    if work.get("url") and not work_url:work_url=work["url"]
+    for chapter in reader.chapters(work)[:max(1,args.chapters_per_work)]:
+     chapter_urls.append(chapter["url"])
+     if not chapter_url:chapter_url=chapter["url"]
+     for page in reader.pages(chapter)[:max(1,args.pages_per_chapter)]:page_images.append(page["url"])
+    hrefs.extend([w.get("url","") for w in [work] if w.get("url")])
+   hrefs=[h for h in dict.fromkeys(hrefs) if h]
+   plan=build_plan(descriptor,observed_hrefs=hrefs,observed_page_images=page_images,
+                   page_images_observed=bool(page_images),chapter_url=chapter_url,
+                   work_url=work_url,observed_chapter_urls=chapter_urls)
+   summary={"source_id":args.source_id,"package":plan.package,"module":plan.module_name,
+            "version":plan.version_name,"publishable":bool(plan.publishable),
+            "blockers":list(plan.blockers),"evidence":{"work_hrefs":len(hrefs),
+            "chapter_urls":len(chapter_urls),"page_images":len(page_images)}}
+   if not plan.publishable or not args.write:
+    print(json.dumps(summary,ensure_ascii=False,indent=2));return 1 if not plan.publishable else 0
+   module=write_module(Path(args.android_root),plan)
+   summary["module_dir"]=str(module)
+   try:
+    built=build_extension(args.android_root,plan.module_name,jdk=args.jdk,build_tools=args.build_tools,timeout=args.timeout)
+   except BuildFailure as exc:
+    summary["build_error"]=str(exc);print(json.dumps(summary,ensure_ascii=False,indent=2));return 1
+   summary["apk"]=str(built.apk);summary["built_package"]=built.package
+   summary["built_version_code"]=built.version_code;summary["certificate"]=built.certificate
+   print(json.dumps(summary,ensure_ascii=False,indent=2));return 0
   elif args.command=="status":
    data=source_report(store,args.source_id)
    if not data:print("source not found",file=sys.stderr);return 2

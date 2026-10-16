@@ -27,6 +27,7 @@ from urllib.parse import urljoin, urlparse
 
 from ..crawler.arabic import (_CHAPTER_LINK, _WORK_LINK, _listing_entries,
                                _links_matching)
+from ..security.network import is_private_host
 
 __all__ = ["SiteDescriptor", "HtmlCatalogueSource"]
 
@@ -194,15 +195,28 @@ class HtmlCatalogueSource:
         return _sorted_chapters(out)
 
     def pages(self, chapter: dict) -> list[dict]:
-        """One chapter's reading pages, in order, from the links the chapter serves."""
+        """One chapter's reading pages, in order, from the links the chapter serves.
+
+        The image detector is deliberately the same one the Kotlin runtime uses
+        (``SiteHtml.IMAGE_SRC``). It used to match only ``<a href="...jpg">``, so
+        a site that lazily loads its pages with ``data-src`` looked unreadable
+        here while reading perfectly well inside the app - the converter would
+        refuse a source the reader could already handle."""
         text = self._get(chapter["url"])
         if not text:
             return []
         out = []
-        for href in dict.fromkeys(_IMAGE_HREF.findall(text)):
-            if (urlparse(urljoin(chapter["url"], href)).hostname or "") != self.d.host:
+        for href in dict.fromkeys([*_IMAGE_SRC.findall(text), *_IMAGE_LINK.findall(text)]):
+            absolute = urljoin(chapter["url"], href.strip())
+            host = (urlparse(absolute).hostname or "").lower()
+            # Reading pages are routinely served from a CDN on another host, and
+            # the generated spec pins that host, so a cross-host image is normal.
+            # What is never acceptable is a page URL aimed at the machine or a
+            # private network, which is why the page fetch stays same-host while
+            # this one only refuses what is private.
+            if is_private_host(host):
                 continue
-            out.append({"index": len(out), "url": urljoin(chapter["url"], href)})
+            out.append({"index": len(out), "url": absolute})
         out.sort(key=_page_sort_key)
         for position, page in enumerate(out):
             page["index"] = position
@@ -236,8 +250,14 @@ class HtmlCatalogueSource:
 
 #: Reading pages are linked as images. This is the same "prove it by structure"
 #: rule the work and chapter shapes use, applied to the last hop.
-_IMAGE_HREF = re.compile(
-    r"""<a[^>]+href\s*=\s*["']([^"']+\.(?:jpe?g|png|webp)(?:\?[^"']*)?)["']""", re.I)
+_IMAGE_SRC = re.compile(
+    r"""(?:src|data-src|data-original|data-lazy-src|data-original-src)\s*=\s*["']([^"']+\.(?:jpe?g|png|webp|gif)(?:\?[^"']*)?)["']""",
+    re.I)
+#: The other shape a site can serve a page in: an anchor whose href is the
+#: full-size image. Kept alongside the src family because both occur, and a site
+#: that only used one would otherwise look unreadable depending on which.
+_IMAGE_LINK = re.compile(
+    r"""<a[^>]+href\s*=\s*["']([^"']+\.(?:jpe?g|png|webp|gif)(?:\?[^"']*)?)["']""", re.I)
 _PAGE_NUMBER = re.compile(r"(\d+)")
 #: How a chapter says so in its own title. Deliberately a marker rather than a
 #: site rule: it identifies the *kind* of entry, never a particular website.

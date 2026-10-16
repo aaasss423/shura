@@ -2077,6 +2077,7 @@ class IndexIdentityAmbiguityTests(Case):
             ]
             counters = {}
             pages = 1
+            trace = []
 
         class Crawler:
             def __init__(self, http):

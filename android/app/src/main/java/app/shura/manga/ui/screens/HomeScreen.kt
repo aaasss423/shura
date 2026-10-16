@@ -15,6 +15,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import app.shura.manga.reader.ReadingProgress
 import app.shura.manga.ui.shura
 import app.shura.manga.ui.image.CoverImage
@@ -287,6 +289,24 @@ fun StatePanel(title: String, body: String, modifier: Modifier = Modifier) {
             body,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * The way back out of a screen that was pushed onto the stack.
+ *
+ * One definition for every pushed screen: a word-sized button used to sit where
+ * the arrow goes, which pushed the content it belonged to down a line and, in
+ * Arabic, took as much width as the title it preceded. The arrow mirrors itself,
+ * so it points the way out in either direction.
+ */
+@Composable
+fun ScreenBackButton(onBack: () -> Unit, modifier: Modifier = Modifier) {
+    IconButton(onClick = onBack, modifier = modifier) {
+        Icon(
+            Icons.AutoMirrored.Filled.ArrowBack,
+            contentDescription = shura("common.back"),
         )
     }
 }

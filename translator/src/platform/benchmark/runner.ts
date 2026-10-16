@@ -21,6 +21,8 @@ import type { TranslationEngine } from '../../engine/engine';
 import { CancellationToken } from '../../core/cancellation';
 import { isTranslationError } from '../../core/errors';
 import { LatencyHistogram } from '../metrics';
+import { measureStability, parseRepeats, renderStability } from './stability';
+import type { StabilityReport } from './stability';
 import type { EvalDataset, EvalItem, EvalSplit } from '../eval/dataset';
 import { claimCeiling, provenanceOf, supportsQualityClaim } from '../eval/dataset';
 import {
@@ -51,6 +53,8 @@ export interface ItemResult {
 }
 
 export type HumanVerdict = 'win' | 'tie' | 'loss' | 'unusable';
+
+const HUMAN_VERDICTS: readonly HumanVerdict[] = ['win', 'tie', 'loss', 'unusable'];
 
 export interface HumanJudgement {
   itemId: string;
@@ -149,6 +153,12 @@ export interface BenchmarkReport {
   /** The honest ceiling on what these numbers may be called. */
   claimCeiling: string;
   supportsQualityClaim: boolean;
+  /**
+   * Repeat-run agreement and score spread. Present only when the corpus was run
+   * more than once, which is the only way stability is a measurement rather than
+   * an assumption.
+   */
+  stability?: StabilityReport;
   results: ItemResult[];
 }
 
@@ -201,6 +211,12 @@ export interface RunEvalOptions {
   resources?: BenchmarkReport['resources'];
   /** What produced these numbers. */
   provenance?: BenchmarkReport['provenance'];
+  /**
+   * Repeat-run agreement and score spread, when the corpus was run more than once.
+   * Recorded on the report, not just printed: a stability number that never reaches
+   * the JSON cannot be compared against the run it belongs to.
+   */
+  stability?: StabilityReport;
   /** Runtime-reported decode rate, when one is available. */
   tokensPerSecond?: BenchmarkReport['tokensPerSecond'];
   onProgress?: (done: number, total: number) => void;
@@ -302,6 +318,7 @@ export async function runEval(options: RunEvalOptions): Promise<BenchmarkReport>
     ...(options.resources ? { resources: options.resources } : {}),
     ...(options.provenance ? { provenance: options.provenance } : {}),
     ...(options.tokensPerSecond ? { tokensPerSecond: options.tokensPerSecond } : {}),
+    ...(options.stability ? { stability: options.stability } : {}),
     ...(engineConfigurationOf(engine)),
   });
 }
@@ -328,6 +345,7 @@ export function buildReport(input: {
   resources?: BenchmarkReport['resources'];
   provenance?: BenchmarkReport['provenance'];
   tokensPerSecond?: BenchmarkReport['tokensPerSecond'];
+  stability?: BenchmarkReport['stability'];
   skipped?: { reason: string };
 }): BenchmarkReport {
   const scored = input.results
@@ -401,23 +419,96 @@ export function buildReport(input: {
     ...(input.resources ? { resources: input.resources } : {}),
     ...(input.provenance ? { provenance: input.provenance } : {}),
     ...(input.tokensPerSecond ? { tokensPerSecond: input.tokensPerSecond } : {}),
+    ...(input.stability ? { stability: input.stability } : {}),
     claimCeiling: input.claimCeiling,
     supportsQualityClaim: input.supportsQualityClaim,
     results: input.results,
   };
 }
 
-/** Human judgement store, persisted next to the dataset. */
+/**
+ * Human judgement store, persisted next to the dataset.
+ *
+ * Throws away a problem on the floor; use `loadJudgementFile` when it matters.
+ */
 export function loadJudgements(file: string): HumanJudgement[] {
+  return loadJudgementFile(file).judgements;
+}
+
+export interface JudgementFile {
+  judgements: HumanJudgement[];
+  /** Set when the file exists but could not be used. Never set when absent. */
+  problem?: string;
+}
+
+/**
+ * Loads a judgement file, tolerantly.
+ *
+ * Use this rather than `loadJudgements` when the difference between "no review was
+ * done" and "the review was discarded" matters. It always did: this file is the
+ * human evidence a selection decision rests on.
+ */
+export function loadJudgementFile(file: string): JudgementFile {
   if (!existsSync(file)) {
-    return [];
+    return { judgements: [] };
   }
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(readFileSync(file, 'utf8')) as unknown;
-    return Array.isArray(parsed) ? (parsed as HumanJudgement[]) : [];
-  } catch {
-    return [];
+    parsed = JSON.parse(readFileSync(file, 'utf8')) as unknown;
+  } catch (error) {
+    return {
+      judgements: [],
+      problem: `${file} is not valid JSON (${error instanceof Error ? error.message : String(error)}). ` +
+        'Judgements were NOT loaded; a report without them must not be read as "reviewed".',
+    };
   }
+  // Two shapes are accepted: a bare array, and `{judgements: [...]}` so the file can
+  // document itself. Keys starting with `_` are metadata and are ignored, which is
+  // how the shipped template explains itself without a JSON comment.
+  let entries: unknown[];
+  if (Array.isArray(parsed)) {
+    entries = parsed;
+  } else if (parsed !== null && typeof parsed === 'object' && Array.isArray((parsed as {judgements?: unknown}).judgements)) {
+    entries = (parsed as { judgements: unknown[] }).judgements;
+  } else {
+    return {
+      judgements: [],
+      problem: `${file} must be a JSON array of judgements, or an object with a "judgements" array.`,
+    };
+  }
+
+  const judgements: HumanJudgement[] = [];
+  const problems: string[] = [];
+  for (const [index, entry] of entries.entries()) {
+    const candidate = entry as Partial<HumanJudgement>;
+    if (typeof candidate.itemId !== 'string' || candidate.itemId.trim().length === 0) {
+      problems.push(`entry ${index}: missing itemId`);
+      continue;
+    }
+    if (!HUMAN_VERDICTS.includes(candidate.verdict as HumanVerdict)) {
+      problems.push(
+        `entry ${index} (${candidate.itemId}): verdict must be one of ${HUMAN_VERDICTS.join(', ')}`,
+      );
+      continue;
+    }
+    if (typeof candidate.reviewer !== 'string' || candidate.reviewer.trim().length === 0) {
+      problems.push(`entry ${index} (${candidate.itemId}): missing reviewer`);
+      continue;
+    }
+    judgements.push({
+      itemId: candidate.itemId,
+      verdict: candidate.verdict as HumanVerdict,
+      reviewer: candidate.reviewer,
+      ...(typeof candidate.note === 'string' ? { note: candidate.note } : {}),
+    });
+  }
+
+  return {
+    judgements,
+    ...(problems.length > 0
+      ? { problem: `${file}: ${problems.length} entr(ies) rejected — ${problems.slice(0, 5).join('; ')}` }
+      : {}),
+  };
 }
 
 export function judgementsPath(datasetRoot: string, split: EvalSplit): string {
@@ -477,6 +568,9 @@ export function renderSummary(reports: BenchmarkReport[]): string {
     if (report.provenance) {
       lines.push(`  provenance: ${report.provenance.summary}`);
     }
+    if (report.stability) {
+      lines.push(renderStability(report.stability));
+    }
     if (report.tokensPerSecond) {
       const tps = report.tokensPerSecond;
       lines.push(
@@ -513,7 +607,7 @@ export function renderSummary(reports: BenchmarkReport[]): string {
   return lines.join('\n');
 }
 
-export { claimCeiling, supportsQualityClaim };
+export { claimCeiling, supportsQualityClaim, measureStability, parseRepeats, renderStability };
 /**
  * Side-by-side comparison.
  *

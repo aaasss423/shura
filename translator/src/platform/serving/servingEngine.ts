@@ -39,6 +39,15 @@ import { getModelSpec, type ModelSpec, type ServingStyle } from './modelCatalog'
 
 const LOCAL_SOURCE_LANGUAGES: LanguageCode[] = ['en', 'ja', 'zh', 'ko', 'ar'];
 
+/**
+ * How long one readiness probe may take when nothing bounds it.
+ *
+ * A wait that has a deadline clamps this to whatever is left of it, so a caller
+ * asking "is it ready within 5s" is never made to wait 6s by a server that accepts
+ * the connection and then stalls.
+ */
+const READINESS_PROBE_TIMEOUT_MS = 3000;
+
 export interface ServingEngineOptions {
   /** Catalog id (`local-tg4`) or the full spec. */
   model: string | ModelSpec;
@@ -375,13 +384,13 @@ export class ServingEngine implements TranslationEngine, ManagedEngine {
    * model it loaded, and that model is the one requested. A server that answers
    * while serving a different model is not ready for this engine.
    */
-  async healthCheck(token?: CancellationToken): Promise<EngineHealth> {
-    const probe = await this.client.probe();
+  async healthCheck(token?: CancellationToken, probeTimeoutMs = READINESS_PROBE_TIMEOUT_MS): Promise<EngineHealth> {
+    const probe = await this.client.probe(probeTimeoutMs);
     if (!probe.reachable) {
       return { engine: this.id, healthy: false, detail: probe.detail };
     }
 
-    const selfReport = await this.client.describe();
+    const selfReport = await this.client.describe(probeTimeoutMs);
     const warnings = checkIdentity(this.identity, {
       ...(selfReport.servedAs !== undefined ? { servedAs: selfReport.servedAs } : {}),
     });
@@ -461,7 +470,11 @@ export class ServingEngine implements TranslationEngine, ManagedEngine {
       if (token?.isCancelled) {
         return { ready: false, waitedMs: Date.now() - started, detail: 'cancelled while waiting for readiness' };
       }
-      const health = await this.healthCheck(token);
+      // The probe gets whatever is left of the budget, never more. Without this a
+      // stalled probe burned 3s of a 500ms budget and then ended the wait, so a
+      // slow server reported "not ready in 5s" when it had not been probed for 3 of them.
+      const remaining = timeoutMs - (Date.now() - started);
+      const health = await this.healthCheck(token, Math.min(READINESS_PROBE_TIMEOUT_MS, remaining));
       lastDetail = health.detail ?? 'no detail';
       if (health.healthy) {
         return { ready: true, waitedMs: Date.now() - started, detail: lastDetail };

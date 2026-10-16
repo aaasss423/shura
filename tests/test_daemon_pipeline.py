@@ -90,7 +90,7 @@ class FakeCrawler:
                            name=f"Ext {v}", language="ar", provenance={"page": "p"})
                  for v in self.versions]
         return type("R", (), {"counters": {"discovered": len(cands)},
-                              "pages": 1, "candidates": cands})()
+                              "pages": 1, "candidates": cands, "trace": []})()
 
 
 class DaemonPipelineTests(unittest.TestCase):

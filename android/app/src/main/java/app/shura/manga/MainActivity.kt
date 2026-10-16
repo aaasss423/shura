@@ -9,7 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
-import app.shura.host.MangaDexChapterDownloader
+import app.shura.host.SourceChapterDownloader
 import app.shura.host.MangaDexSource
 import app.shura.host.SourceHost
 import app.shura.manga.reader.ProgressivePageLoader
@@ -32,7 +32,11 @@ import java.io.File
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Before anything is composed, so the report of a crash that happened on
+        // the way out of the last launch is the first thing on screen.
+        CrashReporter.install(this)
         setContent { ShuraApp() }
+        CrashReporter.show(this)
     }
 }
 
@@ -63,6 +67,9 @@ private data class InstallProgress(
  * and nothing else.
  */
 private const val REPOSITORY_BASE_URL = "https://shura.app/repository"
+
+/** Stands in until the first off-thread index read lands. */
+private fun emptyDirectory() = File("/nonexistent-shura-library")
 private const val KEY_DARK = "ui-dark"
 
 @androidx.compose.runtime.Composable
@@ -216,12 +223,16 @@ private fun ShuraApp() {
     // onInstallRepository has to be read lazily: the picker launcher is
     // declared after this call site, so capturing it eagerly reads a null.
     var installRequested by remember { mutableIntStateOf(0) }
-    val nav = remember {
-        // One page per call, so the reader can show page 1 while the rest
-        // download. The cache directory is keyed by chapter and page name, so
-        // re-opening a chapter reuses what already landed.
-        val chapterReader = MangaDexChapterDownloader()
-        val downloader = ChapterDownloader { _, chapterId, page ->
+    // One page per call, so the reader can show page 1 while the rest
+    // download. The cache directory is keyed by chapter and page name, so
+    // re-opening a chapter reuses what already landed.
+    //
+    // Every source, not just MangaDex: an extension publishes on its own CDN, and
+    // the MangaDex-only rule meant no page of theirs could ever be fetched. The
+    // rule that replaced it still refuses loopback, private and link-local hosts.
+    val chapterReader = remember { SourceChapterDownloader() }
+    val downloader = remember {
+        ChapterDownloader { _, chapterId, page ->
             withContext(Dispatchers.IO) {
                 val dir = File(
                     context.cacheDir,
@@ -230,6 +241,16 @@ private fun ShuraApp() {
                 Uri.fromFile(chapterReader.downloadPage(page, dir))
             }
         }
+    }
+    // Chapter saves. The queue outlives any screen, so a download survives
+    // navigating away from the chapter list, and it tells the activity when the
+    // library on disk has actually changed.
+    val downloads = remember { DownloadQueue(context, scope, downloader) }
+    DisposableEffect(downloads) {
+        downloads.onLibraryChanged = { libraryVersion += 1 }
+        onDispose { downloads.onLibraryChanged = null }
+    }
+    val nav = remember {
         ShuraNav(
             sourceHost = sourceHost,
             downloader = downloader,
@@ -237,6 +258,7 @@ private fun ShuraApp() {
             progressStore = progressStore,
             translationCache = translationCache,
             context = context,
+            downloads = downloads,
             // No translation engine is reachable; the reader says so rather than
             // pretending the control works.
             translationEngineAvailable = BuildConfig.TRANSLATION_ENABLED,
@@ -291,7 +313,16 @@ private fun ShuraApp() {
     val installState = remember { mutableStateMapOf<String, InstallProgress>() }
 
     val history = remember(historyVersion) { progressStore.history() }
-    val library = remember(libraryVersion) { indexStoredChapters(chapterStore(context)) }
+    // The library index reads a directory listing and a JSON manifest per chapter.
+    // That is disk I/O, and a `remember` runs it on the main thread - so opening
+    // the library blocked the UI for as long as the disk took, which is exactly how
+    // Android decides an app is not responding and closes it. Read once off the
+    // thread instead, and show what was last known until the new answer lands.
+    var library by remember { mutableStateOf(indexStoredChapters(emptyDirectory())) }
+    LaunchedEffect(libraryVersion) {
+        val indexed = withContext(Dispatchers.IO) { indexStoredChapters(chapterStore(context)) }
+        library = indexed
+    }
 
     // The reader's data source: the pages of whatever is open.
     // The loader for the chapter currently open. Kept so switching chapters
@@ -303,6 +334,7 @@ private fun ShuraApp() {
     // The reading layout, kept between launches - see ReaderSettings.
     val readerSettingsStore = remember { ReaderSettingsStore(context) }
     var readerMode by remember { mutableStateOf(readerSettingsStore.load().mode) }
+    var readerPreferences by remember { mutableStateOf(readerSettingsStore.loadPreferences()) }
 
     val openChapter: (app.shura.source.ShuraSource, app.shura.source.Chapter, String) -> Unit =
         { source, chapter, cover ->
@@ -338,6 +370,11 @@ private fun ShuraApp() {
                     val fresh = ProgressivePageLoader<Uri>(
                         pageCount = refs.size,
                         failedPage = failedPage,
+                        // From the reader's own settings, so "preload ahead" and
+                        // "parallel downloads" are settings rather than constants
+                        // buried in the loader's signature.
+                        lookAhead = readerPreferences.preload,
+                        parallelism = readerPreferences.parallelism,
                         fetch = { index ->
                             runCatching {
                                 nav.downloader.pageAt(source, chapter.id, refs[index])
@@ -384,6 +421,11 @@ private fun ShuraApp() {
         onReaderModeChange = { chosen ->
             readerMode = chosen
             readerSettingsStore.save(ReaderSettings(chosen))
+        },
+        readerPreferences = readerPreferences,
+        onReaderPreferencesChange = { chosen ->
+            readerPreferences = chosen
+            readerSettingsStore.savePreferences(chosen)
         },
         isLoading = isLoading,
         loadError = loadError,

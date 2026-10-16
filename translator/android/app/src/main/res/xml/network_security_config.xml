@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext policy.
+
+  The default server address is http://127.0.0.1:8787, and since targetSdk 34
+  Android blocks cleartext by default: every request would fail with
+  "CLEARTEXT communication to 127.0.0.1 not permitted by network security policy".
+  The exception is therefore loopback only, which is where the platform server runs
+  on a developer machine or inside an emulator.
+
+  Everything else stays https-only. A server on a LAN or the internet must be
+  reached over TLS; widening this list to a subnet would put translation traffic,
+  and any credential sent with it, on the wire in plaintext.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <!-- The device itself. Works with `adb reverse tcp:8787 tcp:8787`. -->
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+        <!-- The host machine, as seen from an Android emulator. -->
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>

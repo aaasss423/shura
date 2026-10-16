@@ -25,6 +25,21 @@ class CrawlCoordinator:
                 page_left=max(0,self.max_pages-self.counters["pages"]);candidate_left=max(0,self.max_candidates-self.counters["discovered"])
                 instance=crawler(http) if source.kind not in ("html",) else crawler(http,page_left)
                 result=instance.crawl(source,{"max_pages":page_left,"max_candidates":candidate_left})
+                refusals=[str(t["refused"]) for t in result.trace if t.get("refused")]
+                if refusals and not result.candidates:
+                    # A crawler that refused everything it was offered has not crawled the
+                    # source, it has declined it. Recording that as a success is what let a
+                    # source whose artifact had gone missing look healthy for days.
+                    #
+                    # It is still reported as a failed pass and still notifies, but it is
+                    # NOT charged to the source's failure ladder. A refusal means the
+                    # artifact is not built yet or is misconfigured - a build state - and
+                    # counting it would drive the source to DEAD, which is terminal, so
+                    # the loop could never recover once the APK was finally built.
+                    self.store.event(source.source_id,"crawl_refused",{"reason":"; ".join(refusals)})
+                    self.counters["sourcesRefused"]+=1;self.counters["sourcesFailed"]+=1
+                    if self.notifier:self.notifier.send(f"Shura crawl refusal: {source.name}: {'; '.join(refusals)}")
+                    continue
                 self.counters.update(result.counters);self.counters["pages"]+=result.pages
                 fresh=[]
                 for c in result.candidates:

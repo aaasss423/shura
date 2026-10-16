@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import app.shura.manga.reader.translation.TranslationCache
 import app.shura.manga.reader.ReaderMode
+import app.shura.manga.reader.ReaderPreferences
 import app.shura.source.Chapter
 import app.shura.manga.reader.translation.TranslationMode
 import app.shura.manga.reader.translation.TranslationSettings
@@ -102,6 +103,9 @@ fun ReaderScreen(
     translationSettings: TranslationSettings = TranslationSettings(),
     onTranslationSettingsChange: (TranslationSettings) -> Unit = {},
     translationCache: TranslationCache? = null,
+    /** Brightness, preload, screen-awake and download parallelism. */
+    readerPreferences: ReaderPreferences = ReaderPreferences(),
+    onReaderPreferencesChange: (ReaderPreferences) -> Unit = {},
     /** Whether a translation engine is actually reachable. */
     translationEngineAvailable: Boolean = false,
     isLoading: Boolean = false,
@@ -184,11 +188,16 @@ fun ReaderScreen(
 
     Box(modifier.fillMaxSize().background(Ink).then(surfaceModifier)) {
         when {
-            loadError != null -> ReaderMessage(
-                title = shura("common.error"),
-                body = loadError,
-                actionLabel = onRetry?.let { shura("common.retry") },
-                onAction = onRetry ?: {},
+            loadError != null -> WayOut(
+                message = {
+                    ReaderMessage(
+                        title = shura("common.error"),
+                        body = loadError,
+                        actionLabel = onRetry?.let { shura("common.retry") },
+                        onAction = onRetry ?: {},
+                    )
+                },
+                onBack = onBack,
             )
             isLoading -> Column(
                 Modifier.fillMaxSize(),
@@ -198,12 +207,24 @@ fun ReaderScreen(
                 CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(12.dp))
                 Text(shura("common.loading"), color = Color(0xB3FFFFFF))
+                // Loading that never finishes must still be leaveable. The toolbar
+                // hides itself after a few seconds, so relying on its arrow means a
+                // chapter that hangs is a chapter the reader cannot get out of.
+                Spacer(Modifier.height(16.dp))
+                TextButton(onClick = onBack) {
+                    Text(shura("common.back"), color = Color(0xFFFFFFFF))
+                }
             }
-            pages.isEmpty() -> ReaderMessage(
-                title = shura("nav.reader"),
-                body = shura("reader.noPages"),
-                actionLabel = onOpenNextChapter?.let { shura("reader.next") },
-                onAction = { onOpenNextChapter?.invoke() },
+            pages.isEmpty() -> WayOut(
+                message = {
+                    ReaderMessage(
+                        title = shura("nav.reader"),
+                        body = shura("reader.noPages"),
+                        actionLabel = onOpenNextChapter?.let { shura("reader.next") },
+                        onAction = { onOpenNextChapter?.invoke() },
+                    )
+                },
+                onBack = onBack,
             )
             paged -> HorizontalPager(
                 state = pagerState,
@@ -218,6 +239,7 @@ fun ReaderScreen(
                     translationPending = translationSettings.mode != TranslationMode.OFF &&
                         !translationEngineAvailable,
                     onTap = { barVisible = !barVisible },
+                    onRetry = { onRetryPage?.invoke(index) },
                 )
             }
 
@@ -238,6 +260,7 @@ fun ReaderScreen(
                             ?.getOrNull(index),
                         translationPending = translationSettings.mode != TranslationMode.OFF &&
                             !translationEngineAvailable,
+                        onRetry = { onRetryPage?.invoke(index) },
                     )
                 }
             }
@@ -281,14 +304,41 @@ fun ReaderScreen(
                 chapters = chapters,
                 currentChapterId = chapterId,
                 totalPages = totalPages ?: pages.size,
+                currentPage = currentIndex + 1,
                 mode = mode,
                 onModeChange = onModeChange,
+                preferences = readerPreferences,
+                onPreferencesChange = onReaderPreferencesChange,
                 onOpenChapter = { chapter ->
                     sheet = null
                     onJumpToChapter?.invoke(chapter)
                 },
                 onDismiss = { sheet = null },
             )
+        }
+    }
+}
+
+/**
+ * A message with a way out under it.
+ *
+ * Every state where there is no page to read gets one. A chapter that failed, hung
+ * or turned out to be empty showed a single action - Retry, or Next - and when
+ * neither existed the reader was stuck: the only exit was the arrow in a toolbar
+ * that hides itself after three seconds. Leaving is never the thing a reader should
+ * have to discover on their own.
+ */
+@Composable
+private fun WayOut(message: @Composable () -> Unit, onBack: () -> Unit) {
+    Column(
+        Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        message()
+        Spacer(Modifier.height(16.dp))
+        TextButton(onClick = onBack) {
+            Text(shura("common.back"), color = Color(0xFFFFFFFF))
         }
     }
 }
@@ -309,6 +359,13 @@ private fun ReaderPage(
     translationPending: Boolean,
     /** Tapping the page, as opposed to dragging it. */
     onTap: () -> Unit = {},
+    /**
+     * Re-fetches this one page.
+     *
+     * A request rather than an index so the page does not have to know who owns the
+     * loader; the reader passes the retry the activity already wired.
+     */
+    onRetry: () -> Unit = {},
 ) {
     var scale by remember(uri) { mutableFloatStateOf(1f) }
     // Zoom is per page and never inherited from the one before it: opening a
@@ -345,7 +402,7 @@ private fun ReaderPage(
             transform = transform,
             onToggleZoom = { scale = if (scale > 1.01f) 1f else 2.5f },
             onTap = onTap,
-            onRetry = { uri },
+            onRetry = onRetry,
         )
         if (!translation.isNullOrBlank()) {
             Surface(

@@ -210,10 +210,19 @@ def build_plan(descriptor, *, observed_hrefs: list[str] | None = None,
         plan.blockers.append("no page image pattern was proven, so no reading pages")
     observed_pages = list(observed_page_images or [])
     plan.chapter_href = derive_chapter_shape(work_url, list(observed_chapter_urls or []))
-    plan.image_host = urlparse(observed_pages[0]).hostname or "" if observed_pages else ""
     if observed_pages:
         plan.page_image_prefix = derive_page_prefix(
             observed_pages, chapter_url or "", work_url or "")
+    # The host is taken from the pages that actually match the proven prefix,
+    # not from the first image on the page. Those differ whenever a chapter page
+    # carries a logo or banner ahead of its pages, and the runtime rejects any
+    # page whose host is not this one - so taking the first image pins the
+    # extension to the CDN that serves the logo and it then reads no pages at
+    # all. With no prefix there is nothing to narrow by, so it is left unset
+    # rather than guessed, and the prefix check below refuses the plan anyway.
+    matching = [src for src in observed_pages
+                if plan.page_image_prefix and re.search(plan.page_image_prefix, src)]
+    plan.image_host = urlparse(matching[0]).hostname or "" if matching else ""
     if page_images_observed is False:
         plan.blockers.append(
             "a chapter page was read and served no reading images, so this site "

@@ -178,6 +178,8 @@ npm run benchmark -- \
 | `--concurrency N` | in-flight requests; default 1 |
 | `--batch-size N` / `--batch-window-ms N` | micro-batching; `0` disables it |
 | `--budget-ms N` | cap the whole run |
+| `--repeat N` | run the corpus N times and report stability |
+| `--model-path P` | weight file, for the SHA-256 in provenance |
 | `--limit N` | first N items, for a smoke pass |
 | `--show-samples N` | print N item-level outputs |
 | `--json PATH` | machine-readable report |
@@ -252,10 +254,41 @@ never in the table.
 - **Never mix mock and real numbers.** Mock runs exist only to validate the harness
   and their output is prefixed `MOCK`.
 
+### Stability
+
+One run cannot distinguish a stable model from a lucky one. Repeat the corpus:
+
+```bash
+npm run benchmark -- --engines local-tg4 --split test --revision <sha> --repeat 3 --json bench-tg4.json
+```
+
+which reports, per candidate:
+
+- `agreement` — the fraction of items whose output was byte-identical across every
+  repeat. Below 1.0 the score is a distribution, not a point.
+- `chrF min/max/spread` — the error bar on any comparison drawn from one run.
+- `flakyItems` / `hardFailures` / `failures per repeat`.
+
+Even at temperature 0 this is not guaranteed to be 1.0: batch composition changes
+reduction order in the kernels. A model that is not bit-stable is still usable, but
+its score must be quoted with the spread attached.
+
 ### Human review
 
-`eval/judgements-test.json` starts empty. A fluent Arabic reviewer fills
-`{itemId, verdict: win|tie|loss|unusable, reviewer, note}`.
+`eval/judgements-test.template.json` documents the format and is deliberately *not*
+named `judgements-test.json`, so the real file stays absent until a fluent Arabic
+reviewer produces it. Copy it to `eval/judgements-test.json` and fill in:
+
+```json
+{ "itemId": "ja-h-01", "verdict": "win", "reviewer": "<name>", "note": "<why>" }
+```
+
+`verdict` must be `win`, `tie`, `loss` or `unusable`.
+
+The loader validates rather than trusting: a malformed entry is rejected and
+reported, and an unusable file produces a visible
+`HUMAN REVIEW DATA PROBLEM:` line instead of being silently dropped — a discarded
+review must never be readable as "no review performed".
 
 Until that file is non-empty, every report prints
 `human: no judgements recorded (human review not performed)` and no selection may

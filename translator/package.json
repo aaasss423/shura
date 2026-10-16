@@ -33,7 +33,11 @@
     "loadtest": "npm run build && node dist/src/scripts/loadtest.js",
     "serving:plan": "npm run build && node dist/src/scripts/servingPlan.js",
     "preflight": "npm run build && node dist/src/scripts/preflight.js --all",
-    "serve": "npm run build && node dist/src/scripts/serve.js"
+    "serve": "npm run build && node dist/src/scripts/serve.js",
+    "apk:debug": "gradle -p android :app:publishDebugApk",
+    "apk:release": "gradle -p android :app:publishReleaseApk",
+    "apk:test": "gradle -p android :app:testDebugUnitTest",
+    "apk:all": "npm run apk:test && npm run apk:release && npm run apk:debug"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

@@ -30,7 +30,16 @@ import {
   aggregate,
   groupScores,
 } from '../../src/platform/eval/scoring';
-import { runEval, renderSummary, loadJudgements, judgementsPath } from '../../src/platform/benchmark/runner';
+import {
+  runEval,
+  renderSummary,
+  loadJudgements,
+  loadJudgementFile,
+  judgementsPath,
+  measureStability,
+} from '../../src/platform/benchmark/runner';
+import { writeJudgementFile } from './helpers/judgementsExample';
+import { join } from 'node:path';
 import { KnowledgeRepository } from '../../src/platform/knowledge/repository';
 import { TranslationMemoryRepository } from '../../src/platform/memory/repository';
 import { ResearchQueue } from '../../src/platform/research/queue';
@@ -453,6 +462,37 @@ describe('benchmark runner', () => {
     assert.match(text, /claim ceiling/i);
     assert.match(text, /human review not performed/i);
   });
+
+  it('records a stability measurement on the report, not only on stdout', async () => {
+    // runEval declared a `stability` option and never forwarded it to buildReport, so
+    // a caller passing one got a report with no stability in it — and none in the JSON.
+    const first = await runEval({
+      engine: new DeterministicEngine(),
+      items,
+      datasetVersion: real.manifest.version,
+      split: 'test',
+    });
+    const second = await runEval({
+      engine: new DeterministicEngine(),
+      items,
+      datasetVersion: real.manifest.version,
+      split: 'test',
+    });
+    assert.equal(first.stability, undefined, 'one run is not a stability measurement');
+
+    const stability = measureStability([first.results, second.results]);
+    const report = await runEval({
+      engine: new DeterministicEngine(),
+      items,
+      datasetVersion: real.manifest.version,
+      split: 'test',
+      stability,
+    });
+    assert.equal(report.stability?.repeats, 2);
+    assert.equal(report.stability?.agreementRatio, 1);
+    assert.match(renderSummary([report]), /stability: 2 repeat\(s\)/);
+    assert.deepEqual(JSON.parse(JSON.stringify(report)).stability.repeats, 2, 'the JSON must carry it too');
+  });
 });
 
 describe('human judgement files', () => {
@@ -462,5 +502,78 @@ describe('human judgement files', () => {
 
   it('ignores an unreadable judgement file rather than crashing the run', () => {
     assert.deepEqual(loadJudgements('/nonexistent/judgements-test.json'), []);
+  });
+});
+
+describe('human judgement file', () => {
+  it('reads a bare array', async () => {
+    const file = await writeJudgementFile([
+      { itemId: 'ja-h-01', verdict: 'win', reviewer: 'tester' },
+      { itemId: 'ja-h-02', verdict: 'loss', reviewer: 'tester', note: 'worse' },
+    ]);
+    const loaded = loadJudgementFile(file);
+    assert.equal(loaded.problem, undefined);
+    assert.equal(loaded.judgements.length, 2);
+    assert.equal(loaded.judgements[0]!.verdict, 'win');
+  });
+
+  it('reads a self-documenting object and ignores its metadata', async () => {
+    const file = await writeJudgementFile({
+      _comment: ['template'],
+      judgements: [{ itemId: 'ja-h-01', verdict: 'tie', reviewer: 'tester' }],
+    });
+    const loaded = loadJudgementFile(file);
+    assert.equal(loaded.problem, undefined);
+    assert.equal(loaded.judgements.length, 1);
+  });
+
+  it('reports a problem instead of silently discarding a malformed file', async () => {
+    const file = await writeJudgementFile('{ this is not json');
+    const loaded = loadJudgementFile(file);
+    assert.equal(loaded.judgements.length, 0);
+    assert.match(loaded.problem ?? '', /not valid JSON/);
+    assert.match(loaded.problem ?? '', /must not be read as "reviewed"/);
+  });
+
+  it('rejects a file that is neither an array nor a wrapper', async () => {
+    const file = await writeJudgementFile({ verdicts: [] });
+    assert.match(loadJudgementFile(file).problem ?? '', /must be a JSON array/);
+  });
+
+  it('rejects entries with a bad verdict, a missing itemId or a missing reviewer', async () => {
+    const file = await writeJudgementFile([
+      { itemId: 'a', verdict: 'excellent', reviewer: 'tester' },
+      { verdict: 'win', reviewer: 'tester' },
+      { itemId: 'c', verdict: 'win' },
+      { itemId: 'd', verdict: 'win', reviewer: 'tester' },
+    ]);
+    const loaded = loadJudgementFile(file);
+    assert.equal(loaded.judgements.length, 1, 'only the valid entry survives');
+    const problem = loaded.problem ?? '';
+    assert.match(problem, /verdict must be one of/);
+    assert.match(problem, /missing itemId/);
+    assert.match(problem, /missing reviewer/);
+  });
+
+  it('distinguishes an absent file from an unusable one', async () => {
+    assert.deepEqual(loadJudgementFile('/nonexistent/judgements-test.json'), { judgements: [] });
+  });
+
+  it('accepts every documented verdict', async () => {
+    const file = await writeJudgementFile(
+      (['win', 'tie', 'loss', 'unusable'] as const).map((verdict, i) => ({
+        itemId: `item-${i}`,
+        verdict,
+        reviewer: 'tester',
+      })),
+    );
+    assert.equal(loadJudgementFile(file).judgements.length, 4);
+  });
+
+  it('ships a template that loads as an empty review', async () => {
+    const template = join(defaultEvalRoot(), 'judgements-test.template.json');
+    const loaded = loadJudgementFile(template);
+    assert.equal(loaded.problem, undefined, 'the shipped template must be valid');
+    assert.equal(loaded.judgements.length, 0, 'a template is not a review');
   });
 });

@@ -1,0 +1,26 @@
+{
+  "_comment": [
+    "TEMPLATE — copy to eval/judgements-test.json and fill it in.",
+    "Deliberately NOT named judgements-test.json so the real file stays absent until a",
+    "fluent Arabic reviewer produces it. Until then every report prints:",
+    "  human: no judgements recorded (human review not performed)",
+    "and no model selection may be recorded.",
+    "",
+    "Schema: one object per item. verdict must be exactly one of:",
+    "  win       the reviewed output is better",
+    "  tie       neither is better",
+    "  loss      the reviewed output is worse",
+    "  unusable  the output is not Arabic, or is otherwise unusable",
+    "reviewer must be non-empty. note is optional but is where the judgement that",
+    "automatic metrics cannot make gets written.",
+    "",
+    "Only the 'test' split is judged; the dev split is for development."
+  ],
+  "_how_to_produce": [
+    "1. npm run benchmark -- --engines <id> --split test --show-samples 50 > review-<id>.txt",
+    "2. Have a fluent Arabic reviewer read each line and judge the output against the reference.",
+    "3. Record one object per item below, using the itemId exactly as printed.",
+    "4. Re-run the benchmark; the report will then carry the human section."
+  ],
+  "judgements": []
+}
