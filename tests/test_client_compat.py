@@ -995,7 +995,22 @@ class DuplicateVersionListingTests(unittest.TestCase):
         # Both procomic releases keep distinct, non-colliding version codes;
         # the point of the test is that they do not collapse into one entry.
         codes = sorted(e["versionCode"] for e in store["extensions"])
-        self.assertEqual(codes, sorted(set(codes)))
+        # Distinct per package, not across the whole repository. Mihon collapses
+        # `groupBy(pkgName to signingKey)`, so a code shared by two different
+        # packages is never compared against anything and is harmless. Two
+        # unrelated extensions legitimately ship the same version (the Arabic
+        # index has several at 1.6.14), so pinning repo-wide uniqueness asserts
+        # a property the client never relies on and that real content cannot
+        # satisfy.
+        per_package = {}
+        for ext in store["extensions"]:
+            per_package.setdefault(ext["packageName"], []).append(ext["versionCode"])
+        for package, package_codes in per_package.items():
+            with self.subTest(package=package):
+                self.assertEqual(
+                    sorted(package_codes), sorted(set(package_codes)),
+                    f"{package} has two listings Mihon would collapse to the wrong one",
+                )
         self.assertEqual([c for c in codes if c in (10500, 10501)], [10500, 10501])
 
 

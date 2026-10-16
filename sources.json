@@ -1,5 +1,30 @@
 [
   {
+    "source_id": "index:keiyoushi/extensions",
+    "name": "Keiyoushi Arabic extensions",
+    "url": "https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.json",
+    "kind": "index",
+    "language": "ar",
+    "region": "ar",
+    "enabled": true,
+    "configuration": {
+      "allowed_hosts": [
+        "raw.githubusercontent.com",
+        "github.com",
+        "objects.githubusercontent.com",
+        "release-assets.githubusercontent.com"
+      ],
+      "languages": [
+        "ar"
+      ],
+      "package": "eu.kanade.tachiyomi.extension.ar",
+      "signing_key": "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2",
+      "repository_url": "https://github.com/keiyoushi/extensions",
+      "library": "tachiyomi",
+      "operator_notes": "The upstream Mihon-format extension index, filtered to Arabic. Read in the same nested extensionList shape a reader consumes, so the repository can be populated from the ecosystem's real source instead of one hand-listed GitHub repository. Their signing key is pinned here, and because the publisher takes the majority signer as the repository anchor, a repository dominated by these extensions advertises the key a reader needs in order to accept them."
+    }
+  },
+  {
     "source_id": "github:lonevertex/mihon-extension-ar-procomic",
     "name": "ProComic (AR)",
     "url": "https://api.github.com/repos/lonevertex/mihon-extension-ar-procomic/releases",

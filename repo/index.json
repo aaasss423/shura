@@ -28,5 +28,565 @@
     "version": "1.0",
     "nsfw": 0,
     "sources": []
+  },
+  {
+    "name": "Anyone Manga",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.anyonemanga",
+    "apk": "eu_kanade_tachiyomi_extension_ar_anyonemanga-1.6.56.apk",
+    "lang": "ar",
+    "code": 10656,
+    "version": "1.6.56",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Manga Bab",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.arabhentai",
+    "apk": "eu_kanade_tachiyomi_extension_ar_arabhentai-1.6.2.apk",
+    "lang": "ar",
+    "code": 10602,
+    "version": "1.6.2",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "ArabManhwa",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.arabmanhwa",
+    "apk": "eu_kanade_tachiyomi_extension_ar_arabmanhwa-1.6.56.apk",
+    "lang": "ar",
+    "code": 10656,
+    "version": "1.6.56",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Arabs Hentai",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.arabshentai",
+    "apk": "eu_kanade_tachiyomi_extension_ar_arabshentai-1.6.0.apk",
+    "lang": "ar",
+    "code": 10600,
+    "version": "1.6.0",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Arab Toons",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.arabtoons",
+    "apk": "eu_kanade_tachiyomi_extension_ar_arabtoons-1.6.57.apk",
+    "lang": "ar",
+    "code": 10657,
+    "version": "1.6.57",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "ArbxComix",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.arbxcomix",
+    "apk": "eu_kanade_tachiyomi_extension_ar_arbxcomix-1.6.55.apk",
+    "lang": "ar",
+    "code": 10655,
+    "version": "1.6.55",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Area Manga",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.areamanga",
+    "apk": "eu_kanade_tachiyomi_extension_ar_areamanga-1.6.2.apk",
+    "lang": "ar",
+    "code": 10602,
+    "version": "1.6.2",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "AR Hentai",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.arhentai",
+    "apk": "eu_kanade_tachiyomi_extension_ar_arhentai-1.6.55.apk",
+    "lang": "ar",
+    "code": 10655,
+    "version": "1.6.55",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "AriaToon",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.ariatoon",
+    "apk": "eu_kanade_tachiyomi_extension_ar_ariatoon-1.6.1.apk",
+    "lang": "ar",
+    "code": 10601,
+    "version": "1.6.1",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Azora",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.azora",
+    "apk": "eu_kanade_tachiyomi_extension_ar_azora-1.6.73.apk",
+    "lang": "ar",
+    "code": 10673,
+    "version": "1.6.73",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Comic Verse",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.comicverse",
+    "apk": "eu_kanade_tachiyomi_extension_ar_comicverse-1.6.17.apk",
+    "lang": "ar",
+    "code": 10617,
+    "version": "1.6.17",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Despair Manga",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.despairmanga",
+    "apk": "eu_kanade_tachiyomi_extension_ar_despairmanga-1.6.1.apk",
+    "lang": "ar",
+    "code": 10601,
+    "version": "1.6.1",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Detective Conan Ar",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.detectiveconanar",
+    "apk": "eu_kanade_tachiyomi_extension_ar_detectiveconanar-1.6.58.apk",
+    "lang": "ar",
+    "code": 10658,
+    "version": "1.6.58",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Dilar",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.dilar",
+    "apk": "eu_kanade_tachiyomi_extension_ar_dilar-1.6.18.apk",
+    "lang": "ar",
+    "code": 10618,
+    "version": "1.6.18",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Duskoryvile",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.duskoryvile",
+    "apk": "eu_kanade_tachiyomi_extension_ar_duskoryvile-1.6.1.apk",
+    "lang": "ar",
+    "code": 10601,
+    "version": "1.6.1",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Empire Webtoon",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.empirewebtoon",
+    "apk": "eu_kanade_tachiyomi_extension_ar_empirewebtoon-1.6.61.apk",
+    "lang": "ar",
+    "code": 10661,
+    "version": "1.6.61",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "EShadow",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.eshadow",
+    "apk": "eu_kanade_tachiyomi_extension_ar_eshadow-1.6.1.apk",
+    "lang": "ar",
+    "code": 10601,
+    "version": "1.6.1",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Goon Scans",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.goonscans",
+    "apk": "eu_kanade_tachiyomi_extension_ar_goonscans-1.6.1.apk",
+    "lang": "ar",
+    "code": 10601,
+    "version": "1.6.1",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Hentai Lek",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.hentailek",
+    "apk": "eu_kanade_tachiyomi_extension_ar_hentailek-1.6.2.apk",
+    "lang": "ar",
+    "code": 10602,
+    "version": "1.6.2",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "HentaiMan",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.hentaiman",
+    "apk": "eu_kanade_tachiyomi_extension_ar_hentaiman-1.6.0.apk",
+    "lang": "ar",
+    "code": 10600,
+    "version": "1.6.0",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Hentai Slayer",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.hentaislayer",
+    "apk": "eu_kanade_tachiyomi_extension_ar_hentaislayer-1.6.0.apk",
+    "lang": "ar",
+    "code": 10600,
+    "version": "1.6.0",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Hijala",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.hijala",
+    "apk": "eu_kanade_tachiyomi_extension_ar_hijala-1.6.3.apk",
+    "lang": "ar",
+    "code": 10603,
+    "version": "1.6.3",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "HizoManga",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.hizomanga",
+    "apk": "eu_kanade_tachiyomi_extension_ar_hizomanga-1.6.56.apk",
+    "lang": "ar",
+    "code": 10656,
+    "version": "1.6.56",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Kawii Manga",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.kawiimanga",
+    "apk": "eu_kanade_tachiyomi_extension_ar_kawiimanga-1.6.2.apk",
+    "lang": "ar",
+    "code": 10602,
+    "version": "1.6.2",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Lava Scans",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.lavascans",
+    "apk": "eu_kanade_tachiyomi_extension_ar_lavascans-1.6.1.apk",
+    "lang": "ar",
+    "code": 10601,
+    "version": "1.6.1",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Loner Translations",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.lonertranslations",
+    "apk": "eu_kanade_tachiyomi_extension_ar_lonertranslations-1.6.14.apk",
+    "lang": "ar",
+    "code": 10614,
+    "version": "1.6.14",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "3asq",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.manga3asq",
+    "apk": "eu_kanade_tachiyomi_extension_ar_manga3asq-1.6.59.apk",
+    "lang": "ar",
+    "code": 10659,
+    "version": "1.6.59",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Manga Ai Land",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.mangaailand",
+    "apk": "eu_kanade_tachiyomi_extension_ar_mangaailand-1.6.14.apk",
+    "lang": "ar",
+    "code": 10614,
+    "version": "1.6.14",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "MangaCloud",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.mangacloud",
+    "apk": "eu_kanade_tachiyomi_extension_ar_mangacloud-1.6.1.apk",
+    "lang": "ar",
+    "code": 10601,
+    "version": "1.6.1",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "MangaDar",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.mangadar",
+    "apk": "eu_kanade_tachiyomi_extension_ar_mangadar-1.6.2.apk",
+    "lang": "ar",
+    "code": 10602,
+    "version": "1.6.2",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "MangaHub",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.mangahub",
+    "apk": "eu_kanade_tachiyomi_extension_ar_mangahub-1.6.16.apk",
+    "lang": "ar",
+    "code": 10616,
+    "version": "1.6.16",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Mangalek",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.mangalek",
+    "apk": "eu_kanade_tachiyomi_extension_ar_mangalek-1.6.68.apk",
+    "lang": "ar",
+    "code": 10668,
+    "version": "1.6.68",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Mangalink",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.mangalink",
+    "apk": "eu_kanade_tachiyomi_extension_ar_mangalink-1.6.60.apk",
+    "lang": "ar",
+    "code": 10660,
+    "version": "1.6.60",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "MangaLionz",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.mangalionz",
+    "apk": "eu_kanade_tachiyomi_extension_ar_mangalionz-1.6.60.apk",
+    "lang": "ar",
+    "code": 10660,
+    "version": "1.6.60",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "MangaSpark",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.mangaspark",
+    "apk": "eu_kanade_tachiyomi_extension_ar_mangaspark-1.6.63.apk",
+    "lang": "ar",
+    "code": 10663,
+    "version": "1.6.63",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Manga Starz",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.mangastarz",
+    "apk": "eu_kanade_tachiyomi_extension_ar_mangastarz-1.6.65.apk",
+    "lang": "ar",
+    "code": 10665,
+    "version": "1.6.65",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "MangaSwat",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.mangaswat",
+    "apk": "eu_kanade_tachiyomi_extension_ar_mangaswat-1.6.61.apk",
+    "lang": "ar",
+    "code": 10661,
+    "version": "1.6.61",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Manga Tales",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.mangatales",
+    "apk": "eu_kanade_tachiyomi_extension_ar_mangatales-1.6.4.apk",
+    "lang": "ar",
+    "code": 10604,
+    "version": "1.6.4",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "MangaTek",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.mangatek",
+    "apk": "eu_kanade_tachiyomi_extension_ar_mangatek-1.6.8.apk",
+    "lang": "ar",
+    "code": 10608,
+    "version": "1.6.8",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "MangaTik",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.mangatik",
+    "apk": "eu_kanade_tachiyomi_extension_ar_mangatik-1.6.1.apk",
+    "lang": "ar",
+    "code": 10601,
+    "version": "1.6.1",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "MangaTime",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.mangatime",
+    "apk": "eu_kanade_tachiyomi_extension_ar_mangatime-1.6.1.apk",
+    "lang": "ar",
+    "code": 10601,
+    "version": "1.6.1",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "MangaTuk",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.mangatuk",
+    "apk": "eu_kanade_tachiyomi_extension_ar_mangatuk-1.6.0.apk",
+    "lang": "ar",
+    "code": 10600,
+    "version": "1.6.0",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Manhatok",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.manhatok",
+    "apk": "eu_kanade_tachiyomi_extension_ar_manhatok-1.6.15.apk",
+    "lang": "ar",
+    "code": 10615,
+    "version": "1.6.15",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Murim",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.murim",
+    "apk": "eu_kanade_tachiyomi_extension_ar_murim-1.6.15.apk",
+    "lang": "ar",
+    "code": 10615,
+    "version": "1.6.15",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "NeverScans",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.neverscans",
+    "apk": "eu_kanade_tachiyomi_extension_ar_neverscans-1.6.1.apk",
+    "lang": "ar",
+    "code": 10601,
+    "version": "1.6.1",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Oduto",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.oduto",
+    "apk": "eu_kanade_tachiyomi_extension_ar_oduto-1.6.1.apk",
+    "lang": "ar",
+    "code": 10601,
+    "version": "1.6.1",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Onma",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.onma",
+    "apk": "eu_kanade_tachiyomi_extension_ar_onma-1.6.0.apk",
+    "lang": "ar",
+    "code": 10600,
+    "version": "1.6.0",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Orca Manga",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.orcamanga",
+    "apk": "eu_kanade_tachiyomi_extension_ar_orcamanga-1.6.15.apk",
+    "lang": "ar",
+    "code": 10615,
+    "version": "1.6.15",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Paradise BL",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.paradisebl",
+    "apk": "eu_kanade_tachiyomi_extension_ar_paradisebl-1.6.55.apk",
+    "lang": "ar",
+    "code": 10655,
+    "version": "1.6.55",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Rocks Manga",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.rocksmanga",
+    "apk": "eu_kanade_tachiyomi_extension_ar_rocksmanga-1.6.58.apk",
+    "lang": "ar",
+    "code": 10658,
+    "version": "1.6.58",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "StellarSaber",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.stellarsaber",
+    "apk": "eu_kanade_tachiyomi_extension_ar_stellarsaber-1.6.34.apk",
+    "lang": "ar",
+    "code": 10634,
+    "version": "1.6.34",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Team X",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.teamx",
+    "apk": "eu_kanade_tachiyomi_extension_ar_teamx-1.6.33.apk",
+    "lang": "ar",
+    "code": 10633,
+    "version": "1.6.33",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "XSano Manga",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.xsanomanga",
+    "apk": "eu_kanade_tachiyomi_extension_ar_xsanomanga-1.6.14.apk",
+    "lang": "ar",
+    "code": 10614,
+    "version": "1.6.14",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Yokai",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.yokai",
+    "apk": "eu_kanade_tachiyomi_extension_ar_yokai-1.6.16.apk",
+    "lang": "ar",
+    "code": 10616,
+    "version": "1.6.16",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Yona Bar",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.yonabar",
+    "apk": "eu_kanade_tachiyomi_extension_ar_yonabar-1.6.55.apk",
+    "lang": "ar",
+    "code": 10655,
+    "version": "1.6.55",
+    "nsfw": 0,
+    "sources": []
+  },
+  {
+    "name": "Yuri Moon Sub",
+    "pkg": "eu.kanade.tachiyomi.extension.ar.yurimoonsub",
+    "apk": "eu_kanade_tachiyomi_extension_ar_yurimoonsub-1.6.16.apk",
+    "lang": "ar",
+    "code": 10616,
+    "version": "1.6.16",
+    "nsfw": 0,
+    "sources": []
   }
 ]
