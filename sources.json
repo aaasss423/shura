@@ -14,8 +14,9 @@
         "objects.githubusercontent.com",
         "release-assets.githubusercontent.com"
       ],
-      "languages": [
-        "ar"
+      "languages": [],
+      "content_warnings": [
+        "CONTENT_WARNING_SAFE"
       ],
       "package": "eu.kanade.tachiyomi.extension.ar",
       "signing_key": "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2",

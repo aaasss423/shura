@@ -115,12 +115,11 @@ class RepositoryPublisher:
     def _provenance_sources(item: dict) -> list[dict]:
         """The sources the crawled index declared for this extension.
 
-        An index publishes them and this threw them away, so every entry went
-        out with an empty source list - a field a reader has always populated
-        for a working repository. Only what was actually crawled is emitted; an
-        extension whose index listed nothing stays empty rather than being given
-        an invented source.
-        """
+        An index publishes them and this used to throw them away, so every entry
+        went out with an empty source list - a field a reader has always
+        populated for a working repository. Only what was actually crawled is
+        emitted; an extension whose index listed nothing stays empty rather than
+        being given an invented source."""
         provenance = item.get("metadata") or {}
         raw = provenance.get("sources")
         if not isinstance(raw, list):
@@ -139,6 +138,25 @@ class RepositoryPublisher:
         return out
 
     @staticmethod
+    def _content_warning(item: dict) -> int:
+        """Whether the crawled index marked this extension as adult.
+
+        The publisher used to write ``nsfw: 0`` unconditionally, so every entry
+        went out flagged safe - including the ones the index had explicitly
+        marked. A reader filters on this to decide whether to show an extension
+        at all, so a hardcoded zero silently defanged the repository's own
+        content policy and put adult extensions in front of a reader who had
+        asked for safe ones. Only the warning the source actually declared is
+        published; an extension whose index said nothing is treated as adult,
+        because the safe direction is the one that does not surprise anyone.
+        """
+        metadata = item.get("metadata") or {}
+        declared = str(metadata.get("contentWarning") or "").strip().upper()
+        if not declared:
+            return 1
+        return 0 if declared == "CONTENT_WARNING_SAFE" else 1
+
+    @staticmethod
     def _consumer_entry(item: dict, base_url: str = "") -> dict:
         """Legacy ``index.json``/``index.min.json`` entry exactly as Mihon's
         ``NetworkLegacyExtension`` reads it. Extra keys are avoided because
@@ -152,7 +170,7 @@ class RepositoryPublisher:
             "lang": item.get("language", "und"),
             "code": _version_code(item.get("version", "")),
             "version": _normalize_version(item.get("version", "")),
-            "nsfw": 0,
+            "nsfw": RepositoryPublisher._content_warning(item),
             "sources": RepositoryPublisher._provenance_sources(item),
         }
 

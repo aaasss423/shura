@@ -17,91 +17,6 @@
     ]
   },
   {
-    "name": "Manga Bab",
-    "pkg": "eu.kanade.tachiyomi.extension.ar.arabhentai",
-    "apk": "eu_kanade_tachiyomi_extension_ar_arabhentai-1.6.2.apk",
-    "lang": "ar",
-    "code": 10602,
-    "version": "1.6.2",
-    "nsfw": 0,
-    "sources": [
-      {
-        "id": "6899943547168982381",
-        "name": "مانجا باب",
-        "language": "ar",
-        "home_url": "https://mangabab.com"
-      }
-    ]
-  },
-  {
-    "name": "ArabManhwa",
-    "pkg": "eu.kanade.tachiyomi.extension.ar.arabmanhwa",
-    "apk": "eu_kanade_tachiyomi_extension_ar_arabmanhwa-1.6.56.apk",
-    "lang": "ar",
-    "code": 10656,
-    "version": "1.6.56",
-    "nsfw": 0,
-    "sources": [
-      {
-        "id": "5823096631874106406",
-        "name": "ArabManhwa",
-        "language": "ar",
-        "home_url": "https://arabmanhwa.com"
-      }
-    ]
-  },
-  {
-    "name": "Arabs Hentai",
-    "pkg": "eu.kanade.tachiyomi.extension.ar.arabshentai",
-    "apk": "eu_kanade_tachiyomi_extension_ar_arabshentai-1.6.0.apk",
-    "lang": "ar",
-    "code": 10600,
-    "version": "1.6.0",
-    "nsfw": 0,
-    "sources": [
-      {
-        "id": "3472625749271868375",
-        "name": "هنتاي العرب",
-        "language": "ar",
-        "home_url": "https://arabshentai.com"
-      }
-    ]
-  },
-  {
-    "name": "Arab Toons",
-    "pkg": "eu.kanade.tachiyomi.extension.ar.arabtoons",
-    "apk": "eu_kanade_tachiyomi_extension_ar_arabtoons-1.6.57.apk",
-    "lang": "ar",
-    "code": 10657,
-    "version": "1.6.57",
-    "nsfw": 0,
-    "sources": [
-      {
-        "id": "2424761902286195560",
-        "name": "عرب تونز",
-        "language": "ar",
-        "home_url": "https://arabtoons.net"
-      }
-    ]
-  },
-  {
-    "name": "ArbxComix",
-    "pkg": "eu.kanade.tachiyomi.extension.ar.arbxcomix",
-    "apk": "eu_kanade_tachiyomi_extension_ar_arbxcomix-1.6.55.apk",
-    "lang": "ar",
-    "code": 10655,
-    "version": "1.6.55",
-    "nsfw": 0,
-    "sources": [
-      {
-        "id": "6405758918736185117",
-        "name": "ArbxComix",
-        "language": "ar",
-        "home_url": "https://arbxcomix.com"
-      }
-    ]
-  },
-  {
     "name": "Area Manga",
     "pkg": "eu.kanade.tachiyomi.extension.ar.areamanga",
     "apk": "eu_kanade_tachiyomi_extension_ar_areamanga-1.6.2.apk",
@@ -115,23 +30,6 @@
         "name": "أريا مانجا",
         "language": "ar",
         "home_url": "https://ar.kenmanga.com"
-      }
-    ]
-  },
-  {
-    "name": "AR Hentai",
-    "pkg": "eu.kanade.tachiyomi.extension.ar.arhentai",
-    "apk": "eu_kanade_tachiyomi_extension_ar_arhentai-1.6.55.apk",
-    "lang": "ar",
-    "code": 10655,
-    "version": "1.6.55",
-    "nsfw": 0,
-    "sources": [
-      {
-        "id": "7652862112029693411",
-        "name": "آر هنتاي",
-        "language": "ar",
-        "home_url": "https://arhentai.net"
       }
     ]
   },
@@ -238,40 +136,6 @@
     ]
   },
   {
-    "name": "Duskoryvile",
-    "pkg": "eu.kanade.tachiyomi.extension.ar.duskoryvile",
-    "apk": "eu_kanade_tachiyomi_extension_ar_duskoryvile-1.6.1.apk",
-    "lang": "ar",
-    "code": 10601,
-    "version": "1.6.1",
-    "nsfw": 0,
-    "sources": [
-      {
-        "id": "4544396460505163576",
-        "name": "Duskoryvile",
-        "language": "ar",
-        "home_url": "https://duskoryvile.com"
-      }
-    ]
-  },
-  {
-    "name": "Empire Webtoon",
-    "pkg": "eu.kanade.tachiyomi.extension.ar.empirewebtoon",
-    "apk": "eu_kanade_tachiyomi_extension_ar_empirewebtoon-1.6.61.apk",
-    "lang": "ar",
-    "code": 10661,
-    "version": "1.6.61",
-    "nsfw": 0,
-    "sources": [
-      {
-        "id": "2655166136445570124",
-        "name": "Empire Webtoon",
-        "language": "ar",
-        "home_url": "https://webtoonempire-bl.com"
-      }
-    ]
-  },
-  {
     "name": "EShadow",
     "pkg": "eu.kanade.tachiyomi.extension.ar.eshadow",
     "apk": "eu_kanade_tachiyomi_extension_ar_eshadow-1.6.1.apk",
@@ -285,74 +149,6 @@
         "name": "EShadow",
         "language": "ar",
         "home_url": "https://eshadow.net"
-      }
-    ]
-  },
-  {
-    "name": "Goon Scans",
-    "pkg": "eu.kanade.tachiyomi.extension.ar.goonscans",
-    "apk": "eu_kanade_tachiyomi_extension_ar_goonscans-1.6.1.apk",
-    "lang": "ar",
-    "code": 10601,
-    "version": "1.6.1",
-    "nsfw": 0,
-    "sources": [
-      {
-        "id": "2899371341317171497",
-        "name": "Goon Scans",
-        "language": "ar",
-        "home_url": "https://goonscans.org"
-      }
-    ]
-  },
-  {
-    "name": "Hentai Lek",
-    "pkg": "eu.kanade.tachiyomi.extension.ar.hentailek",
-    "apk": "eu_kanade_tachiyomi_extension_ar_hentailek-1.6.2.apk",
-    "lang": "ar",
-    "code": 10602,
-    "version": "1.6.2",
-    "nsfw": 0,
-    "sources": [
-      {
-        "id": "1258840903039841012",
-        "name": "هنتاي ليك",
-        "language": "ar",
-        "home_url": "https://hentailek.com"
-      }
-    ]
-  },
-  {
-    "name": "HentaiMan",
-    "pkg": "eu.kanade.tachiyomi.extension.ar.hentaiman",
-    "apk": "eu_kanade_tachiyomi_extension_ar_hentaiman-1.6.0.apk",
-    "lang": "ar",
-    "code": 10600,
-    "version": "1.6.0",
-    "nsfw": 0,
-    "sources": [
-      {
-        "id": "4335920001580787887",
-        "name": "HentaiMan",
-        "language": "ar",
-        "home_url": "https://hentaiman.net"
-      }
-    ]
-  },
-  {
-    "name": "Hentai Slayer",
-    "pkg": "eu.kanade.tachiyomi.extension.ar.hentaislayer",
-    "apk": "eu_kanade_tachiyomi_extension_ar_hentaislayer-1.6.0.apk",
-    "lang": "ar",
-    "code": 10600,
-    "version": "1.6.0",
-    "nsfw": 0,
-    "sources": [
-      {
-        "id": "1383489648660567366",
-        "name": "هنتاي سلاير",
-        "language": "ar",
-        "home_url": "https://hentaislayer.net"
       }
     ]
   },
@@ -506,23 +302,6 @@
         "name": "MangaDar",
         "language": "ar",
         "home_url": "https://mangadar.com"
-      }
-    ]
-  },
-  {
-    "name": "MangaHub",
-    "pkg": "eu.kanade.tachiyomi.extension.ar.mangahub",
-    "apk": "eu_kanade_tachiyomi_extension_ar_mangahub-1.6.16.apk",
-    "lang": "ar",
-    "code": 10616,
-    "version": "1.6.16",
-    "nsfw": 0,
-    "sources": [
-      {
-        "id": "9160891278578525988",
-        "name": "MangaHub",
-        "language": "ar",
-        "home_url": "https://www.mangaxhentai.com"
       }
     ]
   },
@@ -697,23 +476,6 @@
     ]
   },
   {
-    "name": "MangaTuk",
-    "pkg": "eu.kanade.tachiyomi.extension.ar.mangatuk",
-    "apk": "eu_kanade_tachiyomi_extension_ar_mangatuk-1.6.0.apk",
-    "lang": "ar",
-    "code": 10600,
-    "version": "1.6.0",
-    "nsfw": 0,
-    "sources": [
-      {
-        "id": "6924751245735287034",
-        "name": "MangaTuk",
-        "language": "ar",
-        "home_url": "https://mangatuk.com"
-      }
-    ]
-  },
-  {
     "name": "Manhatok",
     "pkg": "eu.kanade.tachiyomi.extension.ar.manhatok",
     "apk": "eu_kanade_tachiyomi_extension_ar_manhatok-1.6.15.apk",
@@ -816,23 +578,6 @@
     ]
   },
   {
-    "name": "Paradise BL",
-    "pkg": "eu.kanade.tachiyomi.extension.ar.paradisebl",
-    "apk": "eu_kanade_tachiyomi_extension_ar_paradisebl-1.6.55.apk",
-    "lang": "ar",
-    "code": 10655,
-    "version": "1.6.55",
-    "nsfw": 0,
-    "sources": [
-      {
-        "id": "4957859168133378262",
-        "name": "Paradise BL",
-        "language": "ar",
-        "home_url": "https://paradise-bl.com"
-      }
-    ]
-  },
-  {
     "name": "Rocks Manga",
     "pkg": "eu.kanade.tachiyomi.extension.ar.rocksmanga",
     "apk": "eu_kanade_tachiyomi_extension_ar_rocksmanga-1.6.58.apk",
@@ -918,36 +663,2081 @@
     ]
   },
   {
-    "name": "Yona Bar",
-    "pkg": "eu.kanade.tachiyomi.extension.ar.yonabar",
-    "apk": "eu_kanade_tachiyomi_extension_ar_yonabar-1.6.55.apk",
-    "lang": "ar",
+    "name": "Comic Growl",
+    "pkg": "eu.kanade.tachiyomi.extension.all.comicgrowl",
+    "apk": "eu_kanade_tachiyomi_extension_all_comicgrowl-1.6.1.apk",
+    "lang": "all",
+    "code": 10601,
+    "version": "1.6.1",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "299423548273637501",
+        "name": "Comic Growl",
+        "language": "all",
+        "home_url": "https://comic-growl.com"
+      }
+    ]
+  },
+  {
+    "name": "ComicsKingdom",
+    "pkg": "eu.kanade.tachiyomi.extension.all.comicskingdom",
+    "apk": "eu_kanade_tachiyomi_extension_all_comicskingdom-1.6.0.apk",
+    "lang": "all",
+    "code": 10600,
+    "version": "1.6.0",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "3350274514125477391",
+        "name": "Comics Kingdom",
+        "language": "en",
+        "home_url": "https://wp.comicskingdom.com"
+      },
+      {
+        "id": "6467305425630534148",
+        "name": "Comics Kingdom",
+        "language": "es",
+        "home_url": "https://wp.comicskingdom.com"
+      }
+    ]
+  },
+  {
+    "name": "Comikey",
+    "pkg": "eu.kanade.tachiyomi.extension.all.comikey",
+    "apk": "eu_kanade_tachiyomi_extension_all_comikey-1.6.12.apk",
+    "lang": "all",
+    "code": 10612,
+    "version": "1.6.12",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "2769857481066602061",
+        "name": "Comikey",
+        "language": "en",
+        "home_url": "https://comikey.com"
+      },
+      {
+        "id": "374080003312345029",
+        "name": "Comikey",
+        "language": "es",
+        "home_url": "https://comikey.com"
+      },
+      {
+        "id": "1684620622390751911",
+        "name": "Comikey",
+        "language": "id",
+        "home_url": "https://comikey.com"
+      },
+      {
+        "id": "4174862482785095737",
+        "name": "Comikey",
+        "language": "pt-BR",
+        "home_url": "https://comikey.com"
+      },
+      {
+        "id": "4923846262931005728",
+        "name": "Comikey Brasil",
+        "language": "pt-BR",
+        "home_url": "https://br.comikey.com"
+      }
+    ]
+  },
+  {
+    "name": "Commit Strip",
+    "pkg": "eu.kanade.tachiyomi.extension.all.commitstrip",
+    "apk": "eu_kanade_tachiyomi_extension_all_commitstrip-1.6.0.apk",
+    "lang": "all",
+    "code": 10600,
+    "version": "1.6.0",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "5328240584854276436",
+        "name": "Commit Strip",
+        "language": "en",
+        "home_url": "https://www.commitstrip.com"
+      },
+      {
+        "id": "4187575309418573632",
+        "name": "Commit Strip",
+        "language": "fr",
+        "home_url": "https://www.commitstrip.com"
+      }
+    ]
+  },
+  {
+    "name": "DB New Hope",
+    "pkg": "eu.kanade.tachiyomi.extension.all.dbnewhope",
+    "apk": "eu_kanade_tachiyomi_extension_all_dbnewhope-1.6.0.apk",
+    "lang": "all",
+    "code": 10600,
+    "version": "1.6.0",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "909008906078523978",
+        "name": "DB New Hope",
+        "language": "all",
+        "home_url": "https://dbnewhope.com"
+      }
+    ]
+  },
+  {
+    "name": "Dragon Ball Multiverse",
+    "pkg": "eu.kanade.tachiyomi.extension.all.dragonballmultiverse",
+    "apk": "eu_kanade_tachiyomi_extension_all_dragonballmultiverse-1.6.0.apk",
+    "lang": "all",
+    "code": 10600,
+    "version": "1.6.0",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "5855032551259176250",
+        "name": "Dragon Ball Multiverse",
+        "language": "en",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "7989144075938821809",
+        "name": "Dragon Ball Multiverse",
+        "language": "fr",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "2033023429560344772",
+        "name": "Dragon Ball Multiverse",
+        "language": "ja",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "4903395296014438593",
+        "name": "Dragon Ball Multiverse",
+        "language": "zh",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "2743233241005498558",
+        "name": "Dragon Ball Multiverse",
+        "language": "es",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "8107468051584194246",
+        "name": "Dragon Ball Multiverse",
+        "language": "it",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "5511951724437637256",
+        "name": "Dragon Ball Multiverse",
+        "language": "pt",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "7576053878109850761",
+        "name": "Dragon Ball Multiverse",
+        "language": "de",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "8371548443782837856",
+        "name": "Dragon Ball Multiverse",
+        "language": "pl",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "5007169057258882420",
+        "name": "Dragon Ball Multiverse",
+        "language": "nl",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "7492246554765916610",
+        "name": "Dragon Ball Multiverse",
+        "language": "tr",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "1618337326936347760",
+        "name": "Dragon Ball Multiverse",
+        "language": "pt-BR",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "525585394857906081",
+        "name": "Dragon Ball Multiverse",
+        "language": "hu",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "4704003050199034697",
+        "name": "Dragon Ball Multiverse",
+        "language": "ga",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "8851885792094862644",
+        "name": "Dragon Ball Multiverse",
+        "language": "ca",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "6890714885948456521",
+        "name": "Dragon Ball Multiverse",
+        "language": "no",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "7944056408443917590",
+        "name": "Dragon Ball Multiverse",
+        "language": "ru",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "2620385605605077513",
+        "name": "Dragon Ball Multiverse",
+        "language": "ro",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "5961569572141989337",
+        "name": "Dragon Ball Multiverse",
+        "language": "eu",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "5710504167796125606",
+        "name": "Dragon Ball Multiverse",
+        "language": "lt",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "8978307150219982189",
+        "name": "Dragon Ball Multiverse",
+        "language": "hr",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "2035574753584485369",
+        "name": "Dragon Ball Multiverse",
+        "language": "ko",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "3125099729987730580",
+        "name": "Dragon Ball Multiverse",
+        "language": "fi",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "5131201512681860705",
+        "name": "Dragon Ball Multiverse",
+        "language": "he",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "4845919081798207608",
+        "name": "Dragon Ball Multiverse",
+        "language": "bg",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "1446884092638094471",
+        "name": "Dragon Ball Multiverse",
+        "language": "sv",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "9218696211252404910",
+        "name": "Dragon Ball Multiverse",
+        "language": "el",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "4156406679136971778",
+        "name": "Dragon Ball Multiverse",
+        "language": "es-419",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "3744905183009204736",
+        "name": "Dragon Ball Multiverse",
+        "language": "ar",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "3217346477673086342",
+        "name": "Dragon Ball Multiverse",
+        "language": "fil",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "4102859909531263289",
+        "name": "Dragon Ball Multiverse",
+        "language": "la",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "3145772760974227844",
+        "name": "Dragon Ball Multiverse",
+        "language": "da",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "8542101819541236153",
+        "name": "Dragon Ball Multiverse",
+        "language": "co",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "1106049048608045535",
+        "name": "Dragon Ball Multiverse",
+        "language": "br",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "6824599919928625662",
+        "name": "Dragon Ball Multiverse",
+        "language": "vec",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "8795012289956874023",
+        "name": "Dragon Ball Multiverse",
+        "language": "lmo",
+        "home_url": "https://www.dragonball-multiverse.com"
+      },
+      {
+        "id": "5582703984897222132",
+        "name": "Dragon Ball Multiverse Parody",
+        "language": "fr",
+        "home_url": "https://www.dragonball-multiverse.com"
+      }
+    ]
+  },
+  {
+    "name": "FoolSlide Customizable",
+    "pkg": "eu.kanade.tachiyomi.extension.all.foolslidecustomizable",
+    "apk": "eu_kanade_tachiyomi_extension_all_foolslidecustomizable-1.6.6.apk",
+    "lang": "all",
+    "code": 10606,
+    "version": "1.6.6",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "6351052922295965587",
+        "name": "FoolSlide Customizable",
+        "language": "other",
+        "home_url": "https://127.0.0.1"
+      }
+    ]
+  },
+  {
+    "name": "Grabber Zone",
+    "pkg": "eu.kanade.tachiyomi.extension.all.grabberzone",
+    "apk": "eu_kanade_tachiyomi_extension_all_grabberzone-1.6.55.apk",
+    "lang": "all",
     "code": 10655,
     "version": "1.6.55",
     "nsfw": 0,
     "sources": [
       {
-        "id": "8019959770180418614",
-        "name": "Yona Bar",
-        "language": "ar",
-        "home_url": "https://yonaber.com"
+        "id": "7008887237419113673",
+        "name": "Grabber Zone",
+        "language": "all",
+        "home_url": "https://grabber.zone"
       }
     ]
   },
   {
-    "name": "Yuri Moon Sub",
-    "pkg": "eu.kanade.tachiyomi.extension.ar.yurimoonsub",
-    "apk": "eu_kanade_tachiyomi_extension_ar_yurimoonsub-1.6.16.apk",
-    "lang": "ar",
-    "code": 10616,
-    "version": "1.6.16",
+    "name": "HNI-Scantrad",
+    "pkg": "eu.kanade.tachiyomi.extension.all.hniscantrad",
+    "apk": "eu_kanade_tachiyomi_extension_all_hniscantrad-1.6.10.apk",
+    "lang": "all",
+    "code": 10610,
+    "version": "1.6.10",
     "nsfw": 0,
     "sources": [
       {
-        "id": "7833471811016150678",
-        "name": "Yuri Moon Sub",
+        "id": "4972198006998831006",
+        "name": "HNI-Scantrad",
+        "language": "all",
+        "home_url": "https://hni-scantrad.net"
+      }
+    ]
+  },
+  {
+    "name": "HOLONOMETRIA",
+    "pkg": "eu.kanade.tachiyomi.extension.all.holonometria",
+    "apk": "eu_kanade_tachiyomi_extension_all_holonometria-1.6.0.apk",
+    "lang": "all",
+    "code": 10600,
+    "version": "1.6.0",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "8779183423368672304",
+        "name": "HOLONOMETRIA",
+        "language": "ja",
+        "home_url": "https://holoearth.com"
+      },
+      {
+        "id": "1334492919632049277",
+        "name": "HOLONOMETRIA",
+        "language": "en",
+        "home_url": "https://holoearth.com"
+      },
+      {
+        "id": "5054301488874110968",
+        "name": "HOLONOMETRIA",
+        "language": "id",
+        "home_url": "https://holoearth.com"
+      }
+    ]
+  },
+  {
+    "name": "Komga",
+    "pkg": "eu.kanade.tachiyomi.extension.all.komga",
+    "apk": "eu_kanade_tachiyomi_extension_all_komga-1.6.73.apk",
+    "lang": "all",
+    "code": 10673,
+    "version": "1.6.73",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "4508733312114627536",
+        "name": "Komga",
+        "language": "all",
+        "home_url": "https://127.0.0.1:25600"
+      },
+      {
+        "id": "8074481155021144106",
+        "name": "Komga (2)",
+        "language": "all",
+        "home_url": "https://127.0.0.1:25600"
+      },
+      {
+        "id": "5132811728275817394",
+        "name": "Komga (3)",
+        "language": "all",
+        "home_url": "https://127.0.0.1:25600"
+      }
+    ]
+  },
+  {
+    "name": "LANraragi",
+    "pkg": "eu.kanade.tachiyomi.extension.all.lanraragi",
+    "apk": "eu_kanade_tachiyomi_extension_all_lanraragi-1.6.1.apk",
+    "lang": "all",
+    "code": 10601,
+    "version": "1.6.1",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "4482480338677079857",
+        "name": "LANraragi (1)",
+        "language": "all",
+        "home_url": "http://127.0.0.1:3000"
+      },
+      {
+        "id": "6188058704030343819",
+        "name": "LANraragi (2)",
+        "language": "all",
+        "home_url": "http://127.0.0.1:3000"
+      }
+    ]
+  },
+  {
+    "name": "League of Legends",
+    "pkg": "eu.kanade.tachiyomi.extension.all.leagueoflegends",
+    "apk": "eu_kanade_tachiyomi_extension_all_leagueoflegends-1.6.0.apk",
+    "lang": "all",
+    "code": 10600,
+    "version": "1.6.0",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "5421383187922044761",
+        "name": "League of Legends",
+        "language": "en",
+        "home_url": "https://universe.leagueoflegends.com/en_us/comic/"
+      },
+      {
+        "id": "380479987909263478",
+        "name": "League of Legends",
+        "language": "de",
+        "home_url": "https://universe.leagueoflegends.com/de_de/comic/"
+      },
+      {
+        "id": "2505034801993260082",
+        "name": "League of Legends",
+        "language": "es",
+        "home_url": "https://universe.leagueoflegends.com/es_es/comic/"
+      },
+      {
+        "id": "8921189687191630727",
+        "name": "League of Legends",
+        "language": "fr",
+        "home_url": "https://universe.leagueoflegends.com/fr_fr/comic/"
+      },
+      {
+        "id": "2993141237027207546",
+        "name": "League of Legends",
+        "language": "it",
+        "home_url": "https://universe.leagueoflegends.com/it_it/comic/"
+      },
+      {
+        "id": "4102855915741272173",
+        "name": "League of Legends",
+        "language": "pl",
+        "home_url": "https://universe.leagueoflegends.com/pl_pl/comic/"
+      },
+      {
+        "id": "3431750855616467337",
+        "name": "League of Legends",
+        "language": "el",
+        "home_url": "https://universe.leagueoflegends.com/el_gr/comic/"
+      },
+      {
+        "id": "8175862906648984382",
+        "name": "League of Legends",
+        "language": "ro",
+        "home_url": "https://universe.leagueoflegends.com/ro_ro/comic/"
+      },
+      {
+        "id": "8553752347472368081",
+        "name": "League of Legends",
+        "language": "hu",
+        "home_url": "https://universe.leagueoflegends.com/hu_hu/comic/"
+      },
+      {
+        "id": "241129525014815798",
+        "name": "League of Legends",
+        "language": "cs",
+        "home_url": "https://universe.leagueoflegends.com/cs_cz/comic/"
+      },
+      {
+        "id": "3236903197935016602",
+        "name": "League of Legends",
+        "language": "es-419",
+        "home_url": "https://universe.leagueoflegends.com/es_mx/comic/"
+      },
+      {
+        "id": "7646731134152168219",
+        "name": "League of Legends",
+        "language": "pt-BR",
+        "home_url": "https://universe.leagueoflegends.com/pt_br/comic/"
+      },
+      {
+        "id": "1617144019668124895",
+        "name": "League of Legends",
+        "language": "ja",
+        "home_url": "https://universe.leagueoflegends.com/ja_jp/comic/"
+      },
+      {
+        "id": "6359895141227528344",
+        "name": "League of Legends",
+        "language": "ru",
+        "home_url": "https://universe.leagueoflegends.com/ru_ru/comic/"
+      },
+      {
+        "id": "4983763186502997670",
+        "name": "League of Legends",
+        "language": "tr",
+        "home_url": "https://universe.leagueoflegends.com/tr_tr/comic/"
+      },
+      {
+        "id": "1822275077186160208",
+        "name": "League of Legends",
+        "language": "ko",
+        "home_url": "https://universe.leagueoflegends.com/ko_kr/comic/"
+      }
+    ]
+  },
+  {
+    "name": "Magical Translators",
+    "pkg": "eu.kanade.tachiyomi.extension.all.magicaltranslators",
+    "apk": "eu_kanade_tachiyomi_extension_all_magicaltranslators-1.6.0.apk",
+    "lang": "all",
+    "code": 10600,
+    "version": "1.6.0",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "4033172788130537982",
+        "name": "Magical Translators",
+        "language": "en",
+        "home_url": "https://mahoushoujobu.com"
+      },
+      {
+        "id": "8666919453546333116",
+        "name": "Magical Translators",
+        "language": "es",
+        "home_url": "https://mahoushoujobu.com"
+      },
+      {
+        "id": "1289819859468493242",
+        "name": "Magical Translators",
+        "language": "pl",
+        "home_url": "https://mahoushoujobu.com"
+      }
+    ]
+  },
+  {
+    "name": "Manga Draft",
+    "pkg": "eu.kanade.tachiyomi.extension.all.mangadraft",
+    "apk": "eu_kanade_tachiyomi_extension_all_mangadraft-1.6.0.apk",
+    "lang": "all",
+    "code": 10600,
+    "version": "1.6.0",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "6866320578550428692",
+        "name": "MangaDraft",
+        "language": "all",
+        "home_url": "https://mangadraft.com"
+      }
+    ]
+  },
+  {
+    "name": "Manga Million",
+    "pkg": "eu.kanade.tachiyomi.extension.all.mangamillion",
+    "apk": "eu_kanade_tachiyomi_extension_all_mangamillion-1.6.2.apk",
+    "lang": "all",
+    "code": 10602,
+    "version": "1.6.2",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "5427621842719614942",
+        "name": "Manga Million",
+        "language": "en",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "5892305961700928875",
+        "name": "Manga Million",
+        "language": "zh-TW",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "2911411952354074492",
+        "name": "Manga Million",
+        "language": "th",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "4065610833485359391",
+        "name": "Manga Million",
+        "language": "fr",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "4577634664648892329",
+        "name": "Manga Million",
+        "language": "ko-KR",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "8223155082496415999",
+        "name": "Manga Million",
+        "language": "es",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "2734295754625319424",
+        "name": "Manga Million",
+        "language": "it",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "5083522112166110729",
+        "name": "Manga Million",
+        "language": "de",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "268819630254308822",
+        "name": "Manga Million",
+        "language": "pt-BR",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "2891770365728881681",
+        "name": "Manga Million",
+        "language": "es-MX",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "1593100200301948195",
+        "name": "Manga Million",
+        "language": "zh-CN",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "8091532565068406212",
+        "name": "Manga Million",
+        "language": "es-AR",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "887261003174638631",
+        "name": "Manga Million",
+        "language": "pl",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "915698175702500457",
+        "name": "Manga Million",
+        "language": "vi",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "8658975145651377636",
+        "name": "Manga Million",
+        "language": "el",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "4612647476728832671",
+        "name": "Manga Million",
+        "language": "sv",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "924136623947569832",
+        "name": "Manga Million",
+        "language": "tl",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "1026064463101598575",
+        "name": "Manga Million",
+        "language": "id",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "6213822016958763806",
+        "name": "Manga Million",
+        "language": "hi",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "5282995690670742677",
+        "name": "Manga Million",
+        "language": "km",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "4359581031612948871",
+        "name": "Manga Million",
+        "language": "tr",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "4931345632004567033",
+        "name": "Manga Million",
+        "language": "zh-HK",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "7072636103024322731",
+        "name": "Manga Million",
+        "language": "cs",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "9147091841035376048",
+        "name": "Manga Million",
+        "language": "ru",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "7668176795520775072",
+        "name": "Manga Million",
+        "language": "pt",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "8929911308540155494",
+        "name": "Manga Million",
         "language": "ar",
-        "home_url": "https://yurimoonsub.blogspot.com"
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "15590040638864887",
+        "name": "Manga Million",
+        "language": "ca",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "5551097741572713208",
+        "name": "Manga Million",
+        "language": "zu",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "2315850565371135870",
+        "name": "Manga Million",
+        "language": "hu",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "5584992036496630079",
+        "name": "Manga Million",
+        "language": "fi",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "2666027548234219457",
+        "name": "Manga Million",
+        "language": "sr",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "4441155752668321511",
+        "name": "Manga Million",
+        "language": "ro",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "7011243828207286492",
+        "name": "Manga Million",
+        "language": "ms",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "7289714396368196914",
+        "name": "Manga Million",
+        "language": "nl",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "929579237282545340",
+        "name": "Manga Million",
+        "language": "da",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "6834657567401900124",
+        "name": "Manga Million",
+        "language": "no",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "3631292524952989029",
+        "name": "Manga Million",
+        "language": "af",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "2724363928085370876",
+        "name": "Manga Million",
+        "language": "am",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "5387489493086876209",
+        "name": "Manga Million",
+        "language": "as",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "74723524335557167",
+        "name": "Manga Million",
+        "language": "be",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "4216116073244413401",
+        "name": "Manga Million",
+        "language": "bg",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "5558676463076824263",
+        "name": "Manga Million",
+        "language": "bho",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "3018745948328779152",
+        "name": "Manga Million",
+        "language": "bo",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "8386412190074568800",
+        "name": "Manga Million",
+        "language": "ceb",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "1589325780108086386",
+        "name": "Manga Million",
+        "language": "cnr",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "6358192501298664077",
+        "name": "Manga Million",
+        "language": "cy",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "3338743057973942273",
+        "name": "Manga Million",
+        "language": "doi",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "5117224405152253202",
+        "name": "Manga Million",
+        "language": "dv",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "8543983008898706725",
+        "name": "Manga Million",
+        "language": "ee",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "6667796628019328824",
+        "name": "Manga Million",
+        "language": "et",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "1092903932409577182",
+        "name": "Manga Million",
+        "language": "eu",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "5825756469321632200",
+        "name": "Manga Million",
+        "language": "ga",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "4008356879355300750",
+        "name": "Manga Million",
+        "language": "gl",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "112772419269752319",
+        "name": "Manga Million",
+        "language": "gn",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "1475200675181211833",
+        "name": "Manga Million",
+        "language": "gu",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "8931530813150822045",
+        "name": "Manga Million",
+        "language": "haw",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "6721398754773423468",
+        "name": "Manga Million",
+        "language": "he",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "5979003215867695313",
+        "name": "Manga Million",
+        "language": "hmn",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "205807037691459493",
+        "name": "Manga Million",
+        "language": "hr",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "552427325553042322",
+        "name": "Manga Million",
+        "language": "hy",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "8941426273009664978",
+        "name": "Manga Million",
+        "language": "ig",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "5112376028850012057",
+        "name": "Manga Million",
+        "language": "ilo",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "7396900340998325806",
+        "name": "Manga Million",
+        "language": "is",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "668705648188269062",
+        "name": "Manga Million",
+        "language": "ka",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "5129348722421252665",
+        "name": "Manga Million",
+        "language": "kn",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "1887628834357661808",
+        "name": "Manga Million",
+        "language": "kok",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "6172049937493802478",
+        "name": "Manga Million",
+        "language": "la",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "3446817490931327750",
+        "name": "Manga Million",
+        "language": "lb",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "6781611018446292424",
+        "name": "Manga Million",
+        "language": "lg",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "186474585481417758",
+        "name": "Manga Million",
+        "language": "ln",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "1323735580513513869",
+        "name": "Manga Million",
+        "language": "lo",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "8452234242377665525",
+        "name": "Manga Million",
+        "language": "lt",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "2439033374206567907",
+        "name": "Manga Million",
+        "language": "lus",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "928811675895839594",
+        "name": "Manga Million",
+        "language": "lv",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "4523356718200470668",
+        "name": "Manga Million",
+        "language": "mai",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "4309710104190905905",
+        "name": "Manga Million",
+        "language": "mg",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "1086559103330444392",
+        "name": "Manga Million",
+        "language": "mi",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "5359692889871618781",
+        "name": "Manga Million",
+        "language": "mk",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "7641490256991935246",
+        "name": "Manga Million",
+        "language": "ml",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "4536742856700281497",
+        "name": "Manga Million",
+        "language": "mn",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "5811901247190415780",
+        "name": "Manga Million",
+        "language": "mni",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "4345174336752891639",
+        "name": "Manga Million",
+        "language": "mr",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "7787356654974754550",
+        "name": "Manga Million",
+        "language": "mt",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "4800648865078737843",
+        "name": "Manga Million",
+        "language": "mww",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "1802992798406129052",
+        "name": "Manga Million",
+        "language": "my",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "6689704801281094754",
+        "name": "Manga Million",
+        "language": "ne",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "5897946776363059777",
+        "name": "Manga Million",
+        "language": "nso",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "4939099015813575199",
+        "name": "Manga Million",
+        "language": "ny",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "4981801343671181438",
+        "name": "Manga Million",
+        "language": "or",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "5588923649729104048",
+        "name": "Manga Million",
+        "language": "pa",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "2249151303899858757",
+        "name": "Manga Million",
+        "language": "qu",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "9222598220899280074",
+        "name": "Manga Million",
+        "language": "ro-MD",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "4383326882432232725",
+        "name": "Manga Million",
+        "language": "rw",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "8028445692840375802",
+        "name": "Manga Million",
+        "language": "sa",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "8085814830678949590",
+        "name": "Manga Million",
+        "language": "sd",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "8389235245594996421",
+        "name": "Manga Million",
+        "language": "si",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "5129922190807736746",
+        "name": "Manga Million",
+        "language": "sk",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "7699490908204038470",
+        "name": "Manga Million",
+        "language": "sl",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "4823638889764957944",
+        "name": "Manga Million",
+        "language": "sm",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "2498847956286711932",
+        "name": "Manga Million",
+        "language": "sn",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "2214921022051163417",
+        "name": "Manga Million",
+        "language": "sw",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "2387145796512839007",
+        "name": "Manga Million",
+        "language": "ta",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "3410467517391157548",
+        "name": "Manga Million",
+        "language": "te",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "8682211298851595282",
+        "name": "Manga Million",
+        "language": "ts",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "4271245827756537297",
+        "name": "Manga Million",
+        "language": "uk",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "2339118782898784757",
+        "name": "Manga Million",
+        "language": "xh",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "5256277817512389247",
+        "name": "Manga Million",
+        "language": "yi",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      },
+      {
+        "id": "6036938223018876930",
+        "name": "Manga Million",
+        "language": "yo",
+        "home_url": "https://mangamillion.shueisha.co.jp"
+      }
+    ]
+  },
+  {
+    "name": "MANGA Plus by SHUEISHA",
+    "pkg": "eu.kanade.tachiyomi.extension.all.mangaplus",
+    "apk": "eu_kanade_tachiyomi_extension_all_mangaplus-1.6.67.apk",
+    "lang": "all",
+    "code": 10667,
+    "version": "1.6.67",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "1998944621602463790",
+        "name": "MANGA Plus by SHUEISHA",
+        "language": "en",
+        "home_url": "https://mangaplus.shueisha.co.jp"
+      },
+      {
+        "id": "1286073245950890830",
+        "name": "MANGA Plus by SHUEISHA",
+        "language": "es",
+        "home_url": "https://mangaplus.shueisha.co.jp"
+      },
+      {
+        "id": "7642759409549978864",
+        "name": "MANGA Plus by SHUEISHA",
+        "language": "fr",
+        "home_url": "https://mangaplus.shueisha.co.jp"
+      },
+      {
+        "id": "932564577108614127",
+        "name": "MANGA Plus by SHUEISHA",
+        "language": "id",
+        "home_url": "https://mangaplus.shueisha.co.jp"
+      },
+      {
+        "id": "3444662672352788181",
+        "name": "MANGA Plus by SHUEISHA",
+        "language": "pt-BR",
+        "home_url": "https://mangaplus.shueisha.co.jp"
+      },
+      {
+        "id": "3520485566708512181",
+        "name": "MANGA Plus by SHUEISHA",
+        "language": "ru",
+        "home_url": "https://mangaplus.shueisha.co.jp"
+      },
+      {
+        "id": "6345211913721743017",
+        "name": "MANGA Plus by SHUEISHA",
+        "language": "th",
+        "home_url": "https://mangaplus.shueisha.co.jp"
+      },
+      {
+        "id": "4696259977267090434",
+        "name": "MANGA Plus by SHUEISHA",
+        "language": "vi",
+        "home_url": "https://mangaplus.shueisha.co.jp"
+      },
+      {
+        "id": "1893513843840146580",
+        "name": "MANGA Plus by SHUEISHA",
+        "language": "de",
+        "home_url": "https://mangaplus.shueisha.co.jp"
+      }
+    ]
+  },
+  {
+    "name": "MANGA Plus Creators by SHUEISHA",
+    "pkg": "eu.kanade.tachiyomi.extension.all.mangapluscreators",
+    "apk": "eu_kanade_tachiyomi_extension_all_mangapluscreators-1.6.0.apk",
+    "lang": "all",
+    "code": 10600,
+    "version": "1.6.0",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "4994699950662723787",
+        "name": "MANGA Plus Creators by SHUEISHA",
+        "language": "en",
+        "home_url": "https://mangaplus-creators.jp"
+      },
+      {
+        "id": "1894436225000314286",
+        "name": "MANGA Plus Creators by SHUEISHA",
+        "language": "es",
+        "home_url": "https://mangaplus-creators.jp"
+      }
+    ]
+  },
+  {
+    "name": "MangaToon (Limited)",
+    "pkg": "eu.kanade.tachiyomi.extension.all.mangatoon",
+    "apk": "eu_kanade_tachiyomi_extension_all_mangatoon-1.6.0.apk",
+    "lang": "all",
+    "code": 10600,
+    "version": "1.6.0",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "5676233752760414531",
+        "name": "MangaToon (Limited)",
+        "language": "zh",
+        "home_url": "https://mangatoon.mobi"
+      },
+      {
+        "id": "4795663388852759880",
+        "name": "MangaToon (Limited)",
+        "language": "en",
+        "home_url": "https://mangatoon.mobi"
+      },
+      {
+        "id": "6572636034693050219",
+        "name": "MangaToon (Limited)",
+        "language": "id",
+        "home_url": "https://mangatoon.mobi"
+      },
+      {
+        "id": "6849356311438092898",
+        "name": "MangaToon (Limited)",
+        "language": "vi",
+        "home_url": "https://mangatoon.mobi"
+      },
+      {
+        "id": "958417049187203678",
+        "name": "MangaToon (Limited)",
+        "language": "es",
+        "home_url": "https://mangatoon.mobi"
+      },
+      {
+        "id": "6266226783871841407",
+        "name": "MangaToon (Limited)",
+        "language": "th",
+        "home_url": "https://mangatoon.mobi"
+      },
+      {
+        "id": "6666752184827525866",
+        "name": "MangaToon (Limited)",
+        "language": "fr",
+        "home_url": "https://mangatoon.mobi"
+      },
+      {
+        "id": "3509597554682217593",
+        "name": "MangaToon (Limited)",
+        "language": "ja",
+        "home_url": "https://mangatoon.mobi"
+      },
+      {
+        "id": "2064722193112934135",
+        "name": "MangaToon (Limited)",
+        "language": "pt-BR",
+        "home_url": "https://mangatoon.mobi"
+      }
+    ]
+  },
+  {
+    "name": "Manga UP!",
+    "pkg": "eu.kanade.tachiyomi.extension.all.mangaup",
+    "apk": "eu_kanade_tachiyomi_extension_all_mangaup-1.6.3.apk",
+    "lang": "all",
+    "code": 10603,
+    "version": "1.6.3",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "7689478295161479290",
+        "name": "Manga UP!",
+        "language": "en",
+        "home_url": "https://global.manga-up.com"
+      }
+    ]
+  },
+  {
+    "name": "Mango",
+    "pkg": "eu.kanade.tachiyomi.extension.all.mango",
+    "apk": "eu_kanade_tachiyomi_extension_all_mango-1.6.0.apk",
+    "lang": "all",
+    "code": 10600,
+    "version": "1.6.0",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "2882993841250976719",
+        "name": "Mango",
+        "language": "en",
+        "home_url": "http://127.0.0.1:9000"
+      }
+    ]
+  },
+  {
+    "name": "MayoTune",
+    "pkg": "eu.kanade.tachiyomi.extension.all.mayotune",
+    "apk": "eu_kanade_tachiyomi_extension_all_mayotune-1.6.0.apk",
+    "lang": "all",
+    "code": 10600,
+    "version": "1.6.0",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "1480743237782384863",
+        "name": "MayoTune",
+        "language": "en",
+        "home_url": "https://mayochuu.xyz"
+      },
+      {
+        "id": "6644592287307303034",
+        "name": "MayoTune",
+        "language": "ja",
+        "home_url": "https://mayochuu.xyz"
+      }
+    ]
+  },
+  {
+    "name": "NamiComi",
+    "pkg": "eu.kanade.tachiyomi.extension.all.namicomi",
+    "apk": "eu_kanade_tachiyomi_extension_all_namicomi-1.6.0.apk",
+    "lang": "all",
+    "code": 10600,
+    "version": "1.6.0",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "6815287454679474132",
+        "name": "NamiComi",
+        "language": "en",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "7830959603474646022",
+        "name": "NamiComi",
+        "language": "ar",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "7871287213449294583",
+        "name": "NamiComi",
+        "language": "bg",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "5335008997233394468",
+        "name": "NamiComi",
+        "language": "ca",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "1163192659786040070",
+        "name": "NamiComi",
+        "language": "zh-Hans",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "7859611418350123856",
+        "name": "NamiComi",
+        "language": "zh-Hant",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "1125922332535233758",
+        "name": "NamiComi",
+        "language": "hr",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "2037282477963681758",
+        "name": "NamiComi",
+        "language": "cs",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "7548417938714777333",
+        "name": "NamiComi",
+        "language": "da",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "4139908687076589734",
+        "name": "NamiComi",
+        "language": "nl",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "1004520286290933688",
+        "name": "NamiComi",
+        "language": "et",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "7846542287071503597",
+        "name": "NamiComi",
+        "language": "fil",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "8873510733793144577",
+        "name": "NamiComi",
+        "language": "fi",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "2688801006759321823",
+        "name": "NamiComi",
+        "language": "fr",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "6619013782987672377",
+        "name": "NamiComi",
+        "language": "de",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "7683690509668356869",
+        "name": "NamiComi",
+        "language": "el",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "961340698570426919",
+        "name": "NamiComi",
+        "language": "he",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "5974308089281665684",
+        "name": "NamiComi",
+        "language": "hi",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "7787558791584052317",
+        "name": "NamiComi",
+        "language": "hu",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "1123824014117121209",
+        "name": "NamiComi",
+        "language": "is",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "3535683894794049489",
+        "name": "NamiComi",
+        "language": "ga",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "1325956500558078102",
+        "name": "NamiComi",
+        "language": "id",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "5975471501347973768",
+        "name": "NamiComi",
+        "language": "it",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "6873060443067341608",
+        "name": "NamiComi",
+        "language": "ja",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "1524915323009957887",
+        "name": "NamiComi",
+        "language": "ko",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "6196723908897486263",
+        "name": "NamiComi",
+        "language": "lt",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "6113965282317121452",
+        "name": "NamiComi",
+        "language": "ms",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "1665825055279512321",
+        "name": "NamiComi",
+        "language": "ne",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "6572043706378944577",
+        "name": "NamiComi",
+        "language": "no",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "723436680125197351",
+        "name": "NamiComi",
+        "language": "pa",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "569401976641132670",
+        "name": "NamiComi",
+        "language": "fa",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "5296681357952677059",
+        "name": "NamiComi",
+        "language": "pl",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "1401973320108574400",
+        "name": "NamiComi",
+        "language": "pt-BR",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "4804474291848639489",
+        "name": "NamiComi",
+        "language": "pt",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "296214928329015811",
+        "name": "NamiComi",
+        "language": "ru",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "1406651071058914280",
+        "name": "NamiComi",
+        "language": "sk",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "1665334647759224307",
+        "name": "NamiComi",
+        "language": "sl",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "3720618907480183068",
+        "name": "NamiComi",
+        "language": "es-419",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "7482985666811016125",
+        "name": "NamiComi",
+        "language": "es",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "4005855460574344551",
+        "name": "NamiComi",
+        "language": "sv",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "6825567325220655211",
+        "name": "NamiComi",
+        "language": "th",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "1404231504220588104",
+        "name": "NamiComi",
+        "language": "tr",
+        "home_url": "https://namicomi.com"
+      },
+      {
+        "id": "7458865308108369667",
+        "name": "NamiComi",
+        "language": "uk",
+        "home_url": "https://namicomi.com"
+      }
+    ]
+  },
+  {
+    "name": "One Piece Fans",
+    "pkg": "eu.kanade.tachiyomi.extension.all.onepiecefans",
+    "apk": "eu_kanade_tachiyomi_extension_all_onepiecefans-1.6.0.apk",
+    "lang": "all",
+    "code": 10600,
+    "version": "1.6.0",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "3010838382018156522",
+        "name": "One Piece Fans",
+        "language": "es",
+        "home_url": "https://one-piece-fans2.com"
+      },
+      {
+        "id": "6602141352900990132",
+        "name": "One Piece Fans",
+        "language": "en",
+        "home_url": "https://one-piece-fans2.com"
+      }
+    ]
+  },
+  {
+    "name": "Pepper&Carrot",
+    "pkg": "eu.kanade.tachiyomi.extension.all.peppercarrot",
+    "apk": "eu_kanade_tachiyomi_extension_all_peppercarrot-1.6.0.apk",
+    "lang": "all",
+    "code": 10600,
+    "version": "1.6.0",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "279282683217001983",
+        "name": "Pepper&Carrot",
+        "language": "all",
+        "home_url": "https://www.peppercarrot.com"
+      }
+    ]
+  },
+  {
+    "name": "Project Suki",
+    "pkg": "eu.kanade.tachiyomi.extension.all.projectsuki",
+    "apk": "eu_kanade_tachiyomi_extension_all_projectsuki-1.6.0.apk",
+    "lang": "all",
+    "code": 10600,
+    "version": "1.6.0",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "8965918600406781666",
+        "name": "Project Suki",
+        "language": "all",
+        "home_url": "https://projectsuki.com"
+      }
+    ]
+  },
+  {
+    "name": "Sandra and Woo",
+    "pkg": "eu.kanade.tachiyomi.extension.all.sandraandwoo",
+    "apk": "eu_kanade_tachiyomi_extension_all_sandraandwoo-1.6.0.apk",
+    "lang": "all",
+    "code": 10600,
+    "version": "1.6.0",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "8111958912268118735",
+        "name": "Sandra und Woo",
+        "language": "de",
+        "home_url": "https://www.sandraandwoo.com"
+      },
+      {
+        "id": "8566345145646340492",
+        "name": "Sandra and Woo",
+        "language": "en",
+        "home_url": "https://www.sandraandwoo.com"
+      }
+    ]
+  },
+  {
+    "name": "Taddy INK (Webtoons)",
+    "pkg": "eu.kanade.tachiyomi.extension.all.taddyink",
+    "apk": "eu_kanade_tachiyomi_extension_all_taddyink-1.6.0.apk",
+    "lang": "all",
+    "code": 10600,
+    "version": "1.6.0",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "2332326521515456967",
+        "name": "Taddy INK (Webtoons)",
+        "language": "all",
+        "home_url": "https://taddy.org"
+      }
+    ]
+  },
+  {
+    "name": "The Library of Ohara",
+    "pkg": "eu.kanade.tachiyomi.extension.all.thelibraryofohara",
+    "apk": "eu_kanade_tachiyomi_extension_all_thelibraryofohara-1.6.0.apk",
+    "lang": "all",
+    "code": 10600,
+    "version": "1.6.0",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "4379246890416497052",
+        "name": "The Library of Ohara",
+        "language": "id",
+        "home_url": "https://thelibraryofohara.com"
+      },
+      {
+        "id": "2727140669803764425",
+        "name": "The Library of Ohara",
+        "language": "en",
+        "home_url": "https://thelibraryofohara.com"
+      },
+      {
+        "id": "1081764220356482621",
+        "name": "The Library of Ohara",
+        "language": "es",
+        "home_url": "https://thelibraryofohara.com"
+      },
+      {
+        "id": "282587253597010652",
+        "name": "The Library of Ohara",
+        "language": "it",
+        "home_url": "https://thelibraryofohara.com"
+      },
+      {
+        "id": "8205252065972088770",
+        "name": "The Library of Ohara",
+        "language": "ar",
+        "home_url": "https://thelibraryofohara.com"
+      },
+      {
+        "id": "7219503638837099253",
+        "name": "The Library of Ohara",
+        "language": "fr",
+        "home_url": "https://thelibraryofohara.com"
+      }
+    ]
+  },
+  {
+    "name": "Vinne Veritas - CCC",
+    "pkg": "eu.kanade.tachiyomi.extension.all.vinnieVeritas",
+    "apk": "eu_kanade_tachiyomi_extension_all_vinnieVeritas-1.6.0.apk",
+    "lang": "all",
+    "code": 10600,
+    "version": "1.6.0",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "9005452006043030878",
+        "name": "Vinnie Veritas - CCC",
+        "language": "en",
+        "home_url": "https://ccc.vinnieveritas.com"
+      },
+      {
+        "id": "2264075849201286666",
+        "name": "Vinnie Veritas - CCC",
+        "language": "es",
+        "home_url": "https://ccc.vinnieveritas.com"
+      }
+    ]
+  },
+  {
+    "name": "Webcomics",
+    "pkg": "eu.kanade.tachiyomi.extension.all.webcomics",
+    "apk": "eu_kanade_tachiyomi_extension_all_webcomics-1.6.11.apk",
+    "lang": "all",
+    "code": 10611,
+    "version": "1.6.11",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "5830834696627804450",
+        "name": "Webcomics",
+        "language": "en",
+        "home_url": "https://webcomicsapp.com"
+      },
+      {
+        "id": "5885774493166465039",
+        "name": "Webcomics",
+        "language": "fr",
+        "home_url": "https://webcomicsapp.com"
+      },
+      {
+        "id": "3396104446323720599",
+        "name": "Webcomics",
+        "language": "pt",
+        "home_url": "https://webcomicsapp.com"
+      },
+      {
+        "id": "8965174723997547979",
+        "name": "Webcomics",
+        "language": "es",
+        "home_url": "https://webcomicsapp.com"
+      },
+      {
+        "id": "1203016038113719139",
+        "name": "Webcomics",
+        "language": "id",
+        "home_url": "https://webcomicsapp.com"
+      }
+    ]
+  },
+  {
+    "name": "Webtoons.com",
+    "pkg": "eu.kanade.tachiyomi.extension.all.webtoons",
+    "apk": "eu_kanade_tachiyomi_extension_all_webtoons-1.6.2.apk",
+    "lang": "all",
+    "code": 10602,
+    "version": "1.6.2",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "2522335540328470744",
+        "name": "Webtoons.com",
+        "language": "en",
+        "home_url": "https://www.webtoons.com"
+      },
+      {
+        "id": "8749627068478740298",
+        "name": "Webtoons.com",
+        "language": "id",
+        "home_url": "https://www.webtoons.com"
+      },
+      {
+        "id": "3330861233813615504",
+        "name": "Webtoons.com",
+        "language": "th",
+        "home_url": "https://www.webtoons.com"
+      },
+      {
+        "id": "8664735734660636295",
+        "name": "Webtoons.com",
+        "language": "es",
+        "home_url": "https://www.webtoons.com"
+      },
+      {
+        "id": "8251758253314457060",
+        "name": "Webtoons.com",
+        "language": "fr",
+        "home_url": "https://www.webtoons.com"
+      },
+      {
+        "id": "2959982438613576472",
+        "name": "Webtoons.com",
+        "language": "zh-Hant",
+        "home_url": "https://www.webtoons.com"
+      },
+      {
+        "id": "1486822823904297379",
+        "name": "Webtoons.com",
+        "language": "de",
+        "home_url": "https://www.webtoons.com"
+      }
+    ]
+  },
+  {
+    "name": "xkcd",
+    "pkg": "eu.kanade.tachiyomi.extension.all.xkcd",
+    "apk": "eu_kanade_tachiyomi_extension_all_xkcd-1.6.0.apk",
+    "lang": "all",
+    "code": 10600,
+    "version": "1.6.0",
+    "nsfw": 0,
+    "sources": [
+      {
+        "id": "1538249443376436084",
+        "name": "xkcd",
+        "language": "en",
+        "home_url": "https://xkcd.com"
+      },
+      {
+        "id": "6901469937775055420",
+        "name": "xkcd",
+        "language": "es",
+        "home_url": "https://es.xkcd.com"
+      },
+      {
+        "id": "8162821425156695837",
+        "name": "xkcd",
+        "language": "zh",
+        "home_url": "https://xkcd.tw"
+      },
+      {
+        "id": "987306860406766740",
+        "name": "xkcd",
+        "language": "fr",
+        "home_url": "https://xkcd.lapin.org"
+      },
+      {
+        "id": "3742763978853704441",
+        "name": "xkcd",
+        "language": "ru",
+        "home_url": "https://xkcd.ru"
       }
     ]
   }

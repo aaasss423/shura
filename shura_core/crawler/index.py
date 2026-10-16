@@ -61,6 +61,12 @@ class IndexCrawler(Crawler):
         # thousands of artifacts to keep a handful, so the source says which
         # languages it is for and the rest are never fetched.
         wanted={str(x).lower() for x in (source.configuration.get("languages") or [])}
+        # A content warning the index states is a fact about the extension, not
+        # an opinion the publisher gets to overrule. Without this the crawler
+        # downloaded hundreds of adult extensions and the repository published
+        # them, because the flag was overwritten on the way out.
+        allow=source.configuration.get("content_warnings")
+        allowed={str(x).upper() for x in allow} if allow is not None else {"CONTENT_WARNING_SAFE"}
         # Entries are grouped by identity first, because several entries can
         # carry the same package and version and still be different binaries.
         # Deciding per entry would make the outcome depend on list order.
@@ -69,6 +75,8 @@ class IndexCrawler(Crawler):
             named=_field(item,"apk","apk_url","download") or ((item.get("resources") or {}).get("apkUrl"))
             pkg=_field(item,"pkg","package","packageName");version=str(_field(item,"version","versionName") or "")
             if not named or not pkg or not version:continue
+            warning=str(item.get("contentWarning") or "").strip().upper()
+            if warning not in allowed:continue
             language=_language(item,pkg,source.language)
             if wanted and language.lower() not in wanted:continue
             groups.setdefault((str(pkg),version),[]).append((i,item,named,language))
