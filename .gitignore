@@ -21,6 +21,10 @@ local.properties
 # extensions, none of them installed.
 !android/app/src/main/assets/repository/apk/*.apk
 !repo/apk/*.apk
+# ProComic is served from its own directory because it carries a different
+# signing key than the one this repository advertises, and a reader refuses an
+# extension whose signer does not match the anchor. Same layout, separate trust.
+!repo-procomic/apk/*.apk
 *.jks
 *.keystore
 .idea/
