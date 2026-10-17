@@ -22,12 +22,19 @@ import org.junit.Test
  * so they can be pinned here rather than by tapping a button on a device. The
  * cases that matter are the ones nobody would think to check by hand: the work
  * where every chapter is already read, and the second tap on the same button.
+ *
+ * The batch order is pinned here too, and pinned as reading order from chapter
+ * one rather than as "whatever the list shows". A batch is not a view of the
+ * chapter list: the list opens newest first because that is what an ongoing
+ * series needs, while "download the next five" means the first five chapters of
+ * the story. A test that only checked the batch against the visible list would
+ * have passed for the newest-first behaviour and let the wrong one through.
  */
 class WorkDetailsActionsTest {
 
     private fun chapter(id: String, number: Float? = null) = Chapter(id, "Chapter $id", number)
 
-    /** Newest first, which is how both chapter lists in the app open. */
+    /** Newest first, which is how the chapter list opens. */
     private fun numbered(count: Int): List<Chapter> =
         (count downTo 1).map { chapter("c$it", it.toFloat()) }
 
@@ -72,44 +79,84 @@ class WorkDetailsActionsTest {
     // -- next five, next ten, the rest --------------------------------------
 
     @Test
-    fun `the next five start at the newest chapter and take five`() {
-        val batch = BatchDownload.take(numbered(12), BatchState(), limit = 5)
-        assertEquals(listOf("c12", "c11", "c10", "c9", "c8"), batch.map { it.id })
+    fun `the next five start at chapter one and take five`() {
+        // Nothing read, nothing saved: the batch is the first five chapters of
+        // the story, NOT the five that arrived last. This is the whole point of
+        // the change - a reader who picks a work up wants chapter one waiting.
+        val batch = BatchDownload.take(
+            BatchDownload.inReadingOrder(numbered(12)), BatchState(), limit = 5,
+        )
+        assertEquals(listOf("c1", "c2", "c3", "c4", "c5"), batch.map { it.id })
+    }
+
+    @Test
+    fun `a batch is not the newest five`() {
+        val newestFive = ChapterListOrder.reading(numbered(12), ascending = false).take(5)
+        val batch = BatchDownload.take(
+            BatchDownload.inReadingOrder(numbered(12)), BatchState(), limit = 5,
+        )
+        assertEquals(listOf("c12", "c11", "c10", "c9", "c8"), newestFive.map { it.id })
+        assertTrue(
+            "the batch must not be the newest five",
+            batch.map { it.id }.intersect(newestFive.map { it.id }.toSet()).isEmpty(),
+        )
     }
 
     @Test
     fun `the next ten take ten`() {
-        val batch = BatchDownload.take(numbered(12), BatchState(), limit = 10)
+        val batch = BatchDownload.take(
+            BatchDownload.inReadingOrder(numbered(12)), BatchState(), limit = 10,
+        )
         assertEquals(10, batch.size)
-        assertEquals("c12", batch.first().id)
+        assertEquals("c1", batch.first().id)
+        assertEquals("c10", batch.last().id)
     }
 
     @Test
     fun `the rest takes everything that is left, however many that is`() {
-        assertEquals(12, BatchDownload.take(numbered(12), BatchState(), limit = null).size)
+        val batch = BatchDownload.take(
+            BatchDownload.inReadingOrder(numbered(12)), BatchState(), limit = null,
+        )
+        assertEquals(12, batch.size)
+        assertEquals("c1", batch.first().id)
     }
 
     @Test
-    fun `a batch starts after the newest chapter the reader has finished`() {
-        val visible = numbered(12)
-        val batch = BatchDownload.take(visible, BatchState(read = readOf("c12", "c11", "c10")), limit = 5)
-        assertEquals(listOf("c9", "c8", "c7", "c6", "c5"), batch.map { it.id })
+    fun `a batch starts at the first chapter the reader has not finished`() {
+        val visible = BatchDownload.inReadingOrder(numbered(12))
+        val batch = BatchDownload.take(visible, BatchState(read = readOf("c1", "c2", "c3")), limit = 5)
+        // Chapter one is already read, so the first unread one starts the run.
+        assertEquals(listOf("c4", "c5", "c6", "c7", "c8"), batch.map { it.id })
+    }
+
+    @Test
+    fun `with chapter one already read it starts at the first unread one`() {
+        val visible = BatchDownload.inReadingOrder(numbered(12))
+        val oneRead = BatchDownload.take(visible, BatchState(read = readOf("c1")), limit = 5)
+        val twoRead = BatchDownload.take(visible, BatchState(read = readOf("c1", "c2")), limit = 5)
+        val chapterGap = BatchDownload.take(visible, BatchState(read = readOf("c4")), limit = 3)
+
+        assertEquals(listOf("c2", "c3", "c4", "c5", "c6"), oneRead.map { it.id })
+        assertEquals(listOf("c3", "c4", "c5", "c6", "c7"), twoRead.map { it.id })
+        // A chapter read in the middle leaves a hole behind it rather than
+        // moving the start: chapter one is still the beginning of the story.
+        assertEquals(listOf("c1", "c2", "c3"), chapterGap.map { it.id })
     }
 
     @Test
     fun `a batch skips chapters that are already saved or already queued`() {
-        val visible = numbered(8)
+        val visible = BatchDownload.inReadingOrder(numbered(8))
         val batch = BatchDownload.take(
             visible,
-            BatchState(read = readOf("c8"), downloaded = setOf("c7"), queued = setOf("c6")),
+            BatchState(read = readOf("c1"), downloaded = setOf("c2"), queued = setOf("c3")),
             limit = 5,
         )
-        assertEquals(listOf("c5", "c4", "c3", "c2", "c1"), batch.map { it.id })
+        assertEquals(listOf("c4", "c5", "c6", "c7", "c8"), batch.map { it.id })
     }
 
     @Test
     fun `a work with nothing left to offer offers nothing`() {
-        val visible = numbered(3)
+        val visible = BatchDownload.inReadingOrder(numbered(3))
         val spent = BatchState(read = setOf("c3"), downloaded = setOf("c2"), queued = setOf("c1"))
         assertTrue(BatchDownload.pending(visible, spent).isEmpty())
         assertTrue(BatchDownload.take(visible, spent, 5).isEmpty())
@@ -121,27 +168,27 @@ class WorkDetailsActionsTest {
     fun `a fully read work is not downloaded again`() {
         // The failure this guards: with nothing to do, returning the whole list
         // would re-download a finished series the first time anyone taps.
-        val visible = numbered(4)
+        val visible = BatchDownload.inReadingOrder(numbered(4))
         val allRead = BatchState(read = visible.map { it.id }.toSet())
         assertEquals(0, BatchDownload.take(visible, allRead, limit = null).size)
     }
 
     @Test
     fun `a second tap queues the chapters after the first, not the same ones again`() {
-        val visible = numbered(12)
+        val visible = BatchDownload.inReadingOrder(numbered(12))
         val first = BatchDownload.take(visible, BatchState(), limit = 5)
         // The queue now holds the first batch, which is what the page is told.
         val afterFirst = BatchState(queued = first.map { it.id }.toSet())
         val second = BatchDownload.take(visible, afterFirst, limit = 5)
 
-        assertEquals(listOf("c12", "c11", "c10", "c9", "c8"), first.map { it.id })
-        assertEquals(listOf("c7", "c6", "c5", "c4", "c3"), second.map { it.id })
+        assertEquals(listOf("c1", "c2", "c3", "c4", "c5"), first.map { it.id })
+        assertEquals(listOf("c6", "c7", "c8", "c9", "c10"), second.map { it.id })
         assertTrue("the two taps overlap", first.intersect(second.toSet()).isEmpty())
     }
 
     @Test
     fun `the last batch is smaller than the button says and then stops`() {
-        val visible = numbered(12)
+        val visible = BatchDownload.inReadingOrder(numbered(12))
         var queued = emptySet<String>()
         var sizes = mutableListOf<Int>()
         while (true) {
@@ -152,15 +199,22 @@ class WorkDetailsActionsTest {
         }
         assertEquals(listOf(5, 5, 2), sizes)
         assertEquals(visible.size, queued.size)
+        // The whole run is the work from chapter one to the end, with no gaps.
+        assertEquals((1..12).map { "c$it" }, queued.sortedBy { it.drop(1).toInt() })
     }
 
     @Test
-    fun `what the button offers is exactly what the list shows underneath it`() {
-        val visible = ChapterListOrder.reading(numbered(6), ascending = false)
-        val batch = BatchDownload.take(visible, BatchState(read = readOf("c6")), limit = 2)
-        // The chapters follow the one already read, in the order displayed.
-        assertEquals(listOf("c5", "c4"), batch.map { it.id })
-        assertTrue("nothing offered may be hidden by a filter", batch.all { it in visible })
+    fun `the batch walks reading order even though the chapter list shows newest first`() {
+        // The two orders are deliberate, not a disagreement to be fixed: the list
+        // opens on the newest update, the batch starts where the story does.
+        val newestFirst = ChapterListOrder.reading(numbered(6), ascending = false)
+        val batch = BatchDownload.take(
+            BatchDownload.inReadingOrder(newestFirst), BatchState(read = readOf("c1")), limit = 2,
+        )
+        assertEquals(listOf("c6", "c5", "c4", "c3", "c2", "c1"), newestFirst.map { it.id })
+        assertEquals(listOf("c2", "c3"), batch.map { it.id })
+        // Nothing is invented and nothing is hidden: the same chapters either way.
+        assertTrue("the batch offers chapters of this work only", batch.all { it in newestFirst })
     }
 
     @Test

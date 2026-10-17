@@ -25,6 +25,7 @@ local.properties
 # signing key than the one this repository advertises, and a reader refuses an
 # extension whose signer does not match the anchor. Same layout, separate trust.
 !repo-procomic/apk/*.apk
+!repo-shuraown/apk/*.apk
 *.jks
 *.keystore
 .idea/
@@ -55,3 +56,4 @@ tests/test_protected_tile_decode.py
 /artifacts/
 Build artefacts that are part of what the app ships.
 android/.kotlin/
+.keys/

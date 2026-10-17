@@ -1,6 +1,8 @@
 package app.shura.manga.ui
 
 import android.net.Uri
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,19 +10,24 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.List
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -45,12 +52,24 @@ import app.shura.manga.reader.translation.TranslationCache
 import app.shura.manga.reader.translation.TranslationSettings
 import app.shura.manga.reader.translation.TranslationSettingsStore
 import app.shura.manga.LibraryWork
+import app.shura.manga.chapterStore
+import app.shura.manga.ChapterFeed
+import app.shura.manga.DownloadedWork
+import app.shura.manga.LocalChapterRead
+import app.shura.manga.StoredChapterRecord
+import app.shura.manga.WorkCleanupAction
+import app.shura.manga.applyWorkCleanup
+import app.shura.manga.formatBytes
+import app.shura.manga.groupDownloads
+import app.shura.manga.planWorkCleanup
+import app.shura.manga.storedChaptersOf
 import app.shura.manga.isWorkInLibrary
 import app.shura.manga.listLibraryWorks
 import app.shura.manga.removeWork
 import app.shura.manga.storeWork
 import app.shura.manga.workLibrary
 import app.shura.manga.ui.screens.*
+import app.shura.manga.ui.Strings
 import app.shura.manga.ui.theme.LocalUiLanguage
 import app.shura.manga.ui.theme.ShuraTheme
 import app.shura.manga.ui.theme.UiLanguage
@@ -111,9 +130,39 @@ sealed interface ShuraScreen {
     data object Downloads : ShuraScreen
     data object Settings : ShuraScreen
     data object Extensions : ShuraScreen
+
+    /**
+     * The repositories extensions are fetched from.
+     *
+     * Its own screen rather than another panel inside Settings, because it is a
+     * destination with something to do in it: an address is typed, fetched and
+     * verified, and the packages a repository offers are listed from it.
+     */
+    data object Repositories : ShuraScreen
     data class Search(val sourceId: String) : ShuraScreen
     data class Details(val sourceId: String, val manga: MangaSummary) : ShuraScreen
     data class Chapters(val sourceId: String, val manga: MangaSummary) : ShuraScreen
+
+    /**
+     * One work's chapters that are on this device.
+     *
+     * A screen of its own because the two places that list saved chapters are
+     * both lists of *works*: the library grid and the downloads list. Tapping a
+     * work in either of them has to land somewhere, and what it lands on is the
+     * work's chapters - not the first saved one, which is where a tap used to
+     * end up, and not the source's own chapter list, which is about chapters
+     * this device does not have.
+     *
+     * Keyed by (source, manga) rather than by a title, because two sources can
+     * carry works with the same name and this screen must not merge them.
+     */
+    data class SavedChapters(
+        val sourceId: String,
+        val mangaId: String,
+        val title: String,
+        val coverUrl: String = "",
+    ) : ShuraScreen
+
     data class Reader(
         val sourceId: String,
         val mangaTitle: String,
@@ -121,6 +170,31 @@ sealed interface ShuraScreen {
         val chapters: List<Chapter>,
     ) : ShuraScreen
 }
+
+/**
+ * Where tapping a work in the library or the downloads screen goes.
+ *
+ * One rule, in one place, because the two screens were doing it differently and
+ * one of them was doing it wrong: a work with chapters saved opened the first
+ * one of them - straight into a reader, with no list of the rest and no way to
+ * choose. A work is opened by its chapters; a *chapter* is opened by tapping the
+ * chapter.
+ *
+ * A work with nothing saved has no local list to open, so it opens the source's
+ * chapter list instead - the one place its chapters can still come from.
+ *
+ * Public so a test can pin it: this is the user's "tapping a work jumps into a
+ * chapter", and it cannot be checked by reading a layout.
+ */
+fun openTargetFor(work: DownloadedWork): ShuraScreen =
+    if (work.localCount > 0) {
+        ShuraScreen.SavedChapters(work.sourceId, work.mangaId, work.title, work.coverUrl)
+    } else {
+        ShuraScreen.Chapters(
+            work.sourceId,
+            MangaSummary(work.mangaId, work.title, work.coverUrl.takeIf { it.isNotBlank() }),
+        )
+    }
 
 @Composable
 fun ShuraRoot(
@@ -149,11 +223,28 @@ fun ShuraRoot(
     history: List<ReadingProgress>,
     onProgressChanged: (Int) -> Unit,
     library: List<StoredChapter>,
+    /**
+     * The same chapters as [library], in the form the offline decision is made in.
+     *
+     * [library] hands the reader `android.net.Uri`, which a JVM test cannot even
+     * construct - so the "is this chapter on disk?" question, answered over
+     * [StoredChapterRecord] instead, is the first part of this that can be pinned
+     * without a device. It is the same single directory read, converted once.
+     */
+    storedRecords: List<StoredChapterRecord> = emptyList(),
     repositoryNotice: String?,
     onInstallRepository: () -> Unit,
     extensions: List<app.shura.manga.ui.screens.ExtensionRowState> = emptyList(),
     /** Downloads and verifies one extension, then makes it available. */
     onInstallExtension: (app.shura.manga.ExtensionEntry) -> Unit = {},
+    /**
+     * Bumped after a repository is added, refreshed or removed.
+     *
+     * Adding one changes two things this screen does not own: what the store
+     * offers, and which sources the app can reach. Both are read from disk by
+     * the activity, so it is told rather than reached into.
+     */
+    onRepositoriesChanged: () -> Unit = {},
     /** Bumped on removal so the source list is re-read rather than cached. */
     sourcesVersion: Int = 0,
     extensionCatalog: app.shura.manga.ExtensionCatalog? = null,
@@ -169,13 +260,28 @@ fun ShuraRoot(
      * nothing to fetch - but the reader still has to be pointed at them, and
      * navigating there without doing so used to show whatever was left over
      * from the last chapter.
+     *
+     * A [StoredChapterRecord] rather than a [StoredChapter], so the callback is
+     * handed files: the reader is given `file://` URIs it can decode and nothing
+     * that has to be resolved here, and the JVM can drive this whole path -
+     * which is the point, because it is the path that has to work with no
+     * network.
      */
-    onOpenStored: (StoredChapter) -> Unit = {},
+    onOpenStored: (StoredChapterRecord) -> Unit = {},
     /**
      * Refetches a title's chapter list so a resumed chapter knows its
      * neighbours. Null means the source could not be reached.
      */
     fetchChapters: suspend (ShuraSource, String) -> List<Chapter>? = { _, _ -> null },
+    /**
+     * The reader reached the end of a chapter and says what it saw.
+     *
+     * The reader cannot know whether that chapter is in the library or whether
+     * deleting it is wanted, so it reports and the activity that owns the
+     * library decides - the same shape as the download callbacks above: the
+     * screen asks, the owner answers, and neither reads the other's state.
+     */
+    onChapterFinished: (app.shura.manga.reader.ChapterFinished) -> Unit = {},
 ) {
     ShuraTheme(dark = dark) {
         androidx.compose.runtime.CompositionLocalProvider(
@@ -228,7 +334,23 @@ fun ShuraRoot(
             // showing - the chapter is not a trap either way.
             androidx.activity.compose.BackHandler(enabled = backStack.size > 1) { back() }
             var settings by remember { mutableStateOf(nav.settingsStore.load()) }
-            var libraryState by remember { mutableStateOf(library) }
+            // Keyed by the library itself, so a chapter saved or deleted anywhere - by the
+            // download queue, or by the reader finishing one - shows up here
+            // without waiting for the reader to leave the screen and come back.
+            var libraryState by remember(library) { mutableStateOf(library) }
+
+            /**
+             * Chapter ids already on the device.
+             *
+             * Read off the index the activity already keeps rather than off the
+             * store again: three screens were asking the same question, and each
+             * ask was another directory listing with a manifest read per chapter
+             * on the thread that was drawing them.
+             */
+            val downloadedIds = remember(libraryState) { libraryState.map { it.chapterId }.toSet() }
+
+            /** Chapters with a download row, whatever state that row is in. */
+            val queuedIds = remember(downloadJobs) { downloadJobs.map { it.chapterId }.toSet() }
             // The chapters the list screen fetched, carried into the reader so
             // its previous/next have something real to step through.
             var loadedChapters by remember { mutableStateOf<List<Chapter>>(emptyList()) }
@@ -240,10 +362,157 @@ fun ShuraRoot(
             var detailsChapters by remember { mutableStateOf<Pair<String, List<Chapter>>?>(null) }
             val sourceOf = { id: String -> nav.sourceHost.find(id) }
             val resumeScope = rememberCoroutineScope()
+            // Captured once here: a local function called from a callback cannot read
+            // a CompositionLocal itself, and the cleanup notice needs the language.
+            val uiLanguage = LocalUiLanguage.current
+            /** What the last bulk cleanup did, said above the library rather than nowhere. */
+            var cleanupNotice by remember { mutableStateOf<String?>(null) }
+
+            // -- repositories added by URL ------------------------------------
+            //
+            // Three pieces of state and one function, all here because the screen
+            // itself is a view: the list is a file on disk, so it is re-read after
+            // every action rather than remembered across one, and every action is
+            // a network fetch - so it runs off the main thread and the screen is
+            // told it is working rather than being left to answer a second press
+            // while the first is still in flight.
+            var repositoryVersion by remember { mutableIntStateOf(0) }
+            var repositoryWorking by remember { mutableStateOf(false) }
+            var repositoryNotice by remember { mutableStateOf<String?>(null) }
+
+            fun repositoryRecords(): List<app.shura.manga.RepositoryRecord> =
+                runCatching {
+                    app.shura.manga.ShuraRepository.registry(nav.context).records()
+                }.getOrDefault(emptyList())
+
+            /**
+             * One add or refresh, told plainly what happened.
+             *
+             * A refusal is answered with the reason the runtime gave, in the
+             * reader's language - and nothing is registered on that path, which
+             * is [app.shura.manga.RepositoryManager]'s promise rather than
+             * something this function has to remember to keep.
+             */
+            fun repositoryAction(action: (app.shura.manga.RepositoryManager) -> app.shura.manga.RepositoryOutcome) {
+                if (repositoryWorking) return
+                repositoryWorking = true
+                repositoryNotice = null
+                resumeScope.launch {
+                    val outcome = withContext(Dispatchers.IO) {
+                        val manager = app.shura.manga.ShuraRepository.manager(nav.context)
+                        action(manager)
+                    }
+                    repositoryNotice = app.shura.manga.RepositoryStatusText.notice(outcome, uiLanguage)
+                    repositoryWorking = false
+                    repositoryVersion += 1
+                    if (outcome is app.shura.manga.RepositoryOutcome.Registered) {
+                        // A verified repository changes what the store offers and
+                        // which sources the app can reach; both are read from disk
+                        // by the activity, so it is told rather than reached into.
+                        onRepositoriesChanged()
+                    }
+                }
+            }
+
+            /**
+             * Removes downloads, a library entry, or both - independently.
+             *
+             * Three things have to be true at once and none of them is the delete
+             * itself: the plan is built from the work's *own* chapters, so another
+             * work's files are not in it; anything still downloading for this work
+             * is really cancelled, or it would land its chapter straight back into a
+             * directory that was just emptied; and every queue row for the work is
+             * dropped, or the downloads screen keeps offering a download of files
+             * that are not there.
+             *
+             * The whole thing is off the main thread - a chapter is hundreds of
+             * page images, and walking them on the UI thread is the ANR this app
+             * already had once.
+             */
+
+/**
+     * Opens a chapter that is already on this device.
+     *
+     * The reader is pointed at the local files and nothing else is asked for. Its
+     * previous/next come out of the store too, because a neighbour list that can
+     * only be produced by the source is a neighbour list that costs a request -
+     * and "continue reading a downloaded chapter" is exactly the thing that has to
+     * work with the radio off.
+     *
+     * Shared by the library, by a work's list of saved chapters, and by *every*
+     * other route into the reader, because they were all reaching for it through
+     * the same question: "read this chapter of this work".
+     */
+    fun openStoredChapter(entry: StoredChapterRecord) {
+        // The work's cover, recorded so the reader's own header shows it rather
+        // than only the chapter's name.
+        nav.rememberCover(entry.sourceId, entry.mangaTitle.ifBlank { entry.title }, entry.coverUrl)
+        onOpenStored(entry)
+        val stored = Chapter(entry.chapterId, entry.title, null)
+        val neighbours = LocalChapterRead.readerChapters(
+            storedRecords, entry.sourceId, entry.mangaId,
+        )
+        go(ShuraScreen.Reader(
+            entry.sourceId,
+            entry.mangaTitle.ifBlank { entry.title },
+            stored,
+            neighbours,
+        ))
+    }
+
+            fun cleanupWorks(works: List<LibraryWork>, action: WorkCleanupAction) {
+                if (works.isEmpty()) return
+                val group = groupDownloads(libraryState, downloadJobs)
+                resumeScope.launch {
+                    val results = withContext(Dispatchers.IO) {
+                        works.map { work ->
+                            val downloaded = group.firstOrNull {
+                                it.sourceId == work.sourceId && it.mangaId == work.mangaId
+                            } ?: DownloadedWork(
+                                sourceId = work.sourceId,
+                                mangaId = work.mangaId,
+                                title = work.title,
+                                coverUrl = work.coverUrl,
+                                stored = emptyList(),
+                                jobs = emptyList(),
+                            )
+                            val plan = planWorkCleanup(downloaded, action, work)
+                            // Really stopped, not hidden: a download still running
+                            // would otherwise write the chapter back.
+                            plan.cancelJobs.forEach { nav.downloads.cancel(it) }
+                            plan.dropJobs.forEach { nav.downloads.forget(it) }
+                            applyWorkCleanup(plan, workDir, chapterStore(nav.context))
+                        }
+                    }
+                    libraryVersion += 1
+                    workVersion += 1
+                    val deleted = results.sumOf { it.deletedChapters }
+                    val bytes = results.sumOf { it.deletedBytes }
+                    val kept = results.sumOf { it.failedChapters.size }
+                    val removed = results.count { it.removedFromLibrary }
+                    // shura() is a composable call and this runs inside a coroutine,
+                    // so the language is captured above and the plain lookup is used
+                    // here. Same strings, no composable call off the composition.
+                    cleanupNotice = listOfNotNull(
+                        Strings.t("library.cleanupDone", uiLanguage, deleted, formatBytes(bytes)),
+                        Strings.t("library.cleanupLibrary", uiLanguage, removed).takeIf { removed > 0 },
+                        Strings.t("library.cleanupKept", uiLanguage, kept).takeIf { kept > 0 },
+                    ).joinToString(" · ")
+                }
+            }
 
             // Move the reader onto a chapter and start loading it, as one step.
             // Fetching and navigating separately let the route keep naming the
             // old chapter while the new one's pages were already on screen.
+            //
+            // THE STORE IS ASKED FIRST, ON EVERY ROUTE IN
+            //
+            // This is the bug: opening a downloaded chapter went through
+            // `source.pages()` like every other chapter, so a chapter whose files
+            // were sitting on the device was re-fetched over a network the reader
+            // may not have. One question - [LocalChapterRead.feedFor], answered
+            // from the store index the library was just read from - decides it,
+            // and every way into the reader now goes through here.
             fun openChapter(
                 sourceId: String,
                 mangaTitle: String,
@@ -252,33 +521,55 @@ fun ShuraRoot(
                 chapters: List<Chapter>,
                 cover: String = "",
             ) {
-                if (source == null) return
-                go(ShuraScreen.Reader(sourceId, mangaTitle, chapter, chapters))
-                onFetchChapter(source, chapter, cover)
+                when (val feed = LocalChapterRead.feedFor(storedRecords, sourceId, chapter.id)) {
+                    // A local function has to be declared before the line that calls
+                    // it; this one sits below the composition it serves.
+                    is ChapterFeed.OnDevice -> openStoredChapter(feed.record)
+                    ChapterFeed.Network -> {
+                        if (source == null) return
+                        go(ShuraScreen.Reader(sourceId, mangaTitle, chapter, chapters))
+                        onFetchChapter(source, chapter, cover)
+                    }
+                }
             }
 
+
             androidx.compose.material3.Scaffold(
-                // Mihon's layout: the title on top, the destinations under it as
-                // tabs. A bottom bar put the navigation where a thumb rests and
-                // ate the width the title needs; on a narrow phone four long
-                // Arabic labels in a bottom bar were already too many.
+                // The title on top and the destinations under the content, where a
+                // thumb rests. Both bars are the reader's chrome and both come off
+                // for the reader itself: a chapter owns the whole screen, and a bar
+                // over a page is a band the last third of it has to be read around.
                 topBar = {
                     if (route is ShuraScreen.Reader) return@Scaffold
-                    ShuraTabBar(
-                        current = route,
-                        title = titleOf(route),
+                    ShuraTopBar(
+                        title = titleOf(nav, route),
+                        // Only where there is something behind this screen to go
+                        // back to. Arriving at a tab by pressing it leaves nothing,
+                        // and an arrow that cannot act is a dead control.
+                        onBack = if (backStack.size > 1) ({ back() }) else null,
                         actions = { TopBarActions(route) },
+                    )
+                },
+                bottomBar = {
+                    if (route is ShuraScreen.Reader) return@Scaffold
+                    ShuraBottomBar(
+                        current = route,
+                        // A destination is a root, so it replaces the stack rather
+                        // than growing it; otherwise back would walk out of the app
+                        // through every destination ever visited.
                         onNavigate = { target ->
-                            // A tab is a root, so it replaces the stack rather
-                            // than growing it; otherwise back would walk out of
-                            // the app through every tab ever visited.
                             backStack.switchTab(target)
                             readVersion += 1
                             libraryVersion += 1
                         },
+                        activeDownloads = downloadJobs.count {
+                            it.state == app.shura.manga.DownloadState.RUNNING ||
+                                it.state == app.shura.manga.DownloadState.QUEUED
+                        },
                     )
                 },
             ) { padding ->
+
                 Box(Modifier.padding(padding)) {
                     when (val screen = route) {
                         is ShuraScreen.Home -> HomeScreen(
@@ -288,24 +579,38 @@ fun ShuraRoot(
                                 // pages are re-fetched and the route moves with
                                 // them, rather than opening a reader over
                                 // whatever was last loaded.
-                                val source = sourceOf(entry.sourceId)
-                                if (source != null) {
-                                    // Resume with the real list: without it the
-                                    // reader opens with no previous/next at all.
-                                    val stored = Chapter(entry.chapterId, entry.chapterName, null)
-                                    // Fetched off the main thread: a resume
-                                    // refetches the whole list, and doing that
-                                    // inline freezes the tap that triggered it.
-                                    resumeScope.launch {
-                                        val resolved = ChapterResume.resolve(
-                                            stored,
-                                            if (entry.mangaId.isBlank()) null
-                                            else fetchChapters(source, entry.mangaId),
-                                        )
-                                        openChapter(
-                                            entry.sourceId, entry.mangaTitle, source,
-                                            resolved.chapter, resolved.chapters,
-                                        )
+                                //
+                                // A chapter whose pages are on the device is not
+                                // re-fetched at all, and neither is its chapter
+                                // list: asking the source for the neighbours first
+                                // is the request that cannot be made with no
+                                // network, so it was the reason "continue reading"
+                                // failed on a downloaded chapter.
+                                when (val feed = LocalChapterRead.feedFor(
+                                    storedRecords, entry.sourceId, entry.chapterId,
+                                )) {
+                                    is ChapterFeed.OnDevice -> openStoredChapter(feed.record)
+                                    ChapterFeed.Network -> {
+                                        val source = sourceOf(entry.sourceId)
+                                        if (source != null) {
+                                            // Resume with the real list: without it the
+                                            // reader opens with no previous/next at all.
+                                            val stored = Chapter(entry.chapterId, entry.chapterName, null)
+                                            // Fetched off the main thread: a resume
+                                            // refetches the whole list, and doing that
+                                            // inline freezes the tap that triggered it.
+                                            resumeScope.launch {
+                                                val resolved = ChapterResume.resolve(
+                                                    stored,
+                                                    if (entry.mangaId.isBlank()) null
+                                                    else fetchChapters(source, entry.mangaId),
+                                                )
+                                                openChapter(
+                                                    entry.sourceId, entry.mangaTitle, source,
+                                                    resolved.chapter, resolved.chapters,
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             },
@@ -324,50 +629,50 @@ fun ShuraRoot(
                             stored = libraryState,
                             followed = followedWorks,
                             onOpenDownloads = { go(ShuraScreen.Downloads) },
+                            // The empty library says where to fill it, so this is a
+                            // destination rather than a sentence.
+                            onBrowse = { go(ShuraScreen.Sources) },
+                            // A tap opens the work's chapters - the ones on this
+                            // device when there are any, and the source's own list
+                            // when there are none. It never opens a reader: the
+                            // reader is reached by choosing a chapter, and there
+                            // was no way to choose one from here before.
                             onOpenWork = { work ->
-                                // A followed work with nothing saved has no chapter to
-                                // resume, so it opens its chapter list instead - the
-                                // same place the work's own page goes.
                                 go(
-                                    ShuraScreen.Chapters(
-                                        work.sourceId,
-                                        app.shura.source.MangaSummary(work.mangaId, work.title, work.coverUrl),
+                                    openTargetFor(
+                                        DownloadedWork(
+                                            sourceId = work.sourceId,
+                                            mangaId = work.mangaId,
+                                            title = work.title,
+                                            coverUrl = work.coverUrl,
+                                            stored = storedChaptersOf(
+                                                libraryState, work.sourceId, work.mangaId,
+                                            ),
+                                            jobs = emptyList(),
+                                        ),
                                     ),
                                 )
                             },
-                            onDeleteWork = { work ->
+                            onManageWork = { works, action ->
+                                cleanupWorks(
+                                    works.map {
+                                        app.shura.manga.LibraryWork(it.sourceId, it.mangaId, it.title, it.coverUrl)
+                                    },
+                                    action,
+                                )
+                            },
+                            cleanupNotice = cleanupNotice,
+                            onDelete = { entry ->
+                                // Recursive delete on the main thread is the same ANR
+                                // that froze the library before: a chapter is hundreds of
+                                // page images, and walking them blocks the UI for as long
+                                // as the disk takes. The row disappears at once; the bytes
+                                // go in the background.
                                 resumeScope.launch {
                                     withContext(Dispatchers.IO) {
-                                        removeWork(workDir, LibraryWork(work.sourceId, work.mangaId, work.title, work.coverUrl))
+                                        app.shura.manga.deleteStoredChapter(entry)
                                     }
-                                    workVersion += 1
                                 }
-                            },
-                            onRead = { entry ->
-                                onOpenStored(entry)
-                                val source = sourceOf(entry.sourceId)
-                                // A stored chapter whose source is still present
-                                // gets its list back too, so it opens with the
-                                // same navigation a freshly-fetched one does.
-                                val stored = Chapter(entry.chapterId, entry.title, null)
-                                if (source != null && entry.mangaId.isNotBlank()) {
-                                    resumeScope.launch {
-                                        val resolved = ChapterResume.resolve(
-                                            stored, fetchChapters(source, entry.mangaId),
-                                        )
-                                        go(ShuraScreen.Reader(
-                                            entry.sourceId, entry.title,
-                                            resolved.chapter, resolved.chapters,
-                                        ))
-                                    }
-                                } else {
-                                    go(ShuraScreen.Reader(
-                                        entry.sourceId, entry.title, stored, emptyList(),
-                                    ))
-                                }
-                            },
-                            onDelete = { entry ->
-                                app.shura.manga.deleteStoredChapter(entry)
                                 libraryState = libraryState.filterNot { it.chapterId == entry.chapterId }
                             },
                         )
@@ -380,48 +685,108 @@ fun ShuraRoot(
                             repositoryNotice = repositoryNotice,
                             onInstallRepository = onInstallRepository,
                             onOpenStore = { go(ShuraScreen.Extensions) },
+                            // Where repositories added by URL are added. Settings
+                            // could only install one from a folder, which is a
+                            // different act: a folder is already on the device, an
+                            // address has to be fetched and verified before it is
+                            // anything at all.
+                            onOpenRepositories = { go(ShuraScreen.Repositories) },
                         )
+
+                        is ShuraScreen.Repositories -> {
+                            RepositoriesScreen(
+                                // Re-read from disk whenever an action lands, and
+                                // not remembered across one: the list is a file, and
+                                // a file is what survives the app being closed.
+                                records = remember(repositoryVersion) { repositoryRecords() },
+                                working = repositoryWorking,
+                                notice = repositoryNotice,
+                                onAdd = { url -> repositoryAction { it.add(url) } },
+                                onRefresh = { record ->
+                                    repositoryAction { it.update(record.id) }
+                                },
+                                onRemove = { record ->
+                                    repositoryWorking = true
+                                    resumeScope.launch {
+                                        val manager = withContext(Dispatchers.IO) {
+                                            app.shura.manga.ShuraRepository.manager(nav.context)
+                                        }
+                                        // A repository whose files could not be
+                                        // deleted keeps its row, because a row that
+                                        // disappeared while its extensions were
+                                        // still on disk is the one thing this screen
+                                        // must never do.
+                                        val gone = withContext(Dispatchers.IO) { manager.remove(record.id) }
+                                        repositoryNotice = app.shura.manga.RepositoryStatusText.removed(
+                                            record, gone, uiLanguage,
+                                        )
+                                        repositoryWorking = false
+                                        repositoryVersion += 1
+                                        onRepositoriesChanged()
+                                    }
+                                },
+                                // The store, which is where packages from these
+                                // repositories are installed - through the path that
+                                // already existed.
+                                onOpenStore = { go(ShuraScreen.Extensions) },
+                            )
+                        }
 
                         is ShuraScreen.Extensions -> {
                             val catalog = extensionCatalog
-                            Column(Modifier.fillMaxSize()) {
-                                Row(
-                                    Modifier.fillMaxWidth().padding(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    TextButton(onClick = { back() }) {
-                                        Text(shura("common.back"))
-                                    }
-                                }
-                                if (catalog == null) {
-                                    StatePanel(shura("common.error"), "")
-                                } else {
-                                    ExtensionStoreScreen(
-                                        rows = extensions,
-                                        catalog = catalog,
-                                        onInstall = onInstallExtension,
-                                        onRemove = onRemoveExtension,
-                                    )
-                                }
+                            // The way out of this screen is the app's top bar now, so
+                            // the body is either the store or the reason there is none.
+                            if (catalog == null) {
+                                EmptyState(
+                                    title = shura("common.error"),
+                                    body = shura("settings.repositoryHelp"),
+                                    icon = ShuraIcons.Target,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            } else {
+                                ExtensionStoreScreen(
+                                    rows = extensions,
+                                    catalog = catalog,
+                                    onInstall = onInstallExtension,
+                                    onRemove = onRemoveExtension,
+                                )
                             }
                         }
 
                         is ShuraScreen.Search -> {
                             val source = sourceOf(screen.sourceId)
-                            if (source == null) StatePanel(shura("common.error"), screen.sourceId)
+                            // Named, not a bare error: "the source is not installed"
+                            // and "the source failed" are different problems, and a
+                            // panel that says "error" with no way out reads as a dead app.
+                            if (source == null) {
+                                // Named, not a bare error: "the source is not installed"
+                                // and "the source failed" are different problems, and a
+                                // panel that says "error" with no way out reads as a dead
+                                // app. The way out is the arrow in the bar above.
+                                EmptyState(
+                                    title = shura("source.missing"),
+                                    body = screen.sourceId,
+                                    icon = ShuraIcons.Target,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            }
                             else SearchScreen(
                                 source = source,
                                 onOpenManga = { manga ->
                                     nav.rememberCover(screen.sourceId, manga.title, manga.coverUrl)
                                     go(ShuraScreen.Details(screen.sourceId, manga))
                                 },
-                                onBack = { back() },
                             )
                         }
 
                         is ShuraScreen.Details -> {
                             val source = sourceOf(screen.sourceId)
-                            if (source == null) StatePanel(shura("common.error"), screen.sourceId)
+                            if (source == null) EmptyState(
+                                title = shura("common.error"),
+                                body = screen.sourceId,
+                                icon = ShuraIcons.Target,
+                                modifier = Modifier.fillMaxSize(),
+                            )
                             else {
                                 // Chapters the reader has been through, on this
                                 // source. Read from history rather than through
@@ -488,10 +853,8 @@ fun ShuraRoot(
                                     onChaptersLoaded = { detailsChapters = screen.manga.id to it },
                                     isRead = isRead,
                                     history = history,
-                                    downloadedChapterIds = remember(libraryVersion) {
-                                        nav.downloads.downloadedChapters()
-                                    },
-                                    queuedChapterIds = downloadJobs.map { it.chapterId }.toSet(),
+                                    downloadedChapterIds = downloadedIds,
+                                    queuedChapterIds = queuedIds,
                                     // The same call the chapter list makes, one row
                                     // per chapter: the queue decides the order and
                                     // refuses a chapter it already has, so a batch
@@ -505,18 +868,36 @@ fun ShuraRoot(
                                             coverUrl = screen.manga.coverUrl.orEmpty(),
                                         )
                                     },
+                                    // The whole batch in one call: "download the rest"
+                                    // on a long series is hundreds of chapters, and the
+                                    // queue serialises them anyway. Same chapters, same
+                                    // rule for what is left - only the way in changed.
+                                    onDownloadBatch = { batch ->
+                                        nav.downloads.downloadAll(
+                                            source = source,
+                                            mangaId = screen.manga.id,
+                                            mangaTitle = screen.manga.title,
+                                            chapters = batch,
+                                            coverUrl = screen.manga.coverUrl.orEmpty(),
+                                            onDisk = downloadedIds,
+                                        )
+                                    },
                                     onShare = { shareWork(nav.context, source.name, screen.manga.title) },
                                     onOpenChapters = {
                                         go(ShuraScreen.Chapters(screen.sourceId, screen.manga))
                                     },
-                                    onBack = { back() },
                                 )
                             }
                         }
 
                         is ShuraScreen.Chapters -> {
                             val source = sourceOf(screen.sourceId)
-                            if (source == null) StatePanel(shura("common.error"), screen.sourceId)
+                            if (source == null) EmptyState(
+                                title = shura("common.error"),
+                                body = screen.sourceId,
+                                icon = ShuraIcons.Target,
+                                modifier = Modifier.fillMaxSize(),
+                            )
                             else ChapterListScreen(
                                 mangaTitle = screen.manga.title,
                                 source = source,
@@ -536,10 +917,8 @@ fun ShuraRoot(
                                     )
                                 }.map { it.id }.toSet()
                             },
-                                downloadedChapterIds = remember(libraryVersion) {
-                                    nav.downloads.downloadedChapters()
-                                },
-                                queuedChapterIds = downloadJobs.map { it.chapterId }.toSet(),
+                                downloadedChapterIds = downloadedIds,
+                                queuedChapterIds = queuedIds,
                                 onDownloadChapter = { chapter ->
                                     nav.downloads.download(
                                         source = source,
@@ -549,23 +928,97 @@ fun ShuraRoot(
                                         coverUrl = screen.manga.coverUrl.orEmpty(),
                                     )
                                 },
-                                onBack = { back() },
+                                // "Download all chapters", on the chapter list
+                                // itself. Every chapter that is left, in one call
+                                // to the queue, which serialises them.
+                                onDownloadAll = { batch ->
+                                    nav.downloads.downloadAll(
+                                        source = source,
+                                        mangaId = screen.manga.id,
+                                        mangaTitle = screen.manga.title,
+                                        chapters = batch,
+                                        coverUrl = screen.manga.coverUrl.orEmpty(),
+                                        onDisk = downloadedIds,
+                                    )
+                                },
+                            )
+                        }
+
+                        is ShuraScreen.SavedChapters -> {
+                            // Built from the store, not remembered from where the
+                            // tap came from: a download that finished while this
+                            // screen was open has added a chapter to it, and the
+                            // library it was opened from may not have been re-read.
+                            val work = remember(libraryState, downloadJobs, screen.sourceId, screen.mangaId) {
+                                groupDownloads(libraryState, downloadJobs)
+                                    .firstOrNull { it.sourceId == screen.sourceId && it.mangaId == screen.mangaId }
+                                    ?: DownloadedWork(
+                                        sourceId = screen.sourceId,
+                                        mangaId = screen.mangaId,
+                                        title = screen.title,
+                                        coverUrl = screen.coverUrl,
+                                        stored = emptyList(),
+                                        jobs = emptyList(),
+                                    )
+                            }
+                            StoredChaptersScreen(
+                                work = work,
+                                // Straight from the store's own record, so the
+                                // reader is handed the page files that are really
+                                // there rather than a list of URIs to try.
+                                onRead = { entry ->
+                                    LocalChapterRead.feedFor(
+                                        storedRecords, screen.sourceId, entry.chapterId,
+                                    ).let { feed ->
+                                        when (feed) {
+                                            is ChapterFeed.OnDevice -> openStoredChapter(feed.record)
+                                            // The row is on screen but its pages are
+                                            // not: say so rather than opening a reader
+                                            // over nothing.
+                                            ChapterFeed.Network -> cleanupNotice =
+                                                Strings.t("library.chapterGone", uiLanguage, entry.title)
+                                        }
+                                    }
+                                },
+                                onCancel = { nav.downloads.cancel(it) },
+                                onRetry = { nav.downloads.retry(it, sourceOf) },
+                                onForget = { nav.downloads.forget(it) },
                             )
                         }
 
                         is ShuraScreen.Downloads -> DownloadsScreen(
                             jobs = downloadJobs,
+                            stored = libraryState,
                             onCancel = { nav.downloads.cancel(it) },
+                            // One action for everything still moving. Per-row
+                            // cancel is right for one chapter and useless for the
+                            // two hundred a long series queues, which is where
+                            // "stop" has to mean stop.
+                            onCancelAll = { nav.downloads.cancelAll() },
                             onRetry = { nav.downloads.retry(it, sourceOf) },
                             onForget = { nav.downloads.forget(it) },
-                            onBack = { back() },
+                            // A work, not a chapter: tapping a row here opens the
+                            // chapters of that work, and tapping one of those
+                            // chapters is what opens the reader.
+                            onOpenWork = { go(openTargetFor(it)) },
+                            onBrowse = { go(ShuraScreen.Sources) },
                         )
 
                         is ShuraScreen.Reader -> {
-                            val total = totalPages() ?: pages.size
+                            // The chapter's own page count when the activity
+                            // knows it, and how many pages have actually landed
+                            // when it does not. One rule, in [ReaderCounter], and
+                            // the reader is handed the *unresolved* total so the
+                            // same rule is applied where the counter is drawn:
+                            // collapsing it to `pages.size` here is what made a
+                            // forty page chapter read "1 / 1" until its last
+                            // page arrived.
+                            val total = app.shura.manga.reader.ReaderCounter.total(
+                                totalPages(), pages.size,
+                            )
                             val saved = nav.progressStore.pageFor(
                                 screen.sourceId, screen.mangaTitle, screen.chapter.id,
-                                total.coerceAtLeast(1),
+                                total,
                             )
                             // Null where there is nowhere to go, so the bar hides
                             // the arrow rather than offering a dead step.
@@ -585,7 +1038,16 @@ fun ShuraRoot(
                                 pages = pages,
                                 sourceId = screen.sourceId,
                                 chapterId = screen.chapter.id,
-                                chapterTitle = screen.mangaTitle + " · " + screen.chapter.name,
+                                // The work and its chapter, joined with a pinned
+                                // separator. Both sides are usually Arabic and the
+                                // separator is a neutral middot, which is exactly
+                                // the case where an unpinned one puts the two
+                                // halves of the title on screen in the opposite
+                                // order to the one they are written in.
+                                chapterTitle = detailJoin(
+                                    screen.mangaTitle,
+                                    screen.chapter.name,
+                                ),
                                 cover = cover,
                                 savedPage = saved,
                                 onProgress = onProgressChanged,
@@ -598,11 +1060,12 @@ fun ShuraRoot(
                                     )
                                 },
                                 onRetryPage = onRetryPage,
-                                totalPages = total,
+                                totalPages = totalPages(),
                                 mode = readerMode,
                                 onModeChange = onReaderModeChange,
                                 readerPreferences = readerPreferences,
                                 onReaderPreferencesChange = onReaderPreferencesChange,
+                                onChapterFinished = onChapterFinished,
 
                                 onPrevChapter = previous?.let { c ->
                                     { openChapter(screen.sourceId, screen.mangaTitle, source, c, screen.chapters) }
@@ -656,48 +1119,119 @@ private fun shareWork(context: android.content.Context, sourceName: String, titl
 }
 
 /**
- * The title and the destinations, the way Mihon arranges them.
+ * The screen's own bar: the way out, and the name of what is on screen.
  *
- * The tab row is above the content rather than below it, so the reader's own bar
- * is the only thing near their thumb while reading, and the screen title is the
- * largest text on the page the way it is in every other screen.
+ * The arrow lives here rather than in each pushed screen's body, which is where
+ * it used to be drawn four separate times - four times taking a whole row above
+ * the content, and four times being slightly out of line with the title beside
+ * it. It is offered only where there is somewhere to go back to: arriving at a
+ * tab by pressing it leaves nothing behind the screen, and an arrow that cannot
+ * act is the dead button this app keeps trying not to ship.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ShuraTabBar(
-    current: ShuraScreen,
+private fun ShuraTopBar(
     title: String,
-    onNavigate: (ShuraScreen) -> Unit,
+    onBack: (() -> Unit)?,
     actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {},
 ) {
-    Column {
-        TopAppBar(
-            title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-            actions = actions,
-        )
-        TabRow(selectedTabIndex = tabIndexOf(current)) {
-            listOf(
-                ShuraScreen.Home,
-                ShuraScreen.Sources,
-                ShuraScreen.Library,
-                ShuraScreen.Downloads,
-                ShuraScreen.Settings,
-            ).forEach { target ->
-                Tab(
-                    selected = tabIndexOf(current) == tabIndexOf(target),
-                    onClick = { onNavigate(target) },
-                    text = {
-                        Text(
-                            tabLabelOf(target),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                    },
-                )
-            }
+    TopAppBar(
+        navigationIcon = { onBack?.let { ScreenBackButton(it) } },
+        title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        actions = actions,
+    )
+}
+
+/**
+ * The destinations, at the bottom, where a thumb already is.
+ *
+ * Each one is an icon with its name under it, the way every phone app a reader
+ * already has in their hand does it. They used to be five words in a tab row
+ * across the top, directly above the screen's title - which gave the top of the
+ * screen two headings competing for it, and in Arabic, where four of those words
+ * are long, it did not fit a phone at all. The top of the screen belongs to the
+ * screen.
+ *
+ * The selected destination gets a filled pill behind its icon, so the state is a
+ * shape as well as a colour, and the downloads destination carries a count while
+ * anything is actually in flight.
+ *
+ * Only the chrome moved. Which screen a destination opens, what back does, and
+ * which tab a pushed screen belongs to are untouched - that is [ScreenStack]'s
+ * job and this function never sees it.
+ */
+@Composable
+private fun ShuraBottomBar(
+    current: ShuraScreen,
+    onNavigate: (ShuraScreen) -> Unit,
+    /** Downloads in flight, badged on the downloads destination. */
+    activeDownloads: Int,
+) {
+    NavigationBar {
+        listOf(
+            ShuraScreen.Home,
+            ShuraScreen.Sources,
+            ShuraScreen.Library,
+            ShuraScreen.Downloads,
+            ShuraScreen.Settings,
+        ).forEach { target ->
+            val selected = tabIndexOf(current) == tabIndexOf(target)
+            NavigationBarItem(
+                selected = selected,
+                onClick = { onNavigate(target) },
+                icon = {
+                    Box(contentAlignment = Alignment.Center) {
+                        // The pill sits behind the icon rather than around the label,
+                        // so all five destinations keep one size whether or not one
+                        // of them is selected.
+                        Box(
+                            Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(
+                                    if (selected) MaterialTheme.colorScheme.primaryContainer
+                                    else Color.Transparent,
+                                )
+                                .padding(horizontal = 16.dp, vertical = 3.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                tabIconOf(target),
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                        if (target is ShuraScreen.Downloads && activeDownloads > 0) {
+                            CountBadge(
+                                activeDownloads,
+                                Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(end = 4.dp),
+                            )
+                        }
+                    }
+                },
+                label = {
+                    Text(
+                        tabLabelOf(target),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                },
+                alwaysShowLabel = true,
+            )
         }
     }
+}
+
+/** The glyph for a destination. Drawn once per tab, beside its own label. */
+@Composable
+private fun tabIconOf(tab: ShuraScreen) = when (tab) {
+    ShuraScreen.Home -> Icons.Default.Home
+    ShuraScreen.Sources -> ShuraIcons.Target
+    ShuraScreen.Library -> ShuraIcons.Books
+    ShuraScreen.Downloads -> ShuraIcons.Download
+    else -> Icons.Default.Settings
 }
 
 private val TABS = listOf(
@@ -719,8 +1253,11 @@ private val TABS = listOf(
  */
 private fun rootTabOf(screen: ShuraScreen): ShuraScreen = when (screen) {
     is ShuraScreen.Search, is ShuraScreen.Details, is ShuraScreen.Chapters -> ShuraScreen.Sources
-    is ShuraScreen.Extensions -> ShuraScreen.Settings
+    is ShuraScreen.Extensions, is ShuraScreen.Repositories -> ShuraScreen.Settings
     is ShuraScreen.Reader -> ShuraScreen.Home
+    // A work's saved chapters are the library's, opened one level down: the tab
+    // that owns them is the one that should stay lit behind them.
+    is ShuraScreen.SavedChapters -> ShuraScreen.Library
     else -> screen
 }
 
@@ -746,37 +1283,44 @@ private fun tabLabelOf(tab: ShuraScreen): String = when (tab) {
     else -> shura("nav.settings")
 }
 
-/** What the top bar says. A chapter or a work names itself; a tab names the tab. */
 /**
- * The icons on the right of the title.
+ * The icons on the trailing edge of the title.
  *
- * They exist for the one job icons are good at: an action the reader wants without
- * reading a label. Everything else stays a labelled control, because an icon that
- * could be two things is worse than a word that is one.
+ * Nothing is drawn here.
+ *
+ * There used to be a search, a sort and a refresh icon on three of these
+ * screens, each with an empty click handler: three dead controls in the place a
+ * reader looks first. The library's real search and sort are on the library
+ * screen itself, and the extension store's and downloads' real actions are on
+ * their own rows. A screen with no icon in its top bar is honest; a screen with
+ * three that do nothing is worse than either.
+ *
+ * It stays as a function so that putting a *live* action here is one edit rather
+ * than a redesign, and it keeps [ShuraTopBar]'s signature unchanged. The search
+ * and the sort stay on the library screen itself, where the results they change
+ * are, rather than moving up into a bar that is the same on five screens.
  */
 @Composable
 private fun TopBarActions(screen: ShuraScreen) {
-    when (screen) {
-        is ShuraScreen.Library -> {
-            IconButton(onClick = {}) { Icon(Icons.Default.Search, contentDescription = shura("library.search")) }
-            IconButton(onClick = {}) { Icon(Icons.Default.List, contentDescription = shura("library.sort.title")) }
-        }
-        is ShuraScreen.Extensions -> {
-            IconButton(onClick = {}) { Icon(Icons.Default.Refresh, contentDescription = shura("store.updateAll")) }
-        }
-        is ShuraScreen.Downloads -> {
-            IconButton(onClick = {}) { Icon(Icons.Default.Refresh, contentDescription = shura("common.retry")) }
-        }
-        else -> Unit
-    }
+    // Intentionally empty: see above.
 }
 
+/**
+ * What the bar says.
+ *
+ * A tab names itself. A pushed screen names the thing it was pushed onto: the
+ * work's own title, or - for the catalogue - the source being searched, which is
+ * the fact a reader needs when results come back from somewhere unexpected.
+ */
 @Composable
-private fun titleOf(screen: ShuraScreen): String = when (screen) {
-    is ShuraScreen.Search -> shura("nav.discover")
+private fun titleOf(nav: ShuraNav, screen: ShuraScreen): String = when (screen) {
+    is ShuraScreen.Search -> nav.sourceHost.find(screen.sourceId)?.name
+        ?.takeIf { it.isNotBlank() } ?: shura("nav.discover")
     is ShuraScreen.Details -> screen.manga.title
     is ShuraScreen.Chapters -> screen.manga.title
+    is ShuraScreen.SavedChapters -> screen.title
     is ShuraScreen.Extensions -> shura("store.title")
+    is ShuraScreen.Repositories -> shura("repos.title")
     is ShuraScreen.Downloads -> shura("downloads.title")
     is ShuraScreen.Home -> shura("nav.home")
     is ShuraScreen.Sources -> shura("nav.discover")

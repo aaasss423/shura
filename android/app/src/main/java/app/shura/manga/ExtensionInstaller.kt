@@ -64,6 +64,14 @@ class ExtensionInstaller(
     /**
      * Downloads and installs [entry] from [baseUrl].
      *
+     * [directory] is the repository this package is being installed *into*,
+     * which is the repository that published it: a package offered by a
+     * repository added by URL is fetched from that address and written beside
+     * the index it came from, so removing that repository takes exactly its own
+     * artifacts with it and leaves the shipped repository alone. It defaults to
+     * the bundled directory, so every existing call site - and the folder and
+     * asset installs - behave exactly as before.
+     *
      * [onProgress] receives bytes downloaded so far and the total, when the
      * server declares one, so the row can show real progress rather than an
      * indeterminate spinner.
@@ -71,9 +79,9 @@ class ExtensionInstaller(
     suspend fun install(
         entry: RepositoryPackage,
         baseUrl: String,
+        directory: File = ShuraRepository.directory(context),
         onProgress: ((Long, Long) -> Unit)? = null,
     ): InstallResult {
-        val directory = ShuraRepository.directory(context)
         val apkDir = File(directory, ExtensionCatalog.APK_DIR).apply { mkdirs() }
         val staged = File.createTempFile("shura-ext-", ".apk", context.cacheDir)
         return try {

@@ -1,5 +1,27 @@
 [
   {
+    "source_id": "site:www.mangapixel.com",
+    "name": "MangaPixel AR",
+    "url": "https://www.mangapixel.com/ar/",
+    "kind": "local-artifact",
+    "language": "ar",
+    "region": "ar",
+    "enabled": true,
+    "configuration": {
+      "allowed_hosts": [
+        "www.mangapixel.com",
+        "cdn.mangapixel.com"
+      ],
+      "package": "app.shura.extension.mangapixel",
+      "signing_key": "ff2b830d1eabdec6b00904a4f33342618275da3145e5a743994517ad4643fd87",
+      "library": "shura",
+      "version": "1.0",
+      "artifact_path": "repo-shuraown/apk/app_shura_extension_mangapixel-1.0.apk",
+      "repository_url": "https://www.mangapixel.com",
+      "operator_notes": "Arabic catalogue read over plain HTTPS: the work grid and the newest chapters are server-rendered, and the rest of the chapter list comes from an open admin-ajax endpoint. No JavaScript execution and no login. Built from this project's generator and signed with the Shura publisher key held out of Git."
+    }
+  },
+  {
     "source_id": "index:keiyoushi/extensions",
     "name": "Keiyoushi Arabic extensions",
     "url": "https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.json",

@@ -23,6 +23,11 @@ class DownloadAndReaderSettingsTest {
         assertEquals(4, defaults.parallelism)
         assertTrue("the system brightness is left alone by default", !defaults.overridesBrightness)
         assertEquals(false, defaults.keepScreenOn)
+        // Deleting a chapter the reader has finished is Mihon's advanced setting,
+        // and it is off until it is asked for: nobody loses a saved chapter to a
+        // default they never chose.
+        assertEquals(false, defaults.deleteChapterAfterReading)
+        assertEquals(false, ReaderPreferences(brightness = 0.5f).deleteChapterAfterReading)
     }
 
     @Test

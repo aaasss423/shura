@@ -1,5 +1,6 @@
 package app.shura.runtime
 
+import app.shura.source.ChapterNames
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
@@ -29,6 +30,7 @@ class ExtensionSourceAdapter(
     private val loaded: LoadedExtension,
     private val transport: ((Request) -> Pair<Int, okhttp3.ResponseBody>)? = null,
 ) : app.shura.source.ShuraSource {
+
 
     private val source: CatalogueSource get() = loaded.source
 
@@ -70,7 +72,17 @@ class ExtensionSourceAdapter(
         check(chapterCode in 200..299) { "chapters failed (HTTP $chapterCode)" }
         @Suppress("UNCHECKED_CAST")
         val chapters = callParse("chapterListParse", chapterBody) as? List<SChapter> ?: emptyList()
-        return chapters.map { app.shura.source.Chapter(it.url, it.name, it.chapter_number) }
+        return chapters.map { chapter ->
+            // The extension's answer stops being trusted here. These are DEX files
+            // this module did not compile and cannot change, and they read their
+            // titles out of `org.json`, where `optString` on a JSON null returns
+            // the four characters "null" on Android rather than nothing. Believed
+            // as it arrived, that is a chapter list in which every row is titled
+            // "null" - hundreds deep, with the chapter's own number in the column
+            // beside it. [ChapterNames] is the one shared rule for that, and what
+            // the row draws instead is decided from the chapter's own facts.
+            app.shura.source.Chapter(chapter.url, ChapterNames.usable(chapter.name), chapter.chapter_number)
+        }
     }
 
     override suspend fun pages(chapterId: String): List<app.shura.source.Page> {

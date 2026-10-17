@@ -6,10 +6,15 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -24,12 +29,17 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import app.shura.manga.reader.ReaderCounter
 import app.shura.manga.reader.ReaderMode
 import app.shura.manga.reader.ReaderPreferences
 import app.shura.manga.ui.shura
@@ -58,7 +68,7 @@ fun ReaderSheetHost(
     currentPage: Int,
     mode: ReaderMode,
     onModeChange: (ReaderMode) -> Unit,
-    /** Brightness, preload and screen-awake, kept between sessions. */
+    /** Brightness, preload, screen-awake and delete-after-reading, kept between sessions. */
     preferences: ReaderPreferences,
     onPreferencesChange: (ReaderPreferences) -> Unit,
     onOpenChapter: (Chapter) -> Unit,
@@ -112,42 +122,45 @@ private fun ChapterPickerSheet(
     }
 
     Column(Modifier.fillMaxWidth().heightIn(max = 520.dp)) {
-        Text(
-            shura("reader.chapters"),
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-        )
-        LazyColumn(state = listState, modifier = Modifier.fillMaxWidth()) {
+        SectionHeader(label = shura("reader.chapters"), modifier = Modifier.padding(horizontal = 20.dp))
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
             itemsIndexed(chapters, key = { index, c -> "${c.id}:$index" }) { index, chapter ->
                 val isCurrent = chapter.id == currentChapterId
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clickable { onOpen(chapter) }
-                        .padding(horizontal = 20.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        chapter.name,
-                        Modifier.weight(1f),
-                        maxLines = 2,
-                        style = if (isCurrent) MaterialTheme.typography.titleSmall
-                        else MaterialTheme.typography.bodyMedium,
-                        color = if (isCurrent) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurface,
-                    )
-                    if (isCurrent) {
-                        Text(
-                            shura("reader.current"),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                }
-                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                // The app's row, not a bare line of text: a chapter list inside a
+                // sheet is still a chapter list, and it should not be the one place
+                // in the app where a row is drawn differently.
+                AppRow(
+                    title = chapter.name,
+                    meta = if (isCurrent) shura("reader.current") else null,
+                    modifier = Modifier.fillMaxWidth(),
+                    titleLines = 2,
+                    color = if (isCurrent) MaterialTheme.colorScheme.primaryContainer
+                    else MaterialTheme.colorScheme.surfaceVariant,
+                    leading = { UnreadMark(current = isCurrent) },
+                    onClick = { onOpen(chapter) },
+                )
             }
         }
     }
+}
+
+/** The mark on a chapter row: this one, or not. */
+@Composable
+private fun UnreadMark(current: Boolean) {
+    Box(
+        Modifier
+            .size(8.dp)
+            .clip(CircleShape)
+            .then(
+                if (current) Modifier.background(MaterialTheme.colorScheme.primary)
+                else Modifier,
+            ),
+    )
 }
 
 @Composable
@@ -210,9 +223,8 @@ private fun ReadingSettingsSheet(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Spacer(Modifier.height(16.dp))
 
-        Text(shura("reader.preload"), style = MaterialTheme.typography.labelLarge)
+        SectionHeader(label = shura("reader.preload"))
         Slider(
             value = preferences.preload.toFloat(),
             onValueChange = { onPreferencesChange(preferences.copy(preloadPages = it.toInt())) },
@@ -224,9 +236,8 @@ private fun ReadingSettingsSheet(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Spacer(Modifier.height(16.dp))
 
-        Text(shura("reader.parallel"), style = MaterialTheme.typography.labelLarge)
+        SectionHeader(label = shura("reader.parallel"))
         Slider(
             value = preferences.parallelism.toFloat(),
             onValueChange = { onPreferencesChange(preferences.copy(parallelDownloads = it.toInt())) },
@@ -240,27 +251,62 @@ private fun ReadingSettingsSheet(
         )
         Spacer(Modifier.height(16.dp))
 
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                shura("reader.keepScreenOn"),
-                Modifier.weight(1f),
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Switch(
-                checked = preferences.keepScreenOn,
-                onCheckedChange = { onPreferencesChange(preferences.copy(keepScreenOn = it)) },
-            )
-        }
+        // The two yes-or-no settings, as the app's rows: mark, title, summary,
+        // switch. They used to be a line of text with a switch pushed against the
+        // edge, which is the one place in the app where a setting has no shape.
+        AppRow(
+            title = shura("reader.keepScreenOn"),
+            modifier = Modifier.fillMaxWidth(),
+            leading = { RowMark(Icons.Default.Star, contentDescription = null) },
+            trailing = {
+                Switch(
+                    checked = preferences.keepScreenOn,
+                    onCheckedChange = { onPreferencesChange(preferences.copy(keepScreenOn = it)) },
+                )
+            },
+            onClick = {
+                onPreferencesChange(preferences.copy(keepScreenOn = !preferences.keepScreenOn))
+            },
+        )
+        Spacer(Modifier.height(8.dp))
+
+        // Mihon's advanced setting, in the same place Mihon keeps it, and off
+        // until it is asked for: it removes a chapter the reader has finished,
+        // which is worth a switch they can see rather than a rule that surprises
+        // them on chapter two.
+        AppRow(
+            title = shura("reader.deleteAfterReading"),
+            meta = shura("reader.deleteAfterReadingHelp"),
+            metaLines = 3,
+            modifier = Modifier.fillMaxWidth(),
+            leading = { RowMark(Icons.Default.Delete, contentDescription = null) },
+            trailing = {
+                Switch(
+                    checked = preferences.deleteChapterAfterReading,
+                    onCheckedChange = {
+                        onPreferencesChange(preferences.copy(deleteChapterAfterReading = it))
+                    },
+                )
+            },
+            onClick = {
+                onPreferencesChange(
+                    preferences.copy(deleteChapterAfterReading = !preferences.deleteChapterAfterReading),
+                )
+            },
+        )
         Spacer(Modifier.height(16.dp))
         HorizontalDivider()
         Spacer(Modifier.height(8.dp))
-        Text(
-            shura("reader.pages", currentPage.coerceAtLeast(1), totalPages.coerceAtLeast(1)),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        SummaryStrip(
+            // The same two numbers the bar and every page label use, resolved
+            // once by [ReaderCounter]. It used to re-clamp here with a second
+            // rule, which is how a page above the end of the chapter reached a
+            // label.
+            shura(
+                "reader.pages",
+                ReaderCounter.page(currentPage - 1, totalPages),
+                ReaderCounter.total(totalPages, totalPages),
+            ),
         )
     }
 }

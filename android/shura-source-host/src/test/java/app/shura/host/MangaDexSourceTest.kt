@@ -2,6 +2,7 @@ package app.shura.host
 
 import app.shura.source.MangaSummary
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -100,5 +101,48 @@ class MangaDexSourceTest {
         // Guards against SourceApi drift: browse results must be MangaSummary instances.
         val sample = MangaSummary("id", "t", null)
         assertTrue(sample.id == "id" && sample.title == "t")
+    }
+
+    /**
+     * A chapter whose title the API sent as JSON `null`.
+     *
+     * THIS IS WHERE THE WORD "null" CAME FROM
+     *
+     * MangaDex publishes `"title": null` for every chapter that has no
+     * translated title, which is most of a long series. The parser read it with
+     * `JSONObject.optString`, which is not "the string, or empty": on Android it
+     * runs the value through `String.valueOf`, and `JSONObject.NULL` stringifies
+     * to the four characters "null". `title.isNotBlank()` was satisfied by that,
+     * so the name became "null" - and every chapter row in the app printed it,
+     * with the chapter's own number sitting in the column beside it.
+     *
+     * The reference `org.json` on the test classpath returns "" for the same
+     * input, so this test cannot see the four letters itself; what it pins is the
+     * outcome both implementations must produce, which is that a missing title is
+     * never a name and the chapter's number is used instead.
+     */
+    @Test fun aJsonNullTitleIsNeverTheChaptersName() = runBlocking {
+        val feed = """{"result":"ok","data":[
+            {"id":"c-451","attributes":{"chapter":"451","title":null}},
+            {"id":"c-450","attributes":{"chapter":"450","title":null}},
+            {"id":"c-named","attributes":{"chapter":"1","title":"Pilot"}}
+        ]}"""
+        val source = MangaDexSource(routing(FEED_URL to feed))
+        val chapters = source.chapters("m-1111")
+
+        assertEquals(3, chapters.size)
+        listOf("c-451", "c-450").forEachIndexed { index, _ ->
+            val chapter = chapters[index]
+            assertFalse("a chapter was titled the word null", chapter.name.trim().equals("null", true))
+            assertEquals("Chapter ${451 - index}", chapter.name)
+        }
+        // A title the site really wrote is still the name.
+        assertEquals("Pilot", chapters[2].name)
+    }
+
+    private companion object {
+        const val FEED_URL =
+            "https://api.mangadex.org/manga/m-1111/feed?translatedLanguage[]=en&limit=500" +
+                "&order[chapter]=asc&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica"
     }
 }

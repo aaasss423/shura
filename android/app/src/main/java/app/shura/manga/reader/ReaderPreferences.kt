@@ -21,6 +21,15 @@ data class ReaderPreferences(
     val keepScreenOn: Boolean = false,
     /** Pages downloaded at once; higher is faster and heavier on the connection. */
     val parallelDownloads: Int = 4,
+    /**
+     * Delete a chapter from the library once it has been read to the end.
+     *
+     * Mihon keeps this in its advanced reader settings and defaults it off, and
+     * so does this: it frees the space a read chapter was holding, but it is the
+     * reader's own library, and a chapter deleted by a setting nobody expected
+     * to lose is not a thing to discover afterwards.
+     */
+    val deleteChapterAfterReading: Boolean = false,
 ) {
     /** Preload clamped to what a phone can actually hold. */
     val preload: Int get() = preloadPages.coerceIn(0, 10)

@@ -9,9 +9,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -21,6 +26,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.shura.source.Chapter
 import app.shura.source.MangaSummary
 import app.shura.source.ShuraSource
@@ -32,8 +38,10 @@ import app.shura.manga.ui.BatchDownload
 import app.shura.manga.ui.BatchState
 import app.shura.manga.ui.ChapterListOrder
 import app.shura.manga.ui.DetailsResume
+import app.shura.manga.ui.ExploreLoadGate
 import app.shura.manga.ui.Strings
 import app.shura.manga.ui.image.CoverImage
+import app.shura.manga.ui.theme.ShuraSpacing
 import androidx.compose.foundation.layout.size
 import app.shura.manga.ui.shura
 import app.shura.manga.ui.theme.LocalUiLanguage
@@ -46,7 +54,6 @@ import kotlinx.coroutines.withContext
 fun SearchScreen(
     source: ShuraSource,
     onOpenManga: (MangaSummary) -> Unit,
-    onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // Captured so the non-composable callbacks below can format too; a
@@ -103,6 +110,23 @@ fun SearchScreen(
         fetch(1, append = false)
     }
 
+    // Entering the screen is the request.
+    //
+    // It used to be nothing but the search button: `results` started empty,
+    // `searching` was false and `error` was null, so the screen opened onto the
+    // one branch that draws nothing at all - no list, no spinner, no error and
+    // nothing that said a request had never been made. A reader could not tell
+    // that from a source with no results until they had pressed a button.
+    //
+    // Keyed by the source, so it starts once per entry into this source's
+    // catalogue and again when a different source is opened, and not once per
+    // recomposition. The gate says the same thing in a form a test can hold on
+    // to: one request per entry, however many times the screen is recomposed.
+    val loadGate = remember(source.id) { ExploreLoadGate() }
+    LaunchedEffect(source.id) {
+        if (loadGate.shouldStart(source.id)) run()
+    }
+
     // Sorted and narrowed for reading, not for the network: the contract has no
     // filters, and inventing a query syntax a source cannot honour would be a
     // promise nothing keeps.
@@ -115,103 +139,101 @@ fun SearchScreen(
     }
 
     Column(modifier.fillMaxSize()) {
+        // One control row: the query, and the button that runs it. The back arrow
+        // is in the app's bar now, so this row is entirely about searching.
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
+            Modifier
+                .fillMaxWidth()
+                .padding(start = ShuraSpacing.screen, end = ShuraSpacing.screen, top = 8.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            ScreenBackButton(onBack)
-            OutlinedTextField(
+            SearchField(
                 value = query,
                 onValueChange = { query = it },
+                placeholder = shura("discover.search"),
                 modifier = Modifier.weight(1f),
-                singleLine = true,
-                placeholder = { Text(shura("discover.search")) },
+                trailing = {
+                    IconButton(
+                        onClick = { run() },
+                        enabled = !searching,
+                        modifier = Modifier.size(44.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.Search,
+                            contentDescription = shura("search.submit"),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                },
             )
-            Spacer(Modifier.width(8.dp))
-            Button(onClick = { run() }, enabled = !searching) { Text(shura("nav.discover")) }
         }
 
         when {
-            searching -> Box(Modifier.fillMaxSize(), Alignment.Center) {
-                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-            }
-            error != null -> Column(
-                Modifier.fillMaxSize().padding(24.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(
-                    error!!,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
-                    textAlign = TextAlign.Center,
-                )
-                Spacer(Modifier.height(12.dp))
-                Button(onClick = { run() }) { Text(shura("common.retry")) }
-            }
-            searched && visible.isEmpty() -> StatePanel(shura("discover.noResults"), source.name)
+            searching -> LoadingPanel(shura("discover.searching"), Modifier.fillMaxSize())
+            error != null -> EmptyState(
+                title = shura("common.error"),
+                body = error,
+                icon = Icons.Default.Warning,
+                actionLabel = shura("common.retry"),
+                onAction = { run() },
+                modifier = Modifier.fillMaxSize(),
+            )
+            searched && visible.isEmpty() -> EmptyState(
+                title = shura("discover.noResults"),
+                body = shura("discover.noResultsHelp"),
+                icon = Icons.Default.Search,
+                actionLabel = shura("common.clear"),
+                onAction = { query = "" },
+                modifier = Modifier.fillMaxSize(),
+            )
             else -> LazyColumn(
                 Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(
+                    start = ShuraSpacing.screen,
+                    end = ShuraSpacing.screen,
+                    top = 6.dp,
+                    bottom = 24.dp,
+                ),
+                verticalArrangement = Arrangement.spacedBy(ShuraSpacing.row),
             ) {
                 if (searched && results.isNotEmpty()) {
                     item {
+                        SummaryStrip(shura("search.results", visible.size))
+                    }
+                    item {
+                        // Narrowing and ordering, in one line. These used to be a
+                        // full-width outlined field with a label floating above it
+                        // and a chip beside it - two rows of chrome above the first
+                        // result, for two settings.
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            OutlinedTextField(
+                            SearchField(
                                 value = filter,
                                 onValueChange = { filter = it },
+                                placeholder = shura("search.filter"),
                                 modifier = Modifier.weight(1f),
-                                singleLine = true,
-                                label = { Text(shura("search.filter")) },
                             )
-                            Spacer(Modifier.width(8.dp))
-                            FilterChip(
-                                selected = ascending,
-                                onClick = { ascending = !ascending },
-                                label = {
-                                    Text(
-                                        if (ascending) shura("search.sortAz")
-                                        else shura("search.sortZa"),
-                                    )
-                                },
-                            )
-                        }
-                    }
-                }
-                items(visible, key = { it.id }) { manga ->
-                    Surface(
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                            .clickable { onOpenManga(manga) },
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        shape = RoundedCornerShape(12.dp),
-                    ) {
-                        Column(Modifier.padding(16.dp)) {
-                            // The cover is an image. It was rendered as its own
-                            // URL as text, which put a long
-                            // https://... string on every result card.
-                            Row {
-                                CoverImage(
-                                    source = manga.coverUrl,
-                                    modifier = Modifier
-                                        .size(width = 56.dp, height = 80.dp)
-                                        .clip(RoundedCornerShape(10.dp)),
-                                    retryLabel = shura("common.retry"),
-                                )
-                                Spacer(Modifier.width(12.dp))
-                                Text(
-                                    manga.title,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    maxLines = 3,
-                                    overflow = TextOverflow.Ellipsis,
+                            Spacer(Modifier.width(6.dp))
+                            IconButton(onClick = { ascending = !ascending }) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.List,
+                                    contentDescription = shura(
+                                        if (ascending) "search.sortAz" else "search.sortZa",
+                                    ),
                                 )
                             }
                         }
                     }
                 }
+                items(visible, key = { it.id }) { manga ->
+                    SearchResultRow(
+                        manga = manga,
+                        sourceName = detailJoin(source.name, source.language),
+                        onClick = { onOpenManga(manga) },
+                    )
+                }
                 if (searched && !exhausted) {
                     item {
-                        TextButton(
+                        OutlinedButton(
                             onClick = { fetch(page + 1, append = true) },
                             enabled = !loadingMore,
                             modifier = Modifier.fillMaxWidth(),
@@ -226,6 +248,38 @@ fun SearchScreen(
             }
         }
     }
+}
+
+/**
+ * One search result.
+ *
+ * A fixed 2:3 cover on the leading edge - the same plate the library and the
+ * work's page use - and everything else stacked beside it, so the eye runs down
+ * one column of titles instead of across a row of floating words. The way onward
+ * is a chevron on the trailing edge, which mirrors with the layout direction.
+ */
+@Composable
+private fun SearchResultRow(
+    manga: MangaSummary,
+    sourceName: String,
+    onClick: () -> Unit,
+) {
+    AppRow(
+        title = manga.title,
+        meta = sourceName,
+        titleLines = 2,
+        onClick = onClick,
+        modifier = Modifier.padding(vertical = 1.dp),
+        leading = { CoverPlate(manga.coverUrl, width = 52.dp, label = manga.title) },
+        trailing = {
+            Icon(
+                Icons.AutoMirrored.Filled.ArrowForward,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+            )
+        },
+    )
 }
 
 /**
@@ -250,7 +304,6 @@ fun ChapterListScreen(
     source: ShuraSource,
     mangaId: String,
     onOpenChapter: (Chapter) -> Unit,
-    onBack: () -> Unit,
     modifier: Modifier = Modifier,
     /**
      * The list that was actually fetched, handed upward so the reader can step
@@ -271,6 +324,15 @@ fun ChapterListScreen(
     queuedChapterIds: Set<String> = emptySet(),
     /** Saves the chapter for offline reading. Null hides the button entirely. */
     onDownloadChapter: ((Chapter) -> Unit)? = null,
+    /**
+     * Saves every chapter of this work that is left, in one step.
+     *
+     * A different action from the one-chapter button on each row, and a
+     * different one from the section's own "all chapters" control - that one
+     * reveals the rest of the list, this one saves what is in it. Null hides the
+     * action rather than offering a batch that cannot be started.
+     */
+    onDownloadAll: ((List<Chapter>) -> Unit)? = null,
 ) {
     val language = LocalUiLanguage.current
     var chapters by remember(mangaId) { mutableStateOf<List<Chapter>?>(null) }
@@ -291,18 +353,40 @@ fun ChapterListScreen(
     // Newest first unless the reader asks otherwise: a chapter list that opens on
     // chapter 1 of 400 is the reason readers tap "next chapter" instead of reading.
     // The order itself lives in ChapterListOrder, because the work's page batches
-    // downloads out of the same list and the two must not disagree about it.
+    // downloads out of the same chapters - and deliberately asks it for the other
+    // end, so a batch saves the story from the start while this list shows the
+    // newest update. One arrangement of the data, two honest orders.
+    //
+    // Repeated chapter ids are collapsed on the way through, by the same
+    // function: a source that hands back one chapter twice must not produce two
+    // rows here - two download buttons for one chapter, two entries in the
+    // reader's step-through, and a lazy list that cannot hold one key twice.
     val visible = remember(chapters, unreadOnly, ascending, readChapterIds) {
         val filtered = chapters.orEmpty().filter { !unreadOnly || it.id !in readChapterIds }
         ChapterListOrder.reading(filtered, ascending)
     }
+    // What "download all chapters" would take right now, decided the same way the
+    // work's page decides its batch, from the same three sets - so the control
+    // here and the buttons there can never disagree about what is left.
+    //
+    // From the work's own chapters, not from what the list is currently showing:
+    // "download all chapters" is a statement about the work, not about the
+    // filter the reader happens to have on.
+    val pendingAll = remember(chapters, readChapterIds, downloadedChapterIds, queuedChapterIds) {
+        BatchDownload.downloadAll(
+            chapters.orEmpty(),
+            BatchState(read = readChapterIds, downloaded = downloadedChapterIds, queued = queuedChapterIds),
+        )
+    }
 
     Column(modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp)) {
-            ScreenBackButton(onBack)
-        }
+        // The two things a reader changes about a chapter list, on one line, above
+        // the list. No back arrow: that is the bar's job now, on every pushed
+        // screen, instead of a row of its own here.
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+            Modifier
+                .fillMaxWidth()
+                .padding(start = ShuraSpacing.screen, end = ShuraSpacing.screen, top = 8.dp, bottom = 2.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             FilterChip(
@@ -317,117 +401,70 @@ fun ChapterListScreen(
             )
         }
         when {
-            error != null -> StatePanel(shura("common.error"), error!!)
-            chapters == null -> Box(Modifier.fillMaxSize(), Alignment.Center) {
-                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-            }
-            visible.isEmpty() -> StatePanel(shura("discover.noChapters"), mangaTitle)
+            error != null -> EmptyState(
+                // No button here: the bar's arrow is the way out, and a "retry"
+                // that re-reads state this screen no longer fetches would be the
+                // dead control this app keeps trying not to ship.
+                title = shura("common.error"),
+                body = error,
+                icon = Icons.Default.Warning,
+                modifier = Modifier.fillMaxSize(),
+            )
+            chapters == null -> LoadingPanel(shura("common.loading"), Modifier.fillMaxSize())
+            visible.isEmpty() -> EmptyState(
+                title = shura("discover.noChapters"),
+                body = mangaTitle,
+                icon = ShuraIcons.Series,
+                modifier = Modifier.fillMaxSize(),
+            )
             else -> LazyColumn(
                 Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                contentPadding = PaddingValues(
+                    start = ShuraSpacing.screen,
+                    end = ShuraSpacing.screen,
+                    top = 6.dp,
+                    bottom = 24.dp,
+                ),
+                verticalArrangement = Arrangement.spacedBy(ShuraSpacing.row),
             ) {
                 item {
-                    Text(
-                        shura("discover.chapters"),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+                    // How many chapters this work has, above the rows, rather than
+                    // a heading that repeats what the bar already says.
+                    SectionHeader(
+                        label = detailJoin(
+                            shura("discover.chapters"),
+                            shura("discover.chapterCount", visible.size),
+                        ),
+                        // Saving the whole work, on the header of its own chapter
+                        // list. Separate from this screen's per-row button, and
+                        // separate from the "all chapters" control on the work's
+                        // page, which reveals the rest of the list instead of
+                        // saving it. Disabled when there is nothing left to take,
+                        // which is the same rule the work's page's batch buttons
+                        // use.
+                        trailingLabel = onDownloadAll?.let { shura("downloads.downloadAll") },
+                        onTrailing = onDownloadAll?.takeIf { pendingAll.isNotEmpty() }
+                            ?.let { batch -> { batch(pendingAll) } },
                     )
                 }
                 items(visible, key = { it.id }) { chapter ->
-                    val read = chapter.id in readChapterIds
-                    val downloaded = chapter.id in downloadedChapterIds
-                    val queued = chapter.id in queuedChapterIds
-                    Surface(
-                        modifier = Modifier.fillMaxWidth()
-                            .clip(MaterialTheme.shapes.small)
-                            .clickable { onOpenChapter(chapter) },
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        shape = MaterialTheme.shapes.small,
-                    ) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            // Mihon's shape: the number in a column of its own, so a
-                            // list of four hundred lines can be scanned for "12"
-                            // without reading four hundred titles. Sources are loose
-                            // about chapter numbers - some are null, some are 12.5 -
-                            // so the column is a fixed width and never moves.
-                            Text(
-                                chapterNumberLabel(chapter.number),
-                                Modifier.width(46.dp).padding(end = 8.dp),
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    chapter.name.ifBlank { chapter.id },
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    // Read chapters recede instead of disappearing: the
-                                    // filter is there for that, and hiding history by
-                                    // default is how a reader loses their place.
-                                    color = if (read) MaterialTheme.colorScheme.onSurfaceVariant
-                                    else MaterialTheme.colorScheme.onSurface,
-                                )
-                            }
-                            // The word sits on the trailing edge rather than under
-                            // the title, so a read row is not taller than the one
-                            // above it and the column still scans as a column.
-                            if (read) {
-                                Text(
-                                    shura("chapters.read"),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    modifier = Modifier.padding(horizontal = 8.dp),
-                                )
-                            }
-                            when {
-                                // Saved already: a tick, so the row says it without
-                                // a button that would offer the same work twice.
-                                downloaded -> Icon(
-                                    Icons.Default.Check,
-                                    contentDescription = null,
-                                    modifier = Modifier.padding(horizontal = 10.dp).size(18.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                onDownloadChapter == null -> Unit
-                                else -> TextButton(
-                                    onClick = { onDownloadChapter(chapter) },
-                                    enabled = !queued,
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                ) {
-                                    Text(
-                                        if (queued) shura("chapters.queued") else shura("chapters.download"),
-                                        maxLines = 1,
-                                    )
-                                }
-                            }
-                        }
-                    }
+                    // The row is drawn by the same code the work's own page uses,
+                    // so a chapter looks the same wherever it is listed.
+                    ChapterRow(
+                        chapter = chapter,
+                        sourceName = source.name,
+                        read = chapter.id in readChapterIds,
+                        downloaded = chapter.id in downloadedChapterIds,
+                        queued = chapter.id in queuedChapterIds,
+                        onOpen = { onOpenChapter(chapter) },
+                        onDownload = onDownloadChapter?.let { download ->
+                            { download(chapter) }
+                        },
+                    )
                 }
             }
         }
     }
-}
-
-/**
- * A chapter number as a reader would write it.
- *
- * Sources report numbers loosely: absent, whole, or "Chapter 12.5". Rendering the
- * Float directly put "1.0" in the leading column of every list, so whole numbers
- * lose the decimal and the rest keep only their real fraction.
- */
-private fun chapterNumberLabel(number: Float?): String {
-    if (number == null) return "—"
-    val whole = number.toLong()
-    return if (whole.toFloat() == number) whole.toString() else number.toString()
 }
 
 /** Saved chapters, with read and delete. */
@@ -460,7 +497,6 @@ fun WorkDetailsScreen(
     onToggleLibrary: () -> Unit,
     onReadLatest: (Chapter) -> Unit,
     onOpenChapters: () -> Unit,
-    onBack: () -> Unit,
     modifier: Modifier = Modifier,
     loading: Boolean = false,
     error: String? = null,
@@ -487,6 +523,11 @@ fun WorkDetailsScreen(
     queuedChapterIds: Set<String> = emptySet(),
     /** Saves chapters for offline reading. Null hides the batch actions. */
     onDownloadChapter: ((Chapter) -> Unit)? = null,
+    /**
+     * Saves a batch of chapters in one step. Null falls back to one call per
+     * chapter, which is correct and slow on a long series.
+     */
+    onDownloadBatch: ((List<Chapter>) -> Unit)? = null,
 ) {
     val language = LocalUiLanguage.current
     var chapters by remember(manga.id) { mutableStateOf<List<Chapter>?>(null) }
@@ -501,12 +542,12 @@ fun WorkDetailsScreen(
             .onFailure { chaptersError = it.message ?: Strings.t("error.generic", language) }
     }
 
-    // Newest first: the order the chapter list opens in, so the batch buttons
-    // offer the chapters the reader is looking at rather than a second opinion
-    // about which end of the work comes next.
-    val visible = remember(chapters) {
-        chapters?.let { ChapterListOrder.reading(it, ascending = false) }
-    }
+    // Reading order, from chapter one. Not the chapter list's own newest-first
+    // order: a batch is a decision about what to save, and the first chapters of
+    // the story are what a reader who has just picked a work up wants saved. The
+    // list screen keeps its own order and its own sort chips - this page never
+    // shows a list, so there is nothing here for the chips to disagree with.
+    val batchOrder = remember(chapters) { chapters?.let { BatchDownload.inReadingOrder(it) } }
     val lastRead = remember(history, source.id, manga.id, chapters) {
         DetailsResume.hintFor(history, source.id, manga.id, chapters.orEmpty())
     }
@@ -515,195 +556,298 @@ fun WorkDetailsScreen(
     val settled = chapters != null || chaptersError != null
     val target = remember(lastRead, chapters) { DetailsResume.target(lastRead, chapters) }
 
-    val readIds = remember(visible, isRead) {
-        visible.orEmpty().filter { isRead(it.id) }.mapTo(mutableSetOf()) { it.id }
+    // Read state is asked about this work's own chapters, and it is a set: which
+    // order the batch walks them in makes no difference to which are read.
+    val readIds = remember(batchOrder, isRead) {
+        batchOrder.orEmpty().filter { isRead(it.id) }.mapTo(mutableSetOf()) { it.id }
     }
     val batch = remember(readIds, downloadedChapterIds, queuedChapterIds) {
         BatchState(read = readIds, downloaded = downloadedChapterIds, queued = queuedChapterIds)
     }
-    val nextFive = remember(visible, batch) { BatchDownload.take(visible.orEmpty(), batch, 5) }
-    val nextTen = remember(visible, batch) { BatchDownload.take(visible.orEmpty(), batch, 10) }
-    val rest = remember(visible, batch) { BatchDownload.take(visible.orEmpty(), batch, null) }
+    val nextFive = remember(batchOrder, batch) { BatchDownload.take(batchOrder.orEmpty(), batch, 5) }
+    val nextTen = remember(batchOrder, batch) { BatchDownload.take(batchOrder.orEmpty(), batch, 10) }
+    val rest = remember(batchOrder, batch) { BatchDownload.take(batchOrder.orEmpty(), batch, null) }
     // What the buttons will actually do right now. Empty means every chapter is
     // read, saved or already queued, and saying so beats offering a button that
     // would only re-download what the reader already has.
-    val canQueue = visible != null && nextFive.isNotEmpty()
+    val canQueue = batchOrder != null && nextFive.isNotEmpty()
+    // The newest chapters, to show on the page itself. Newest first, the way the
+    // reader arrives at a series; a batch still walks in reading order, because a
+    // batch is a decision about what to save rather than a view of the list.
+    val preview = remember(chapters) {
+        chapters?.let { ChapterListOrder.reading(it, ascending = false).take(PREVIEW_CHAPTERS) }
+    }
+    // The whole work's chapter count, read once. `chapters` is a delegated
+    // property so it cannot be smart-cast, and the count has to be the real one:
+    // heading the preview with "5 chapters" on a work that has four hundred is
+    // the kind of small lie that makes a reader think they have read the lot.
+    val chapterCount = chapters?.size ?: 0
 
-    Column(
-        modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-    ) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp)) {
-            ScreenBackButton(onBack)
-        }
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-            // Mihon's shape: the cover is a fixed 2:3 plate rather than whatever
-            // the source's image happens to be, so the page reads the same for
-            // every source.
-            CoverImage(
-                source = manga.coverUrl,
-                modifier = Modifier
-                    .width(132.dp)
-                    .aspectRatio(2f / 3f)
-                    .clip(MaterialTheme.shapes.medium),
-                contentDescription = manga.title,
-                retryLabel = shura("common.retry"),
-            )
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    manga.title,
-                    style = MaterialTheme.typography.titleLarge,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    sourceName,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    onShare?.let { share ->
-                        OutlinedIconButton(onClick = share) {
-                            Icon(Icons.Default.Share, contentDescription = shura("common.share"))
-                        }
-                    }
-                    // The favourite is the library toggle: the heart is filled and
-                    // violet exactly when the work is in the library, so the state
-                    // is readable without reading the button's label.
-                    OutlinedIconButton(onClick = onToggleLibrary) {
-                        Icon(
-                            if (inLibrary) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                            contentDescription = shura(
-                                if (inLibrary) "library.delete" else "library.title",
-                            ),
-                            tint = if (inLibrary) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-        }
-        // What is actually known about this title. No genre chips: the source
-        // contract carries none, and a made-up one would be a lie in the place a
-        // reader looks to decide.
-        if (sourceName.isNotBlank() || sourceLanguage.isNotBlank()) {
-            Row(
-                Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                // Weighted but not filling: a source with a long name takes what
-                // it needs and gives the rest back, so the language chip is never
-                // pushed off the end of the row.
-                if (sourceName.isNotBlank()) {
-                    Box(Modifier.weight(1f, fill = false)) { MetaChip(sourceName) }
-                }
-                if (sourceLanguage.isNotBlank()) {
-                    Box(Modifier.weight(1f, fill = false)) { MetaChip(sourceLanguage) }
-                }
-            }
-        }
+    Box(modifier.fillMaxSize()) {
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
         ) {
-            // One button, saying which of the two it is. "Start" opens chapter
-            // one; "Continue" opens the chapter the reader last read, and the
-            // reader restores the page they reached from the progress store.
-            if (settled) {
-                target?.let { opening ->
-                    Button(
-                        onClick = { onReadLatest(opening.chapter) },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
+            // The cover block: artwork on the leading edge at a fixed 2:3, and
+            // beside it the only three facts the source contract actually knows -
+            // the title, where it came from, and how long it is.
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        start = ShuraSpacing.screen,
+                        end = ShuraSpacing.screen,
+                        top = 10.dp,
+                    ),
+            ) {
+                CoverImage(
+                    source = manga.coverUrl,
+                    modifier = Modifier
+                        .width(116.dp)
+                        .aspectRatio(2f / 3f)
+                        .clip(MaterialTheme.shapes.small),
+                    contentDescription = manga.title,
+                    retryLabel = shura("common.retry"),
+                )
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        manga.title,
+                        style = MaterialTheme.typography.titleLarge,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    if (sourceName.isNotBlank() || sourceLanguage.isNotBlank()) {
                         Text(
-                            shura(
-                                if (DetailsResume.isContinuing(lastRead))
-                                    "details.continue"
-                                else "details.start",
-                            ),
+                            detailJoin(sourceName, sourceLanguage),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    // How long the work is, once the chapter list has said. Absent
+                    // until then rather than guessed at as "…" - it is a count, and
+                    // a made-up count is worse than no count.
+                    if (chapters != null) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            shura("discover.chapterCount", chapterCount),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
             }
-            OutlinedButton(
-                onClick = onOpenChapters,
-                enabled = !loading,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text(shura("discover.chapters")) }
-            val download = onDownloadChapter
-            if (download != null && visible != null) {
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    shura("details.download"),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    listOf(
-                        shura("details.downloadNext", 5) to nextFive,
-                        shura("details.downloadNext", 10) to nextTen,
-                        shura("details.downloadAll") to rest,
-                    ).forEach { (label, targets) ->
-                        // Enabled only while the batch has something in it. Once
-                        // the chapters are queued the next tap offers the ones
-                        // after them, so a second tap queues the next five rather
-                        // than refusing them silently.
-                        OutlinedButton(
-                            onClick = { targets.forEach { chapter -> download(chapter) } },
-                            enabled = targets.isNotEmpty(),
-                            modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
-                        ) {
-                            Text(
-                                label,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                style = MaterialTheme.typography.labelSmall,
-                            )
-                        }
-                    }
-                }
-                if (!canQueue) {
-                    Text(
-                        shura("details.downloadNone"),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+
+            // What can be done to this work, as a row of actions under the block.
+            // They used to be two outlined circles squeezed against the title,
+            // which left the third thing - the full chapter list - with nowhere to
+            // go and no label on either of them.
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = ShuraSpacing.screen, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                onShare?.let { share ->
+                    ActionTile(
+                        icon = Icons.Default.Share,
+                        label = shura("common.share"),
+                        onClick = share,
                     )
                 }
+                // The favourite is the library toggle: filled and crimson exactly
+                // when the work is in the library, so the state is readable without
+                // reading the label.
+                ActionTile(
+                    icon = if (inLibrary) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                    label = shura(if (inLibrary) "details.inLibrary" else "details.addLibrary"),
+                    onClick = onToggleLibrary,
+                    selected = inLibrary,
+                )
+                ActionTile(
+                    icon = ShuraIcons.Series,
+                    label = shura("discover.chapters"),
+                    onClick = onOpenChapters,
+                )
+            }
+
+            when {
+                error != null -> EmptyState(
+                    title = shura("common.error"),
+                    body = error,
+                    icon = Icons.Default.Warning,
+                    modifier = Modifier.height(260.dp),
+                )
+                chaptersError != null -> EmptyState(
+                    title = shura("common.error"),
+                    body = chaptersError,
+                    icon = Icons.Default.Warning,
+                    modifier = Modifier.height(260.dp),
+                )
+                loading || chapters == null -> LoadingPanel(
+                    shura("common.loading"),
+                    Modifier.height(200.dp),
+                )
+                // The chapters themselves, in the row shape every chapter list in
+                // the app uses, with the way to all of them on the section's end.
+                preview.isNullOrEmpty() -> EmptyState(
+                    title = shura("discover.noChapters"),
+                    body = manga.title,
+                    icon = ShuraIcons.Series,
+                    modifier = Modifier.height(260.dp),
+                )
+                else -> Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = ShuraSpacing.screen),
+                    verticalArrangement = Arrangement.spacedBy(ShuraSpacing.row),
+                ) {
+                    SectionHeader(
+                        detailJoin(
+                            shura("discover.chapters"),
+                            shura("discover.chapterCount", chapterCount),
+                        ),
+                        trailingLabel = shura("discover.allChapters"),
+                        onTrailing = onOpenChapters,
+                    )
+                    preview.forEach { chapter ->
+                        ChapterRow(
+                            chapter = chapter,
+                            sourceName = sourceName,
+                            read = isRead(chapter.id),
+                            downloaded = chapter.id in downloadedChapterIds,
+                            queued = chapter.id in queuedChapterIds,
+                            onOpen = { onReadLatest(chapter) },
+                            onDownload = onDownloadChapter?.let { download ->
+                                { download(chapter) }
+                            },
+                        )
+                    }
+                }
+            }
+            val download = onDownloadChapter
+            if (download != null && batchOrder != null) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = ShuraSpacing.screen),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    SectionHeader(shura("details.download"))
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        listOf(
+                            shura("details.downloadNext", 5) to nextFive,
+                            shura("details.downloadNext", 10) to nextTen,
+                            shura("details.downloadAll") to rest,
+                        ).forEach { (label, targets) ->
+                            // Enabled only while the batch has something in it. Once
+                            // the chapters are queued the next tap offers the ones
+                            // after them, so a second tap queues the next five rather
+                            // than refusing them silently.
+                            //
+                            // The whole list goes to the queue in one call where it
+                            // can: "download the rest" on a long series is hundreds
+                            // of chapters, and asking for them one at a time made
+                            // the tap itself the expensive part.
+                            OutlinedButton(
+                                onClick = {
+                                    onDownloadBatch?.invoke(targets)
+                                        ?: targets.forEach { chapter -> download(chapter) }
+                                },
+                                enabled = targets.isNotEmpty(),
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
+                            ) {
+                                Text(
+                                    label,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                            }
+                        }
+                    }
+                    if (!canQueue) {
+                        Text(
+                            shura("details.downloadNone"),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+            // Room for the pill, so the last control is never behind it.
+            Spacer(Modifier.height(PILL_CLEARANCE))
+        }
+
+        // "Start", floating.
+        //
+        // The one thing almost every reader came to this page to do, and it was a
+        // full-width button in the middle of a column that had to be scrolled
+        // past first. As a pill at the bottom it is under the thumb, in the place
+        // every reader expects it, and it only appears once the chapter list has
+        // settled - a pill that cannot act yet is worse than no pill.
+        if (settled) {
+            target?.let { opening ->
+                StartPill(
+                    label = shura(
+                        if (DetailsResume.isContinuing(lastRead)) "details.continue"
+                        else "details.start",
+                    ),
+                    onClick = { onReadLatest(opening.chapter) },
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = ShuraSpacing.screen),
+                )
             }
         }
-        when {
-            error != null -> StatePanel(shura("common.error"), error)
-            chaptersError != null -> StatePanel(shura("common.error"), chaptersError!!)
-            loading || chapters == null -> Box(Modifier.fillMaxWidth().padding(24.dp), Alignment.Center) {
-                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-            }
-        }
-        Spacer(Modifier.height(16.dp))
     }
 }
 
-/** A fact about a title, as a chip rather than a sentence. */
+/** How many chapters the work's own page shows before offering the whole list. */
+private const val PREVIEW_CHAPTERS = 5
+
+/** Height kept clear at the bottom of the page for the floating pill. */
+private val PILL_CLEARANCE = 104.dp
+
+/**
+ * The floating way into a work: one pill, one action, under the thumb.
+ *
+ * The glyph leads, so in Arabic the pill reads "ابدأ ▶" - the word first, the way
+ * it is written, with the play mark pointing the way the reader reads rather than
+ * always to the right.
+ */
 @Composable
-private fun MetaChip(label: String) {
+private fun StartPill(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Surface(
-        shape = MaterialTheme.shapes.extraSmall,
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .clickable { onClick() },
+        color = MaterialTheme.colorScheme.primary,
+        shape = RoundedCornerShape(50),
+        shadowElevation = 10.dp,
     ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Row(
+            Modifier.padding(start = 20.dp, end = 24.dp, top = 14.dp, bottom = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Default.PlayArrow,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                label,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onPrimary,
+            )
+        }
     }
 }

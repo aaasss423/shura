@@ -28,6 +28,7 @@ class TabIndexRegressionTest {
             ShuraScreen.Search("s"),
             ShuraScreen.Details("s", manga),
             ShuraScreen.Chapters("s", manga),
+            ShuraScreen.SavedChapters("s", "id", "A title"),
             ShuraScreen.Reader("s", "A title", app.shura.source.Chapter("c", "C", 1f), emptyList()),
         )
         for (screen in screens) {
@@ -43,5 +44,8 @@ class TabIndexRegressionTest {
         assertTrue(tabIndexFor(ShuraScreen.Search("s")) == discover)
         assertTrue(tabIndexFor(ShuraScreen.Details("s", manga)) == discover)
         assertTrue(tabIndexFor(ShuraScreen.Chapters("s", manga)) == discover)
+        // A work's saved chapters are the library's, opened one level down, so
+        // the library stays lit behind them.
+        assertTrue(tabIndexFor(ShuraScreen.SavedChapters("s", "id", "A title")) == tabIndexFor(ShuraScreen.Library))
     }
 }

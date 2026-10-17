@@ -5,6 +5,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
@@ -16,6 +17,11 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshotFlow
@@ -29,12 +35,14 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.shura.manga.reader.translation.TranslationCache
+import app.shura.manga.reader.ChapterDeletionClaim
+import app.shura.manga.reader.ChapterFinished
+import app.shura.manga.reader.ReaderCounter
 import app.shura.manga.reader.ReaderMode
 import app.shura.manga.reader.ReaderPreferences
 import app.shura.source.Chapter
@@ -46,6 +54,7 @@ import app.shura.manga.ui.theme.LocalUiLanguage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import app.shura.manga.ui.image.CoverImage
 import app.shura.manga.ui.image.ImageStore
 
 /**
@@ -106,6 +115,15 @@ fun ReaderScreen(
     /** Brightness, preload, screen-awake and download parallelism. */
     readerPreferences: ReaderPreferences = ReaderPreferences(),
     onReaderPreferencesChange: (ReaderPreferences) -> Unit = {},
+    /**
+     * Offers this chapter for deletion once the reader reaches its last page.
+     *
+     * The reader does not decide whether the chapter is deleted - it cannot see
+     * the library - so it says what it saw and the screen that owns the library
+     * decides with that. One offer per chapter, however many times the last page
+     * reports itself. Null disables the whole path.
+     */
+    onChapterFinished: ((ChapterFinished) -> Unit)? = null,
     /** Whether a translation engine is actually reachable. */
     translationEngineAvailable: Boolean = false,
     isLoading: Boolean = false,
@@ -113,7 +131,6 @@ fun ReaderScreen(
     onRetry: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
-    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     // Tools are hidden until asked for. They used to start visible, which put
     // a fixed bar over the bottom of every page from the moment a chapter
     // opened - the opposite of a reading surface.
@@ -135,6 +152,14 @@ fun ReaderScreen(
     // are pulled in identically whichever layout is showing.
     val paged = mode == ReaderMode.PAGED
     val currentIndex = if (paged) pagerState.currentPage else listState.firstVisibleItemIndex
+
+    // ONE number for the whole reader. Every surface below - the bar's "3 / 40",
+    // the number over each page, and the settings sheet - reads these two
+    // values, so they cannot disagree with each other. They used to be computed
+    // separately in three places, each falling back to `pages.size`, which is
+    // how a forty page chapter came to read "1 / 1" and then "2 of 1".
+    val counter = ReaderCounter.of(currentIndex, totalPages, pages.size)
+
     val seek: (Int) -> Unit = { index ->
         val target = index.coerceIn(0, pages.lastIndex.coerceAtLeast(0))
         if (paged) scope.launch { pagerState.scrollToPage(target) }
@@ -153,6 +178,36 @@ fun ReaderScreen(
                 onPageVisible(it)
             }
         }
+    }
+
+    // "Delete the chapter after reading", Mihon's advanced setting. The reader
+    // reports reaching the end; whoever owns the library decides whether there
+    // is anything to delete.
+    //
+    // The chapter's own page count, not the pages that have downloaded: while a
+    // chapter is still arriving, "the last page on screen" is whatever finished
+    // loading a moment ago, and deleting the chapter there would throw away
+    // pages the reader has not reached.
+    val chapterLastPage = counter.total - 1
+    val atLastPage = pages.isNotEmpty() && currentIndex >= chapterLastPage
+    val finishedHandler = onChapterFinished
+    val deletionClaim = remember { ChapterDeletionClaim() }
+    LaunchedEffect(chapterId, chapterLastPage, atLastPage) {
+        // Nothing is wired to a library, so there is nothing this could offer.
+        if (finishedHandler == null) return@LaunchedEffect
+        val deleteAfterReading = readerPreferences.deleteChapterAfterReading
+        // Not keyed on the preference on purpose. Flipping the switch while the
+        // reader is already looking at the last page must not delete the chapter
+        // out from under them; turning it on anywhere earlier in the chapter
+        // still takes effect at the end, which is when the effect runs again.
+        if (!deletionClaim.claim(chapterId, atLastPage && deleteAfterReading)) return@LaunchedEffect
+        finishedHandler(
+            ChapterFinished(
+                chapterId = chapterId,
+                lastPageReached = atLastPage,
+                deleteAfterReading = deleteAfterReading,
+            ),
+        )
     }
 
     // Keep the chapter's own place when the page list arrives late: the reader
@@ -233,7 +288,7 @@ fun ReaderScreen(
                 ReaderPage(
                     uri = pages[index],
                     index = index,
-                    pageCount = totalPages ?: pages.size,
+                    pageCount = counter.total,
                     translation = translationCache?.pagesFor(sourceId, chapterId)
                         ?.getOrNull(index),
                     translationPending = translationSettings.mode != TranslationMode.OFF &&
@@ -255,7 +310,7 @@ fun ReaderScreen(
                     ReaderPage(
                         uri = pages[index],
                         index = index,
-                        pageCount = totalPages ?: pages.size,
+                        pageCount = counter.total,
                         translation = translationCache?.pagesFor(sourceId, chapterId)
                             ?.getOrNull(index),
                         translationPending = translationSettings.mode != TranslationMode.OFF &&
@@ -281,11 +336,9 @@ fun ReaderScreen(
                 onInteractionChanged = { interacting = it },
                 cover = cover,
                 chapterTitle = chapterTitle,
-                currentPage = currentIndex + 1,
-                pageCount = totalPages ?: pages.size,
-                rtl = rtl,
+                currentPage = counter.page,
+                pageCount = counter.total,
                 onBack = onBack,
-                onProgress = seek,
                 layoutMode = mode,
                 onLayoutModeChange = onModeChange,
                 onPrevChapter = onPrevChapter,
@@ -303,8 +356,8 @@ fun ReaderScreen(
                 sheet = open,
                 chapters = chapters,
                 currentChapterId = chapterId,
-                totalPages = totalPages ?: pages.size,
-                currentPage = currentIndex + 1,
+                totalPages = counter.total,
+                currentPage = counter.page,
                 mode = mode,
                 onModeChange = onModeChange,
                 preferences = readerPreferences,
@@ -554,9 +607,7 @@ private fun ReaderBar(
     chapterTitle: String,
     currentPage: Int,
     pageCount: Int,
-    rtl: Boolean,
     onBack: () -> Unit,
-    onProgress: (Int) -> Unit,
     onPrevChapter: (() -> Unit)?,
     onNextChapter: (() -> Unit)?,
     translationSettings: TranslationSettings,
@@ -570,11 +621,14 @@ private fun ReaderBar(
     /** Lets the tools know a finger is on them, so they do not fade away. */
     onInteractionChanged: (Boolean) -> Unit,
 ) {
-    Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) {
+    // Translucent rather than an opaque panel, so the page still runs under the
+    // tools: the strip goes edge to edge and the bar is a shadow over it, not a
+    // band the reader's last third of every page has to be read around.
+    Surface(color = Color.Black.copy(alpha = 0.88f)) {
         Column(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .padding(horizontal = 10.dp, vertical = 6.dp)
                 // While a finger is down on the tools they must not vanish
                 // under it. Released again on lift, so they can fade once
                 // reading has resumed - a flag that is only ever set would
@@ -588,33 +642,99 @@ private fun ReaderBar(
                     }
                 }
         ) {
+            // One row: what you are reading, where in it you are, and every control
+            // this bar has, in the order they are used. Nothing else is on it - the
+            // reading controls and the translation control each get their own line
+            // below, so neither is crowded into a corner of the other.
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // The in-reader arrow. Independent of the system back button:
                 // both must work, and neither substitutes for the other.
-                TextButton(onClick = onBack) { Text("←") }
-                Text(
-                    chapterTitle,
-                    Modifier.weight(1f),
-                    maxLines = 1,
-                    style = MaterialTheme.typography.titleMedium,
-                    textAlign = TextAlign.Center,
-                )
+                //
+                // An auto-mirrored icon, not a "←" typed as text. A bare arrow
+                // character is a neutral glyph: it is laid out by the paragraph's
+                // direction and never mirrored by it, so in Arabic it sat on the
+                // leading edge pointing *away* from where the reader came from -
+                // a back arrow that pointed forward.
+                IconButton(onClick = onBack, modifier = Modifier.size(38.dp)) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = shura("common.back"),
+                        tint = Color(0xFFE6E6E6),
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                // The work's own cover, small, so the tools say which book is open
+                // and not only which chapter of it.
+                if (cover.isNotBlank()) {
+                    CoverImage(
+                        source = cover,
+                        modifier = Modifier
+                            .size(width = 22.dp, height = 32.dp)
+                            .clip(MaterialTheme.shapes.extraSmall),
+                        retryLabel = shura("common.retry"),
+                    )
+                    Spacer(Modifier.width(10.dp))
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        chapterTitle,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    // The discreet page indicator: where in the chapter this is, as
+                    // two numbers rather than a sentence.
+                    Text(
+                        "$currentPage / $pageCount",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0x8FFFFFFF),
+                    )
+                }
                 // The chapter list, reachable without leaving the chapter.
-                TextButton(onClick = onOpenChapters) { Text(shura("reader.chapters")) }
-                TextButton(onClick = onOpenSettings) { Text("⚙") }
+                androidx.compose.material3.TextButton(onClick = onOpenChapters) {
+                    Text(shura("reader.chapters"), maxLines = 1)
+                }
+                IconButton(onClick = onOpenSettings, modifier = Modifier.size(38.dp)) {
+                    Icon(
+                        Icons.Default.Settings,
+                        contentDescription = shura("reader.settings"),
+                        tint = Color(0xFFE6E6E6),
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
                 // Chapter navigation follows reading order, which is the reverse
                 // of the visual direction in RTL - so the arrows are placed by
-                // reading order, not by text direction.
-                if (onPrevChapter != null) TextButton(onClick = onPrevChapter) { Text("◀") }
-                if (onNextChapter != null) TextButton(onClick = onNextChapter) { Text("▶") }
+                // reading order, and are deliberately NOT auto-mirrored: a
+                // mirrored arrow here would point the wrong way in Arabic.
+                if (onPrevChapter != null) {
+                    IconButton(onClick = onPrevChapter, modifier = Modifier.size(38.dp)) {
+                        Icon(
+                            Icons.Default.KeyboardArrowLeft,
+                            contentDescription = shura("reader.prev"),
+                            tint = Color(0xFFE6E6E6),
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                }
+                if (onNextChapter != null) {
+                    IconButton(onClick = onNextChapter, modifier = Modifier.size(38.dp)) {
+                        Icon(
+                            Icons.Default.KeyboardArrowRight,
+                            contentDescription = shura("reader.next"),
+                            tint = Color(0xFFE6E6E6),
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                }
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    shura("reader.pages", currentPage, pageCount),
-                    style = MaterialTheme.typography.labelSmall,
-                )
-                Spacer(Modifier.width(10.dp))
+            // The second line: how the pages behave, and the translation mode. It
+            // stays in this bar - inline, dismissible with everything else - and is
+            // never a floating overlay over the page.
+            Row(
+                Modifier.fillMaxWidth().padding(top = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 LayoutToggle(layoutMode, onLayoutModeChange)
                 Spacer(Modifier.weight(1f))
                 TranslationControl(
@@ -625,9 +745,12 @@ private fun ReaderBar(
             }
             if (pageCount > 1) {
                 val fraction = if (pageCount <= 1) 0f else (currentPage - 1).toFloat() / (pageCount - 1)
+                // Along the very bottom edge of the bar, hairline: it is the only
+                // thing here that says where the chapter ends.
                 LinearProgressIndicator(
                     progress = { fraction },
-                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                    color = Color(0xFFE0323F),
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp).height(2.dp),
                 )
             }
         }

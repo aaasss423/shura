@@ -37,6 +37,41 @@ object ShuraRepository {
     fun directory(context: Context): File = File(context.filesDir, "repo")
 
     /**
+     * Where repositories added by URL live.
+     *
+     * One directory per repository under this root, named by that repository's
+     * address. Deliberately not [directory]: the loader reads that one as a whole
+     * and the installer replaces it whole, so a second repository merged into it
+     * could never be removed without taking the first one - and a row that
+     * disappears while its extensions are still installed is the thing this
+     * layout exists to make impossible.
+     */
+    fun remoteRoot(context: Context): File = File(context.filesDir, "repos")
+
+    /** The list of registered repositories, on disk. */
+    fun registry(context: Context): RepositoryRegistry = RepositoryRegistry(remoteRoot(context))
+
+    /** Adds, refreshes and removes repositories added by URL. */
+    fun manager(context: Context): RepositoryManager = RepositoryManager(registry(context), ShuraExtensions.policy)
+
+    /** Every registered repository as the catalogue reads one. */
+    fun remoteSources(context: Context): List<CatalogRepository> {
+        val registry = registry(context)
+        return registry.records().mapNotNull { record ->
+            val directory = registry.directoryOf(record.id)
+            if (!directory.isDirectory) null
+            else CatalogRepository(directory, RepositoryOrigin(record.id, record.url, directory))
+        }
+    }
+
+    /**
+     * Every directory extensions are loaded from: the shipped repository, then
+     * each registered one, in the order they were added.
+     */
+    fun allDirectories(context: Context): List<File> =
+        listOf(directory(context)) + remoteSources(context).map { it.directory }
+
+    /**
      * Copies the repository the user picked into the directory the loader
      * reads, and reports what happened.
      */
@@ -55,11 +90,16 @@ object ShuraRepository {
     }
 
     /**
-     * Replaces the registered sources with the ones the repository now yields.
+     * Replaces the registered sources with the ones the repositories now yield.
      *
      * Extensions are removed as well as added, so uninstalling a repository
      * actually takes its sources off the list instead of leaving the app
      * showing whatever happened to be there when it started.
+     *
+     * Every registered repository is read, not only the bundled one: a
+     * repository added by URL has its own directory and its own index, and
+     * loading only `filesDir/repo` made adding one a thing that produced a row
+     * and no sources at all.
      *
      * Returns the failures, if any, to show to the user. It returns rather than
      * throws: a repository that is absent or refused is a state to report, not
@@ -67,7 +107,9 @@ object ShuraRepository {
      */
     fun reload(host: SourceHost, context: Context): List<String> {
         val previously = host.all().map { it.id }.toSet()
-        val outcomes = ShuraExtensions.load(context, directory(context))
+        val outcomes = allDirectories(context).flatMap { dir ->
+            ShuraExtensions.load(context, dir)
+        }
         for (id in previously) {
             host.remove(id)
         }

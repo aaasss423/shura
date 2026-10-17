@@ -42,6 +42,10 @@ class ReaderSettingsStore(context: Context) {
         preloadPages = preferences.getInt(KEY_PRELOAD, 3),
         keepScreenOn = preferences.getBoolean(KEY_KEEP_ON, false),
         parallelDownloads = preferences.getInt(KEY_PARALLEL, 4),
+        // False when the key was never written, so a build that never had this
+        // setting - or one that stores nothing at all - still opens with the
+        // reader's chapters exactly where they were.
+        deleteChapterAfterReading = preferences.getBoolean(KEY_DELETE_AFTER, false),
     )
 
     fun savePreferences(value: ReaderPreferences) {
@@ -50,6 +54,7 @@ class ReaderSettingsStore(context: Context) {
             .putInt(KEY_PRELOAD, ReaderPreferences.preloadOf(value.preloadPages))
             .putBoolean(KEY_KEEP_ON, value.keepScreenOn)
             .putInt(KEY_PARALLEL, ReaderPreferences.parallelismOf(value.parallelDownloads))
+            .putBoolean(KEY_DELETE_AFTER, value.deleteChapterAfterReading)
             .apply()
     }
 
@@ -59,6 +64,7 @@ class ReaderSettingsStore(context: Context) {
         const val KEY_PRELOAD = "reader-preload"
         const val KEY_KEEP_ON = "reader-keep-screen-on"
         const val KEY_PARALLEL = "reader-parallel"
+        const val KEY_DELETE_AFTER = "reader-delete-after-reading"
     }
 }
 
@@ -67,5 +73,6 @@ data class ReaderSettings(val mode: ReaderMode = ReaderMode.VERTICAL)
 /*
  * The rest of the reader's configuration lives in ReaderPreferences.kt, stored by the
  * same store so one save writes a coherent set: brightness, how far ahead pages are
- * preloaded, whether the screen stays awake, and how many pages download at once.
+ * preloaded, whether the screen stays awake, how many pages download at once, and
+ * whether a chapter is deleted once it has been read.
  */

@@ -5,12 +5,16 @@ import app.shura.source.Chapter
 /**
  * The order a work's chapters are offered in, and which of them a batch takes.
  *
- * Two screens list the same chapters: the chapter list itself, and the work's own
- * page, which now offers to save several at once. They have to agree about what
- * "the next five" means, or the button queues chapters the reader cannot see
- * next to it. So the ordering is one function called from both, and it is the
- * order the reader is looking at - newest first, which is how every chapter list
- * in this app opens - rather than a second, private arrangement of the same data.
+ * Two screens list the same chapters and they deliberately disagree about the
+ * order. The chapter list opens newest first, because a list that opens on
+ * chapter 1 of 400 is the reason readers tap "next chapter" instead of reading.
+ * A batch saves what comes next *in reading order*, from chapter one: "download
+ * the next five" means the first five chapters of the story the reader has not
+ * read yet, not the five chapters that arrived last.
+ *
+ * Both orders come from [ChapterListOrder], so there is one arrangement of the
+ * data and each screen asks for the one it needs - rather than a private sort in
+ * a composable that can drift away from the other.
  *
  * Nothing here touches Android, a source or a screen: these are the decisions
  * that are hard to check by hand (what happens when everything is already read,
@@ -19,15 +23,45 @@ import app.shura.source.Chapter
 object ChapterListOrder {
 
     /**
+     * One row per chapter id, in the order they arrived.
+     *
+     * A chapter's identity is its id, and it is the id the rest of the app
+     * already uses for everything it does with a chapter: the directory
+     * `persistStoredChapter` writes it into, the key the download queue refuses a
+     * second copy with, the key reading progress is stored under. So when a
+     * source hands back the same id twice - a site whose own list repeats a
+     * chapter, or a paginated one whose pages overlap - it has described one
+     * chapter twice, and drawing two rows would offer two download buttons for
+     * one chapter and two entries in the reader's step-through for one page.
+     *
+     * The first sighting wins, because that is the row the reader was shown
+     * first.
+     *
+     * The chapter *number* is deliberately not the identity. Specials, side
+     * stories and re-uploads share a number with the chapter they sit beside,
+     * and dropping one of those loses a chapter somebody asked for; only the
+     * id says which chapter this is.
+     */
+    fun distinct(chapters: List<Chapter>): List<Chapter> {
+        val seen = mutableSetOf<String>()
+        return chapters.filter { seen.add(it.id) }
+    }
+
+    /**
      * Chapters in the order they are read.
      *
      * Numbered chapters sort by number, ascending, and a chapter a source
      * reports without one goes to the end of that order rather than the
      * beginning - "Chapter: Extra" is not chapter zero. [ascending] flips it, so
      * `ascending = false` is the newest-first list the reader sees.
+     *
+     * A repeated id is collapsed on the way in ([distinct]): every caller of
+     * this is drawing or walking a list of chapters, and a list with the same
+     * chapter twice is wrong for all of them - including as the `key` of a lazy
+     * list, which cannot hold one key twice.
      */
     fun reading(chapters: List<Chapter>, ascending: Boolean): List<Chapter> =
-        chapters
+        distinct(chapters)
             .sortedBy { chapter -> chapter.number ?: Float.MAX_VALUE }
             .let { if (ascending) it else it.reversed() }
 }
@@ -61,11 +95,11 @@ data class BatchState(
 /**
  * Which chapters a "download the next N" button queues.
  *
- * The rule is the one Mihon uses, and it is a rule about the reader's position
- * rather than about the source: the batch starts at the newest chapter that is
- * not read, not saved and not already queued, and takes the next few after it.
- * Two things follow from that, and both are why this is a function and not a
- * loop in a composable.
+ * The rule is a rule about reading rather than about the source: the batch
+ * starts at chapter one, walks forward in reading order, and takes the next few
+ * chapters that are not read, not saved and not already queued. Two things
+ * follow from that, and both are why this is a function and not a loop in a
+ * composable.
  *
  * Nothing to offer is an answer, not a fallback to re-downloading. A work whose
  * every chapter is read, saved or queued has no batch to run, so the buttons
@@ -80,13 +114,29 @@ data class BatchState(
 object BatchDownload {
 
     /**
-     * Every chapter a batch could still take, in the order they are shown.
+     * The order a batch walks: reading order, from chapter one.
      *
-     * [visible] is the list as the reader sees it, so what this returns is
-     * exactly the chapters that follow the button.
+     * Not the order the chapter list shows. That list is newest first so it can
+     * be scanned from the latest update, and its order is the reader's to change
+     * with the sort chips; a batch is not a view of the list but a decision about
+     * what to save, and that decision starts where the story does.
      */
-    fun pending(visible: List<Chapter>, state: BatchState): List<Chapter> =
-        visible.filterNot { state.isSpent(it) }
+    fun inReadingOrder(chapters: List<Chapter>): List<Chapter> =
+        ChapterListOrder.reading(chapters, ascending = true)
+
+    /**
+     * Every chapter a batch could still take, in the order they are taken.
+     *
+     * [ordered] is [inReadingOrder] applied to the work's chapters, so what this
+     * returns is exactly the chapters a batch would queue from there.
+     *
+     * Distinct by id on the way through as well, so a list that reached this
+     * point with a repeated chapter in it still cannot queue that chapter twice:
+     * the queue would refuse the second copy, but the reader would have been
+     * offered a batch that is one chapter longer than it can ever be.
+     */
+    fun pending(ordered: List<Chapter>, state: BatchState): List<Chapter> =
+        ChapterListOrder.distinct(ordered).filterNot { state.isSpent(it) }
 
     /**
      * The first [limit] chapters a batch would take; every remaining one when
@@ -95,8 +145,25 @@ object BatchDownload {
      * Null rather than a sentinel number, because "the rest" is a different
      * action from "the next five" and not a very large five.
      */
-    fun take(visible: List<Chapter>, state: BatchState, limit: Int?): List<Chapter> {
-        val pending = pending(visible, state)
+    fun take(ordered: List<Chapter>, state: BatchState, limit: Int?): List<Chapter> {
+        val pending = pending(ordered, state)
         return if (limit == null) pending else pending.take(limit.coerceAtLeast(0))
     }
+
+    /**
+     * What "download all chapters" takes: every chapter that is left.
+     *
+     * The same rule the "download the rest" button uses - not read, not saved,
+     * not already queued - and the same order, chapter one first. Two things are
+     * worth stating because they are the ones that get broken:
+     *
+     *  - there is no cap. A work with five hundred chapters offers five hundred
+     *    chapters, in one list, once. Nothing here truncates, samples or pages,
+     *    because a batch that quietly stopped at 100 would look exactly like a
+     *    batch that was still working.
+     *  - there are no duplicates. The list is distinct by chapter id, so a
+     *    source that repeats a chapter in its own list contributes it once.
+     */
+    fun downloadAll(chapters: List<Chapter>, state: BatchState): List<Chapter> =
+        take(inReadingOrder(chapters), state, limit = null)
 }

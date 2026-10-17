@@ -80,7 +80,7 @@ class MangaDexSource(private val getter: HttpGetter = defaultHttpGetter()) : Shu
                 val item = data.optJSONObject(index) ?: continue
                 val id = item.optString("id")
                 val attrs = item.optJSONObject("attributes") ?: continue
-                val title = attrs.optJSONObject("title")?.optString("en").orEmpty().ifBlank { firstAlternativeTitle(attrs) }
+                val title = attrs.optJSONObject("title")?.text("en").orEmpty().ifBlank { firstAlternativeTitle(attrs) }
                 if (id.isBlank() || title.isBlank()) continue
                 add(MangaSummary(id, title, coverUrl(item, id)))
             }
@@ -100,7 +100,12 @@ class MangaDexSource(private val getter: HttpGetter = defaultHttpGetter()) : Shu
                 val id = item.optString("id")
                 val attrs = item.optJSONObject("attributes") ?: continue
                 val number = (attrs.opt("chapter") as? String)?.toFloatOrNull()
-                val title = attrs.optString("title").orEmpty()
+                // Read through text(), never through optString: MangaDex sends
+                // `"title": null` for every chapter with no translated title,
+                // and org.json's optString runs JSON null through
+                // String.valueOf - which is how four hundred chapter rows came to
+                // be titled "null". A missing title is a missing title.
+                val title = attrs.text("title")
                 val name = when {
                     title.isNotBlank() -> title
                     number != null -> "Chapter ${formatNumber(number)}"
@@ -145,12 +150,25 @@ class MangaDexSource(private val getter: HttpGetter = defaultHttpGetter()) : Shu
         val alternatives = attrs.optJSONArray("altTitles") ?: return ""
         for (index in 0 until alternatives.length()) {
             val entry = alternatives.optJSONObject(index) ?: continue
-            if (entry.has("en")) return entry.optString("en")
+            if (entry.has("en")) return entry.text("en")
             val keys = entry.keys() as Iterator<String>
-            if (keys.hasNext()) return entry.optString(keys.next())
+            if (keys.hasNext()) return entry.text(keys.next())
         }
         return ""
     }
+
+    /**
+     * A JSON string, or "" when the value is absent or JSON `null`.
+     *
+     * The one line of this file that every other string read goes through.
+     * `JSONObject.optString` is not "the string, or empty": on Android it runs
+     * whatever is there through `JSON.toString`, and for `JSONObject.NULL` that
+     * is `String.valueOf(NULL)` - the four characters "null". `isNull` covers
+     * both cases the JSON layer itself calls null, so a field that was never
+     * sent and one that was sent as null both come back as "nothing to read".
+     */
+    private fun JSONObject.text(name: String): String =
+        if (isNull(name)) "" else optString(name).trim()
 
     private fun formatNumber(number: Float): String =
         if (number % 1f == 0f) number.toInt().toString() else number.toString()

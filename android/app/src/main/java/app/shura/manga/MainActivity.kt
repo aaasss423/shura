@@ -13,6 +13,7 @@ import app.shura.host.SourceChapterDownloader
 import app.shura.host.MangaDexSource
 import app.shura.host.SourceHost
 import app.shura.manga.reader.ProgressivePageLoader
+import app.shura.manga.reader.ChapterDeletion
 import app.shura.manga.reader.ReaderSettings
 import app.shura.manga.reader.ReaderSettingsStore
 import app.shura.manga.reader.ReadingProgress
@@ -98,7 +99,12 @@ private fun ShuraApp() {
             // MangaDex stays as the built-in adapter; extensions from the
             // repository are added beside it, never instead of it.
             register(MangaDexSource())
-            ShuraExtensions.load(context, File(context.filesDir, "repo"))
+            // Every registered repository, the bundled one first: a repository
+            // added by URL has its own directory and its own index, and reading
+            // only filesDir/repo meant nothing added by URL could ever be
+            // reached even after it had been verified.
+            app.shura.manga.ShuraRepository.allDirectories(context)
+                .flatMap { dir -> ShuraExtensions.load(context, dir) }
                 .forEach { outcome -> outcome.source?.let { register(it) } }
         }
     }
@@ -171,9 +177,15 @@ private fun ShuraApp() {
         scope.launch {
             state[entry.pkg] = InstallProgress(fraction = 0f)
             val installer = ExtensionInstaller(context, ShuraExtensions.policy)
+            // Fetched from, and written into, the repository that published it.
+            // A package a reader added by URL is not on shura.app, so the
+            // built-in address could only ever produce a download failure for
+            // everything a URL repository offers.
+            val origin = entry.origin
             val result = installer.install(
-                repositoryPackage,
-                REPOSITORY_BASE_URL,
+                entry = repositoryPackage,
+                baseUrl = origin?.url ?: REPOSITORY_BASE_URL,
+                directory = origin?.directory ?: app.shura.manga.ShuraRepository.directory(context),
             ) { done, total ->
                 if (total > 0) {
                     state[entry.pkg] = InstallProgress(
@@ -306,8 +318,12 @@ private fun ShuraApp() {
 
 
     val catalog = remember(storeVersion) { ExtensionCatalog.forBuild(context) }
+    // Every repository, not only the bundled one. `describe(directory)` read the
+    // shipped index only, so a repository added by URL could be listed on the
+    // repositories screen and still contribute nothing here - which is what
+    // made adding one look like it had done nothing at all.
     val extensions = remember(storeVersion, catalog) {
-        ExtensionCatalog.rowStates(catalog.describe(catalog.directory))
+        ExtensionCatalog.rowStates(catalog.describeAll())
     }
     // Progress and failure text for the row being installed, keyed by package.
     val installState = remember { mutableStateMapOf<String, InstallProgress>() }
@@ -319,9 +335,21 @@ private fun ShuraApp() {
     // Android decides an app is not responding and closes it. Read once off the
     // thread instead, and show what was last known until the new answer lands.
     var library by remember { mutableStateOf(indexStoredChapters(emptyDirectory())) }
+    // The same store, read in the shape the reader asks its questions in.
+    //
+    // This was the whole of "a downloaded chapter will not open offline":
+    // `storedRecords` on the navigation side defaulted to an empty list and nobody
+    // ever passed a value, so the offline check answered "not on this device" for
+    // every chapter - including the ones sitting on disk - and the reader went to
+    // the source, which cannot be reached with the network off. The chapter list
+    // still worked because that route opens a stored record directly.
+    var storedRecords by remember { mutableStateOf(emptyList<StoredChapterRecord>()) }
     LaunchedEffect(libraryVersion) {
-        val indexed = withContext(Dispatchers.IO) { indexStoredChapters(chapterStore(context)) }
+        val store = chapterStore(context)
+        val indexed = withContext(Dispatchers.IO) { indexStoredChapters(store) }
+        val records = withContext(Dispatchers.IO) { indexStoredChapterRecords(store) }
         library = indexed
+        storedRecords = records
     }
 
     // The reader's data source: the pages of whatever is open.
@@ -414,6 +442,7 @@ private fun ShuraApp() {
         // loader, so it renders from the local list. Both are snapshot lists,
         // so the reader redraws as either one changes.
         pages = pages,
+        storedRecords = storedRecords,
         onPageVisible = { index -> loader?.ensure(index) },
         onRetryPage = { index -> loader?.retry(index) },
         totalPages = { chapterPageTotal.takeIf { it > 0 } },
@@ -442,8 +471,11 @@ private fun ShuraApp() {
             loader?.cancel()
             loader = null
             pages.clear()
-            pages.addAll(entry.pageUris)
-            chapterPageTotal = entry.pageUris.size
+            // The record's page files, resolved the same way the offline check does:
+            // a record whose named pages are gone is not a chapter the reader can open.
+            val localPages = LocalChapterRead.pageFiles(entry)
+            pages.addAll(localPages.map { Uri.fromFile(it) })
+            chapterPageTotal = localPages.size
             readerMeta = ReaderMeta(entry.sourceId, entry.title, entry.mangaId, null, "library", entry.coverUrl)
             loadError = null
             isLoading = false
@@ -463,6 +495,31 @@ private fun ShuraApp() {
             readerMeta = null
             pages.clear()
             historyVersion++
+        },
+        // Mihon's "delete the chapter after reading", decided here because this
+        // is where the library is known: the reader reports reaching the last
+        // page and what the preference was, and whether anything is actually
+        // saved under that chapter id is the one fact only this side can answer.
+        onChapterFinished = { finished ->
+            val chapter = library.firstOrNull { it.chapterId == finished.chapterId }
+            val wanted = ChapterDeletion.shouldDelete(
+                lastPageReached = finished.lastPageReached,
+                preferenceOn = finished.deleteAfterReading,
+                chapterStored = chapter != null,
+            )
+            if (chapter == null || !wanted) return@ShuraRoot
+            scope.launch {
+                // Off the main thread, like every other touch of the store: a
+                // recursive delete of a chapter's pages is disk work, and the
+                // reader is still drawing.
+                val gone = withContext(Dispatchers.IO) {
+                    runCatching { deleteStoredChapter(chapter) }.isSuccess && !chapter.dir.exists()
+                }
+                // Only a real deletion re-reads the index. A failed one leaves
+                // the library exactly as it was, and saying so by doing nothing
+                // is better than a list that flickers.
+                if (gone) libraryVersion += 1
+            }
         },
         history = history,
         onProgressChanged = { page ->
@@ -525,6 +582,13 @@ private fun ShuraApp() {
             }
         },
         onInstallRepository = { repositoryPicker.launch(null) },
+        onRepositoriesChanged = {
+            // Both the store and the source list are read from disk and cached
+            // behind these two counters, so a repository being added, refreshed
+            // or removed has to bump both or nothing on screen changes.
+            storeVersion++
+            sourcesVersion++
+        },
     )
 }
 
