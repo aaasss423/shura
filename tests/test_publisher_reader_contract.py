@@ -93,6 +93,7 @@ class PublisherReaderContractTests(unittest.TestCase):
             "_artifact_path": str(apk),
             "_security": {"sha256": ARTIFACT_SHA, "certificate": SIGNING,
                           "malware": {"verdict": "CLEAN", "reason": "no threats"}},
+            "contentWarning": "CONTENT_WARNING_SAFE",
             "_content_policy": {"scope": "source",
                                 "classification": assessment.classification.value,
                                 "policy_fingerprint": self.store.get_source(sid).fingerprint(),

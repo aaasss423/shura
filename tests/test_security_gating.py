@@ -186,7 +186,10 @@ class PreflightTests(unittest.TestCase):
         import tempfile
         from pathlib import Path
         with tempfile.TemporaryDirectory() as empty:
-            scanner = MalwareScanner(database_dir=empty)
+            engine = Path(empty) / "clamscan"
+            engine.write_text("#!/bin/sh\nexit 0\n")
+            engine.chmod(0o755)
+            scanner = MalwareScanner(engine=str(engine), database_dir=empty)
             status = scanner.preflight()
             self.assertFalse(status.available)
             self.assertIn(MalwareScanner.DB_MISSING, status.reason)

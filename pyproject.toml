@@ -21,3 +21,4 @@ shura_core = ["publishing/index.proto"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]

@@ -60,8 +60,8 @@ class HardeningTests(unittest.TestCase):
 
     def test_package_and_version_remain_distinct(self):
         payload = json.dumps({"extensions": [
-            {"pkg": "org.example.ext", "version": "1.0", "apk": "https://example.org/a.apk", "name": "A"},
-            {"pkg": "org.example.ext", "version": "2.0", "apk": "https://example.org/b.apk", "name": "A"},
+            {"pkg": "org.example.ext", "version": "1.0", "apk": "https://example.org/a.apk", "name": "A", "contentWarning": "CONTENT_WARNING_SAFE"},
+            {"pkg": "org.example.ext", "version": "2.0", "apk": "https://example.org/b.apk", "name": "A", "contentWarning": "CONTENT_WARNING_SAFE"},
         ]}).encode()
         source = Source("idx", "idx", "https://example.org/index.json", "index",
                         configuration={"allowed_hosts": ["example.org"]})

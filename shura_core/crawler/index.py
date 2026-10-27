@@ -51,6 +51,26 @@ def _language(item,pkg,fallback):
         return parts[parts.index("extension")+1]
     return str(fallback or "und")
 
+def _content_warning(item):
+    """Normalize the modern warning enum and the legacy ``nsfw`` flag.
+
+    An absent or unknown warning stays unknown so the default-safe policy
+    continues to reject it.
+    """
+    warning=item.get("contentWarning")
+    if warning is not None:
+        if isinstance(warning,int) and not isinstance(warning,bool):
+            return {1:"CONTENT_WARNING_SAFE",2:"CONTENT_WARNING_MIXED",3:"CONTENT_WARNING_NSFW"}.get(warning,"")
+        normalized=str(warning).strip().upper()
+        return {"1":"CONTENT_WARNING_SAFE","2":"CONTENT_WARNING_MIXED",
+                "3":"CONTENT_WARNING_NSFW"}.get(normalized,normalized)
+    if "nsfw" in item:
+        legacy=item["nsfw"]
+        if legacy is False or legacy == 0 or str(legacy).strip().lower() in {"0","false"}:
+            return "CONTENT_WARNING_SAFE"
+        return "CONTENT_WARNING_NSFW"
+    return ""
+
 class IndexCrawler(Crawler):
     def __init__(self,http):self.http=http
     def crawl(self,source,budget=None):
@@ -75,7 +95,7 @@ class IndexCrawler(Crawler):
             named=_field(item,"apk","apk_url","download") or ((item.get("resources") or {}).get("apkUrl"))
             pkg=_field(item,"pkg","package","packageName");version=str(_field(item,"version","versionName") or "")
             if not named or not pkg or not version:continue
-            warning=str(item.get("contentWarning") or "").strip().upper()
+            warning=_content_warning(item)
             if warning not in allowed:continue
             language=_language(item,pkg,source.language)
             if wanted and language.lower() not in wanted:continue

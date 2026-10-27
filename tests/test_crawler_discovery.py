@@ -1798,7 +1798,7 @@ class IndexConsumptionTests(Case):
     def test_a_relative_artifact_name_resolves_to_where_the_file_really_is(self):
         """Not merely an https URL: the file the publisher writes lives under apk/."""
         result = self.crawler(
-            [{"pkg": "org.example.ext", "version": "1.0", "apk": "org_example_ext-1.0.apk"}]
+            [{"pkg": "org.example.ext", "version": "1.0", "apk": "org_example_ext-1.0.apk", "nsfw": 0}]
         ).crawl(self.source(), {"max_pages": 1, "max_candidates": 5})
         self.assertEqual(len(result.candidates), 1)
         self.assertEqual(result.candidates[0].apk_url,
@@ -1815,9 +1815,9 @@ class IndexConsumptionTests(Case):
             "test_the_reader_can_tell_the_apk_from_the_index")
         case.setUp()
         try:
-            index = case.publish()
+            case.publish()
             repo = Path(case.repo)
-            entry = index["packages"][0] if "packages" in index else index[0]
+            entry = json.loads((repo / "index.json").read_text())[0]
             apk_name = entry["apk"]
             # Where the publisher actually put it.
             self.assertTrue((repo / "apk" / apk_name).is_file(),
@@ -1850,13 +1850,13 @@ class IndexConsumptionTests(Case):
     def test_an_absolute_artifact_url_is_left_alone(self):
         result = self.crawler(
             [{"pkg": "org.example.ext", "version": "1.0",
-              "apk": "https://mirror.example/ext.apk"}]
+              "apk": "https://mirror.example/ext.apk", "nsfw": 0}]
         ).crawl(self.source(), {"max_pages": 1, "max_candidates": 5})
         self.assertEqual(result.candidates[0].apk_url, "https://mirror.example/ext.apk")
 
     def test_an_apk_subdirectory_is_preserved(self):
         result = self.crawler(
-            [{"pkg": "org.example.ext", "version": "1.0", "apk": "apk/ext-1.0.apk"}]
+            [{"pkg": "org.example.ext", "version": "1.0", "apk": "apk/ext-1.0.apk", "nsfw": 0}]
         ).crawl(self.source(), {"max_pages": 1, "max_candidates": 5})
         self.assertEqual(result.candidates[0].apk_url, f"{self.BASE}/apk/ext-1.0.apk",
                          "an entry that already says apk/ is not prefixed twice")
@@ -1864,7 +1864,7 @@ class IndexConsumptionTests(Case):
     def test_the_resolved_url_passes_the_network_policy(self):
         from shura_core.security.network import validate_url
         result = self.crawler(
-            [{"pkg": "org.example.ext", "version": "1.0", "apk": "org_example_ext-1.0.apk"}]
+            [{"pkg": "org.example.ext", "version": "1.0", "apk": "org_example_ext-1.0.apk", "nsfw": 0}]
         ).crawl(self.source(), {"max_pages": 1, "max_candidates": 5})
         validate_url(result.candidates[0].apk_url, ["repo.shura.example"])
 
@@ -1872,6 +1872,18 @@ class IndexConsumptionTests(Case):
         result = self.crawler([{"pkg": "org.example.ext", "version": "1.0"}]).crawl(
             self.source(), {"max_pages": 1, "max_candidates": 5})
         self.assertEqual(result.candidates, [])
+
+    def test_only_explicitly_safe_warning_forms_are_admitted(self):
+        entries = [
+            {"pkg": "org.example.legacy", "version": "1.0", "apk": "legacy.apk", "nsfw": 0},
+            {"pkg": "org.example.enum", "version": "1.0", "apk": "enum.apk",
+             "contentWarning": 1},
+            {"pkg": "org.example.adult", "version": "1.0", "apk": "adult.apk", "nsfw": 1},
+            {"pkg": "org.example.unknown", "version": "1.0", "apk": "unknown.apk"},
+        ]
+        result = self.crawler(entries).crawl(self.source(), {"max_candidates": 5})
+        self.assertEqual({candidate.package for candidate in result.candidates},
+                         {"org.example.legacy", "org.example.enum"})
 
 
 class ReleaseAssetSelectionTests(Case):
@@ -1989,7 +2001,8 @@ class IndexIdentityAmbiguityTests(Case):
 
     def entries(self, *names):
         return [{"name": n, "pkg": "org.example.ext", "version": "1.0",
-                 "lang": "ar", "apk": n} for n in names]
+                 "lang": "ar", "apk": n, "contentWarning": "CONTENT_WARNING_SAFE"}
+                for n in names]
 
     def crawl(self, index_body, source=None):
         body = json.dumps(index_body).encode()
@@ -2045,8 +2058,10 @@ class IndexIdentityAmbiguityTests(Case):
                          [c.apk_url for c in backward.candidates])
 
     def test_distinct_versions_are_not_treated_as_duplicates(self):
-        body = [{"pkg": "org.example.ext", "version": "1.0", "apk": "e-1.0.apk"},
-                {"pkg": "org.example.ext", "version": "1.1", "apk": "e-1.1.apk"}]
+        body = [{"pkg": "org.example.ext", "version": "1.0", "apk": "e-1.0.apk",
+                 "contentWarning": "CONTENT_WARNING_SAFE"},
+                {"pkg": "org.example.ext", "version": "1.1", "apk": "e-1.1.apk",
+                 "contentWarning": "CONTENT_WARNING_SAFE"}]
         result = self.crawl(body)
         self.assertEqual([c.version for c in result.candidates], ["1.0", "1.1"],
                          "two versions are two identities, not an ambiguous group")

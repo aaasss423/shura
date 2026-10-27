@@ -192,6 +192,9 @@ class ProductionPathIntegrationTests(unittest.TestCase):
         self.repo = root / "repo"
         self.artifacts = root / "artifacts"
         self.artifacts.mkdir()
+        signature_db = self.artifacts / "clamav-db"
+        signature_db.mkdir()
+        (signature_db / "daily.cvd").write_bytes(b"fixture database")
         _FakeClamEngine(self.artifacts)
         _install_apk_tools(self.artifacts, CERT)
         # Only this test's stubs are reachable; see ToolSandbox in test_malware.
@@ -211,7 +214,7 @@ class ProductionPathIntegrationTests(unittest.TestCase):
         self.config = root / "sources.json"
         _Handler.index = [{"name": "Shura Fixture Extension", "pkg": "org.example.ext",
                            "version": "1.0", "lang": "ar", "apk": self.base + "/ok.apk",
-                           "signingKey": CERT}]
+                           "signingKey": CERT, "contentWarning": "CONTENT_WARNING_SAFE"}]
         self.config.write_text(json.dumps([{
             "source_id": "s1", "name": "Shura Fixture", "url": self.base + "/index.json",
             "kind": "index", "language": "ar", "enabled": True,
@@ -249,6 +252,8 @@ class ProductionPathIntegrationTests(unittest.TestCase):
                 mock.patch("shura_core.pipeline.processor.SafeHTTP", RelaxedHTTP), \
                 mock.patch("shura_core.coordinator.SafeHTTP", RelaxedHTTP), \
                 mock.patch("shura_core.pipeline.processor.validate_url", RelaxedValidator()), \
+                mock.patch("shura_core.pipeline.processor.MalwareScanner",
+                           _scanner_factory(self.artifacts)), \
                 mock.patch.object(cli, "SourceRegistry", LoopbackSourceRegistry):
             yield
 
@@ -352,7 +357,7 @@ class ProductionPathIntegrationTests(unittest.TestCase):
     def test_infected_artifact_is_quarantined_and_never_published(self):
         _Handler.index = [{"name": "Shura Fixture Extension", "pkg": "org.example.ext",
                            "version": "1.0", "lang": "ar", "apk": self.base + "/eicar.apk",
-                           "signingKey": CERT}]
+                           "signingKey": CERT, "contentWarning": "CONTENT_WARNING_SAFE"}]
         store = self.store()
         store.add_source(Source("s1", "Shura Fixture", self.base + "/eicar.apk", "index", "ar",
                                 configuration={"allowed_hosts": ["127.0.0.1"], "signing_key": CERT,
@@ -413,6 +418,7 @@ def _scanner_factory(bin_dir):
 
     def build(*a, **kw):
         kw.setdefault("engine", "clamscan")
+        kw.setdefault("database_dir", str(bin_dir / "clamav-db"))
         kw.setdefault("timeout", 60)
         return MalwareScanner(*a, **kw)
 

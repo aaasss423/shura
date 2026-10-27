@@ -146,15 +146,30 @@ class RepositoryPublisher:
         marked. A reader filters on this to decide whether to show an extension
         at all, so a hardcoded zero silently defanged the repository's own
         content policy and put adult extensions in front of a reader who had
-        asked for safe ones. Only the warning the source actually declared is
-        published; an extension whose index said nothing is treated as adult,
-        because the safe direction is the one that does not surprise anyone.
+        asked for safe ones. Only an explicit safe warning on this item produces
+        ``nsfw: 0``.
+        Source classification is not evidence that every title in the source
+        is safe, and missing, unknown, or conflicting item warnings fail closed.
         """
         metadata = item.get("metadata") or {}
-        declared = str(metadata.get("contentWarning") or "").strip().upper()
-        if not declared:
-            return 1
-        return 0 if declared == "CONTENT_WARNING_SAFE" else 1
+        warnings = []
+        if metadata.get("contentWarning") not in (None, ""):
+            declared = metadata["contentWarning"]
+            if isinstance(declared, int) and not isinstance(declared, bool):
+                warnings.append(declared == 1)
+            else:
+                warnings.append(str(declared).strip().upper()
+                                in {"CONTENT_WARNING_SAFE", "1"})
+        if "nsfw" in metadata:
+            declared = metadata["nsfw"]
+            if declared is False or (isinstance(declared, int) and not isinstance(declared, bool)
+                                     and declared == 0):
+                warnings.append(True)
+            elif isinstance(declared, str):
+                warnings.append(declared.strip().lower() in {"0", "false"})
+            else:
+                warnings.append(False)
+        return 0 if warnings and all(warnings) else 1
 
     @staticmethod
     def _consumer_entry(item: dict, base_url: str = "") -> dict:

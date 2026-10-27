@@ -27,7 +27,7 @@ import zipfile
 from hashlib import sha256
 from pathlib import Path
 
-from shura_core.models import Candidate, Source
+from shura_core.models import Candidate, Source, SourceState
 from shura_core.state import StateStore
 from shura_core.publishing import protobuf as pb
 from shura_core.publishing import index_pb
@@ -608,6 +608,7 @@ class LegacyIndexCompatibilityTests(unittest.TestCase):
                       provenance={"page": "p"},
                       metadata={"_artifact_path": str(artifact),
                                 "_security": {"sha256": "c" * 64, "certificate": CERT},
+                                "contentWarning": "CONTENT_WARNING_SAFE",
                                 "_content_policy": {"scope": "source", "classification": "SAFE",
                                                     "reasons": ["test fixture declared safe"],
                                                     "evidence": {}}})
@@ -650,6 +651,7 @@ class LegacyIndexCompatibilityTests(unittest.TestCase):
         self.assertEqual(repo_doc["meta"]["name"], "Shura")
         self.assertNotIn("index_v2", repo_doc)  # no base URL configured -> legacy flow only
 
+
     def test_repo_index_v2_present_when_base_url_configured(self):
         import os
         os.environ["SHURA_REPO_BASE_URL"] = "https://repo.example/shura"
@@ -662,6 +664,33 @@ class LegacyIndexCompatibilityTests(unittest.TestCase):
             self.assertEqual(index[0]["version"], "1.5.1")
         finally:
             del os.environ["SHURA_REPO_BASE_URL"]
+
+
+class PublisherContentWarningTests(unittest.TestCase):
+    def test_publisher_requires_explicit_item_safety_metadata(self):
+        publish_item = {
+            "package": "org.example.ext",
+            "version": "1.0",
+            "metadata": {"_content_policy": {"classification": "SAFE"}},
+        }
+        self.assertEqual(RepositoryPublisher._consumer_entry(publish_item)["nsfw"], 1)
+
+        publish_item["metadata"]["nsfw"] = 0
+        self.assertEqual(RepositoryPublisher._consumer_entry(publish_item)["nsfw"], 0)
+        publish_item["metadata"]["nsfw"] = 1
+        self.assertEqual(RepositoryPublisher._consumer_entry(publish_item)["nsfw"], 1)
+
+        publish_item["metadata"].pop("nsfw")
+        publish_item["metadata"]["contentWarning"] = "CONTENT_WARNING_SAFE"
+        self.assertEqual(RepositoryPublisher._consumer_entry(publish_item)["nsfw"], 0)
+        publish_item["metadata"]["contentWarning"] = "unknown"
+        self.assertEqual(RepositoryPublisher._consumer_entry(publish_item)["nsfw"], 1)
+        publish_item["metadata"]["contentWarning"] = "CONTENT_WARNING_SAFE"
+        publish_item["metadata"]["nsfw"] = 0
+        self.assertEqual(RepositoryPublisher._consumer_entry(publish_item)["nsfw"], 0)
+        publish_item["metadata"]["nsfw"] = 1
+        self.assertEqual(RepositoryPublisher._consumer_entry(publish_item)["nsfw"], 1,
+                         "conflicting per-item warnings must resolve to adult")
 
 
 class ProtoV2CompatibilityTests(LegacyIndexCompatibilityTests):
@@ -979,14 +1008,9 @@ class DuplicateVersionListingTests(unittest.TestCase):
                                  f"Mihon would not offer the newest build of {pkg}")
 
     def test_duplicate_listings_stay_distinct_in_both_indexes(self):
-        """Both versions remain individually addressable (each keeps its own APK),
-        which is what makes the collapse safe rather than destructive."""
+        """Two safe versions of one package remain addressable in both indexes."""
         live = Path(__file__).resolve().parents[1] / "repo"
         index_json = json.loads((live / "index.json").read_text())
-        self.assertEqual(
-            sorted(e["version"] for e in index_json if e["pkg"].endswith("procomic")),
-            ["1.5.0", "1.5.1"],
-        )
         apks = {e["apk"] for e in index_json}
         self.assertEqual(len(apks), len(index_json), "each listing needs its own APK file")
         for name in apks:
@@ -1015,7 +1039,50 @@ class DuplicateVersionListingTests(unittest.TestCase):
                     sorted(package_codes), sorted(set(package_codes)),
                     f"{package} has two listings Mihon would collapse to the wrong one",
                 )
-        self.assertEqual([c for c in codes if c in (10500, 10501)], [10500, 10501])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = StateStore(root / "state.db")
+            source_id = "fixture:multiple-versions"
+            source = Source(
+                source_id, "Fixture", "https://example.org/index.json", "index", "ar",
+                enabled=False, state=SourceState.PAUSED,
+                configuration={"allowed_hosts": ["example.org"], "signing_key": CERT},
+            )
+            store.add_source(source)
+            store.accept_source(source_id, reason="test fixture")
+            store.enable_source(source_id, reason="test fixture")
+            source_fingerprint = store.get_source(source_id).fingerprint()
+            versions = ("1.5.0", "1.5.1")
+            for version in versions:
+                apk = root / f"{version}.apk"
+                apk.write_bytes(b"fixture APK")
+                candidate = Candidate(
+                    source_id, "org.example.ext", version,
+                    f"https://example.org/{version}.apk", name="Fixture", language="ar",
+                    metadata={
+                        "_artifact_path": str(apk),
+                        "_security": {"sha256": "c" * 64, "certificate": CERT,
+                                      "malware": {"verdict": "CLEAN"}},
+                        "_content_policy": {"scope": "source", "classification": "SAFE",
+                                            "policy_fingerprint": source_fingerprint},
+                    },
+                )
+                store.put_pending(candidate, "security-passed")
+                store.accept_pending(source_id, candidate.identity)
+            repo = root / "repo"
+            RepositoryPublisher(store, repo).publish(release=True)
+            published = json.loads((repo / "index.json").read_text())
+            self.assertEqual(sorted(entry["version"] for entry in published), list(versions))
+            self.assertEqual(len({entry["apk"] for entry in published}), 2)
+            for entry in published:
+                self.assertTrue((repo / "apk" / entry["apk"]).is_file())
+            proto = mihon_decode_store((repo / "index.pb").read_bytes())
+            self.assertEqual(
+                sorted(ext["versionName"] for ext in proto["extensions"]), list(versions))
+            self.assertEqual(
+                sorted(ext["versionCode"] for ext in proto["extensions"]), [10500, 10501])
+            store.close()
 
 
 class RealArtifactSigningTests(unittest.TestCase):

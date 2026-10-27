@@ -38,7 +38,7 @@ def _sandbox(bin_dir):
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path=="/index-redirect":self.send_response(302);self.send_header("Location","/index");self.end_headers();return
-        elif self.path=="/index":body=json.dumps({"extensions":[{"pkg":"org.example.ext","version":"1.2","apk":"http://127.0.0.1:1/x.apk"}]}).encode();kind="application/json"
+        elif self.path=="/index":body=json.dumps({"extensions":[{"pkg":"org.example.ext","version":"1.2","apk":"http://127.0.0.1:1/x.apk","contentWarning":"CONTENT_WARNING_SAFE"}]}).encode();kind="application/json"
         elif self.path=="/releases":body=json.dumps([{"tag_name":"v2.1","assets":[{"name":"source.apk","browser_download_url":"https://github.com/org/repo/releases/download/v2.1/source.apk","url":"https://api.github.com/assets/1"}]}]).encode();kind="application/json"
         elif self.path=="/list":body=b'<html lang="ar"><a href="/x.apk" class="shura-extension" data-shura-package="org.example.ext" data-shura-version="1.2">Arabic</a><a rel="next" href="/next">Next</a></html>';kind="text/html"
         elif self.path=="/next":body=b'<html><a rel="next" href="/list">Loop</a></html>';kind="text/html"
@@ -150,9 +150,12 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(len(candidates),1);self.assertEqual(counters["sourcesAccounted"],1);self.assertTrue(any("crawl success" in x for x in recorder.messages))
         tool=Path(self.tmp.name)/"apksigner";tool.write_text("#!/bin/sh\nprintf 'Signer #1 certificate SHA-256 digest: "+"a"*64+"\n'\n") ;tool.chmod(tool.stat().st_mode|stat.S_IXUSR)
         aapt=Path(self.tmp.name)/"aapt";aapt.write_text("#!/bin/sh\nprintf '%s\\n' \"package: name='org.example.ext' versionCode=1\"\n");aapt.chmod(aapt.stat().st_mode|stat.S_IXUSR)
+        clam=Path(self.tmp.name)/"fakeclam";clam.write_text("#!/bin/sh\nexit 0\n");clam.chmod(clam.stat().st_mode|stat.S_IXUSR)
+        database=Path(self.tmp.name)/"clamav";database.mkdir();(database/"daily.cvd").write_bytes(b"test database")
         old_path=_sandbox(self.tmp.name)
         try:
-            processor=CandidateProcessor(self.store,Path(self.tmp.name)/"artifacts",expected_hosts={"127.0.0.1"},http_factory=http_factory,url_validator=lambda url,hosts: __import__("shura_core.security.network",fromlist=["validate_url"]).validate_url(url,hosts,https_only=False,allow_nonstandard_ports=True,allow_private_hosts=True))
+            from shura_core.security.malware import MalwareScanner
+            processor=CandidateProcessor(self.store,Path(self.tmp.name)/"artifacts",expected_hosts={"127.0.0.1"},http_factory=http_factory,url_validator=lambda url,hosts: __import__("shura_core.security.network",fromlist=["validate_url"]).validate_url(url,hosts,https_only=False,allow_nonstandard_ports=True,allow_private_hosts=True),malware_scanner=MalwareScanner(engine=str(clam),database_dir=str(database)))
             result=processor.process(candidates[0]);self.assertEqual(result["verdict"],"ACCEPTED",result);self.assertGreaterEqual(result["quality_score"],0);self.store.accept_pending(candidates[0].source_id,candidates[0].identity)
         finally:os.environ["PATH"]=old_path
         published=RepositoryPublisher(self.store,Path(self.tmp.name)/"repository").publish(release=True)
