@@ -1,14 +1,18 @@
 package app.shura.manga.ui.theme
 
+import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -177,13 +181,24 @@ val LocalUiLanguage = compositionLocalOf { UiLanguage.ARABIC }
 val LocalIsRtl: Boolean
     @Composable get() = LocalUiLanguage.current == UiLanguage.ARABIC
 
+internal fun shouldUseDynamicColor(enabled: Boolean, sdkInt: Int): Boolean =
+    enabled && sdkInt >= Build.VERSION_CODES.S
+
 @Composable
 fun ShuraTheme(
     dark: Boolean = isSystemInDarkTheme(),
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
+    val context = LocalContext.current
+    val useDynamicColor = shouldUseDynamicColor(dynamicColor, Build.VERSION.SDK_INT)
     MaterialTheme(
-        colorScheme = if (dark) ShuraDark else ShuraLight,
+        colorScheme = when {
+            useDynamicColor && dark -> dynamicDarkColorScheme(context)
+            useDynamicColor -> dynamicLightColorScheme(context)
+            dark -> ShuraDark
+            else -> ShuraLight
+        },
         // The palette and the shapes are the identity and are left alone. Only
         // the type is tuned here, and only where the default scale was built for
         // a screen these screens are not: titles get a tighter line, because a
@@ -204,11 +219,11 @@ fun ShuraTheme(
             labelSmall = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium, lineHeight = 15.sp),
         ),
         shapes = Shapes(
-            extraSmall = RoundedCornerShape(6.dp),
-            small = RoundedCornerShape(10.dp),
-            medium = RoundedCornerShape(14.dp),
-            large = RoundedCornerShape(20.dp),
-            extraLarge = RoundedCornerShape(28.dp),
+            extraSmall = RoundedCornerShape(8.dp),
+            small = RoundedCornerShape(14.dp),
+            medium = RoundedCornerShape(18.dp),
+            large = RoundedCornerShape(24.dp),
+            extraLarge = RoundedCornerShape(32.dp),
         ),
         content = content,
     )

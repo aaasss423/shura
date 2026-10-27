@@ -1,5 +1,6 @@
 package app.shura.manga.ui.screens
 
+import android.os.Build
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -55,6 +56,8 @@ fun SettingsScreen(
     onLanguage: (UiLanguage) -> Unit,
     dark: Boolean,
     onDark: (Boolean) -> Unit,
+    dynamicColor: Boolean = false,
+    onDynamicColor: (Boolean) -> Unit = {},
     repositoryNotice: String?,
     onInstallRepository: () -> Unit,
     onOpenStore: () -> Unit,
@@ -123,6 +126,26 @@ fun SettingsScreen(
                 icon = ShuraIcons.Contrast,
                 onToggle = { onDark(!dark) },
                 checked = dark,
+            )
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                RowDivider()
+                SettingsRow(
+                    title = shura("settings.dynamicColor"),
+                    summary = shura(if (dynamicColor) "settings.enabled" else "settings.disabled"),
+                    help = shura("settings.dynamicColorHelp"),
+                    icon = ShuraIcons.Contrast,
+                    onToggle = { onDynamicColor(!dynamicColor) },
+                    checked = dynamicColor,
+                )
+            }
+        }
+
+        Group(shura("settings.translationGroup")) {
+            SettingsRow(
+                title = shura("settings.translation"),
+                summary = shura("settings.translationUnavailable"),
+                help = shura("settings.translationHelp"),
+                icon = ShuraIcons.Letter,
             )
         }
 

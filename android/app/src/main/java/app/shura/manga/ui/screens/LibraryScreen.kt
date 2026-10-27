@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -19,14 +20,20 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,6 +48,12 @@ import app.shura.manga.ui.theme.ShuraSpacing
 
 /** How the library is ordered. */
 enum class LibrarySort { RECENT, TITLE, CHAPTERS }
+
+sealed interface LibraryFilter {
+    data object All : LibraryFilter
+    data object Favorites : LibraryFilter
+    data class Category(val name: String) : LibraryFilter
+}
 
 /**
  * One work in the library.
@@ -60,6 +73,8 @@ data class LibraryWork(
     val lastRead: ReadingProgress?,
     /** True when the reader chose this work before downloading anything from it. */
     val followed: Boolean = false,
+    val favorite: Boolean = false,
+    val category: String? = null,
 ) {
     /** Identity used by selection and by the followed-work check. */
     val key: String get() = "${sourceId}|${mangaId}"
@@ -120,6 +135,12 @@ fun buildLibrary(
                 chapters = chapters,
                 lastRead = byProgress["${first.sourceId}|${first.mangaId}"],
                 followed = followed.any { it.key == "${first.sourceId}|${first.mangaId}" },
+                favorite = followed.firstOrNull {
+                    it.sourceId == first.sourceId && it.mangaId == first.mangaId
+                }?.favorite ?: false,
+                category = followed.firstOrNull {
+                    it.sourceId == first.sourceId && it.mangaId == first.mangaId
+                }?.category,
             )
         }
     val keys = downloaded.mapTo(mutableSetOf()) { "${it.sourceId}|${it.mangaId}" }
@@ -134,6 +155,8 @@ fun buildLibrary(
                 chapters = emptyList(),
                 lastRead = byProgress["${it.sourceId}|${it.mangaId}"],
                 followed = true,
+                favorite = it.favorite,
+                category = it.category,
             )
         }
     return downloaded + onlyFollowed
@@ -144,10 +167,18 @@ fun libraryRows(
     works: List<LibraryWork>,
     query: String,
     sort: LibrarySort,
+    filter: LibraryFilter = LibraryFilter.All,
 ): List<LibraryWork> {
     val needle = query.trim()
-    val filtered = if (needle.isEmpty()) works
-    else works.filter { it.title.contains(needle, ignoreCase = true) }
+    val filtered = works
+        .filter { work ->
+            when (filter) {
+                LibraryFilter.All -> true
+                LibraryFilter.Favorites -> work.favorite
+                is LibraryFilter.Category -> work.category == filter.name
+            }
+        }
+        .filter { needle.isEmpty() || it.title.contains(needle, ignoreCase = true) }
     return when (sort) {
         LibrarySort.RECENT -> filtered.sortedByDescending {
             it.lastRead?.updatedAt ?: it.chapters.maxOfOrNull { chapter -> chapter.dir.lastModified() } ?: 0L
@@ -208,6 +239,8 @@ fun LibraryScreen(
     onOpenWork: ((LibraryWork) -> Unit)? = null,
     /** Where a chapter gets saved, for the empty state to send the reader to. */
     onBrowse: (() -> Unit)? = null,
+    onToggleFavorite: ((LibraryWork, Boolean) -> Unit)? = null,
+    onAssignCategory: ((List<LibraryWork>, String?) -> Unit)? = null,
 ) {
     val works = remember(stored, history, followed) { buildLibrary(stored, history, followed) }
     // Multi-select, the way a shelf is picked over: a long press starts it, the
@@ -217,9 +250,11 @@ fun LibraryScreen(
     // rather than acted on where the confirmation appears, so backing out of the
     // dialog really does change nothing.
     var managing by remember { mutableStateOf<List<LibraryWork>?>(null) }
+    var organizing by remember { mutableStateOf<List<LibraryWork>?>(null) }
     val selecting = selected.isNotEmpty()
     var query by remember { mutableStateOf("") }
     var sort by remember { mutableStateOf(LibrarySort.RECENT) }
+    var filter by remember { mutableStateOf<LibraryFilter>(LibraryFilter.All) }
 
     managing?.let { chosen ->
         WorkCleanupDialog(
@@ -232,12 +267,26 @@ fun LibraryScreen(
             onDismiss = { managing = null },
         )
     }
+    organizing?.let { chosen ->
+        CategoryAssignmentDialog(
+            categories = works.mapNotNull { it.category }.distinct().sorted(),
+            onAssign = { category ->
+                onAssignCategory?.invoke(chosen, category)
+                selected = emptySet()
+                organizing = null
+            },
+            onDismiss = { organizing = null },
+        )
+    }
 
     Column(modifier.fillMaxSize()) {
         if (selecting) {
             SelectionBar(
                 count = selected.size,
                 onClear = { selected = emptySet() },
+                onOrganize = onAssignCategory?.let {
+                    { organizing = works.filter { work -> work.key in selected } }
+                },
                 onMarkRead = onMarkRead?.let { mark ->
                     {
                         works.filter { it.key in selected }.forEach { mark(it, true) }
@@ -268,7 +317,36 @@ fun LibraryScreen(
             )
         }
 
-        val rows = remember(works, query, sort) { libraryRows(works, query, sort) }
+        if (!selecting && works.isNotEmpty()) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = ShuraSpacing.screen, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilterChip(
+                    selected = filter == LibraryFilter.All,
+                    onClick = { filter = LibraryFilter.All },
+                    label = { Text(shura("library.filter.all")) },
+                )
+                FilterChip(
+                    selected = filter == LibraryFilter.Favorites,
+                    onClick = { filter = LibraryFilter.Favorites },
+                    label = { Text(shura("library.filter.favorites")) },
+                )
+                works.mapNotNull { it.category }.distinct().sorted().forEach { category ->
+                    val categoryFilter = LibraryFilter.Category(category)
+                    FilterChip(
+                        selected = filter == categoryFilter,
+                        onClick = { filter = categoryFilter },
+                        label = { Text(category, maxLines = 1) },
+                    )
+                }
+            }
+        }
+
+        val rows = remember(works, query, sort, filter) { libraryRows(works, query, sort, filter) }
 
         when {
             // Three states, three different sentences. "Nothing saved" says where
@@ -285,8 +363,8 @@ fun LibraryScreen(
             )
 
             rows.isEmpty() -> EmptyState(
-                title = shura("library.noMatches"),
-                body = shura("library.noMatchesBody"),
+                title = shura(if (filter == LibraryFilter.All) "library.noMatches" else "library.filter.empty"),
+                body = shura(if (filter == LibraryFilter.All) "library.noMatchesBody" else "library.filter.emptyBody"),
                 icon = ShuraIcons.Books,
                 actionLabel = shura("common.clear"),
                 onAction = { query = "" },
@@ -326,7 +404,12 @@ fun LibraryScreen(
                             work.lastRead?.let {
                                 shura("library.progress", it.page + 1, it.pageCount.coerceAtLeast(1))
                             }.orEmpty(),
+                            work.category.orEmpty(),
                         ),
+                        favorite = work.favorite,
+                        onFavoriteClick = if (selecting) null else onToggleFavorite?.let { toggle ->
+                            { toggle(work, !work.favorite) }
+                        },
                     )
                 }
             }
@@ -421,6 +504,7 @@ private fun SelectionBar(
     onClear: () -> Unit,
     onMarkRead: (() -> Unit)?,
     onDelete: (() -> Unit)?,
+    onOrganize: (() -> Unit)?,
 ) {
     Row(
         Modifier
@@ -444,12 +528,59 @@ private fun SelectionBar(
                 Text(shura("chapters.read"), maxLines = 1)
             }
         }
+        onOrganize?.let {
+            TextButton(onClick = it) {
+                Text(shura("library.category"), maxLines = 1)
+            }
+        }
         onDelete?.let {
             androidx.compose.material3.TextButton(onClick = it) {
                 Text(shura("library.manage"), maxLines = 1)
             }
         }
     }
+}
+
+@Composable
+private fun CategoryAssignmentDialog(
+    categories: List<String>,
+    onAssign: (String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var newCategory by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(shura("library.category.title")) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = { onAssign(null) }) {
+                    Text(shura("library.category.none"))
+                }
+                categories.forEach { category ->
+                    TextButton(onClick = { onAssign(category) }) {
+                        Text(category)
+                    }
+                }
+                OutlinedTextField(
+                    value = newCategory,
+                    onValueChange = { newCategory = it },
+                    label = { Text(shura("library.category.new")) },
+                    singleLine = true,
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onAssign(newCategory.trim()) },
+                enabled = newCategory.isNotBlank(),
+            ) {
+                Text(shura("library.category.create"))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(shura("common.cancel")) }
+        },
+    )
 }
 
 /**

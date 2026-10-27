@@ -593,49 +593,59 @@ fun WorkDetailsScreen(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(
-                        start = ShuraSpacing.screen,
-                        end = ShuraSpacing.screen,
-                        top = 10.dp,
-                    ),
+                    .padding(horizontal = ShuraSpacing.screen)
+                    .padding(top = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                CoverImage(
-                    source = manga.coverUrl,
-                    modifier = Modifier
-                        .width(116.dp)
-                        .aspectRatio(2f / 3f)
-                        .clip(MaterialTheme.shapes.small),
-                    contentDescription = manga.title,
-                    retryLabel = shura("common.retry"),
-                )
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        manga.title,
-                        style = MaterialTheme.typography.titleLarge,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    if (sourceName.isNotBlank() || sourceLanguage.isNotBlank()) {
-                        Text(
-                            detailJoin(sourceName, sourceLanguage),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
+                AppPlate(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    shape = MaterialTheme.shapes.large,
+                ) {
+                    Row(
+                        Modifier.padding(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CoverImage(
+                            source = manga.coverUrl,
+                            modifier = Modifier
+                                .width(112.dp)
+                                .aspectRatio(2f / 3f)
+                                .clip(MaterialTheme.shapes.medium),
+                            contentDescription = manga.title,
+                            retryLabel = shura("common.retry"),
                         )
-                    }
-                    // How long the work is, once the chapter list has said. Absent
-                    // until then rather than guessed at as "…" - it is a count, and
-                    // a made-up count is worse than no count.
-                    if (chapters != null) {
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            shura("discover.chapterCount", chapterCount),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                manga.title,
+                                style = MaterialTheme.typography.headlineSmall,
+                                maxLines = 4,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            if (sourceName.isNotBlank() || sourceLanguage.isNotBlank()) {
+                                Spacer(Modifier.height(10.dp))
+                                AssistChip(
+                                    onClick = {},
+                                    label = {
+                                        Text(
+                                            detailJoin(sourceName, sourceLanguage),
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    },
+                                )
+                            }
+                            // How long the work is, once the chapter list has said.
+                            if (chapters != null) {
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    shura("discover.chapterCount", chapterCount),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
                     }
                 }
             }

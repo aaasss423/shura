@@ -203,6 +203,8 @@ fun ShuraRoot(
     onLanguage: (UiLanguage) -> Unit,
     dark: Boolean,
     onDark: (Boolean) -> Unit,
+    dynamicColor: Boolean = false,
+    onDynamicColor: (Boolean) -> Unit = {},
     pages: List<Uri>,
     /** Called with the page now on screen, so downloads can stay ahead of it. */
     onPageVisible: (Int) -> Unit = {},
@@ -283,7 +285,7 @@ fun ShuraRoot(
      */
     onChapterFinished: (app.shura.manga.reader.ChapterFinished) -> Unit = {},
 ) {
-    ShuraTheme(dark = dark) {
+    ShuraTheme(dark = dark, dynamicColor = dynamicColor) {
         androidx.compose.runtime.CompositionLocalProvider(
             LocalUiLanguage provides language,
             androidx.compose.ui.platform.LocalLayoutDirection provides
@@ -661,6 +663,48 @@ fun ShuraRoot(
                                     action,
                                 )
                             },
+                            onToggleFavorite = { work, favorite ->
+                                resumeScope.launch {
+                                    withContext(Dispatchers.IO) {
+                                        val existing = listLibraryWorks(workDir).firstOrNull {
+                                            it.sourceId == work.sourceId && it.mangaId == work.mangaId
+                                        }
+                                        val record = existing ?: app.shura.manga.LibraryWork(
+                                            work.sourceId,
+                                            work.mangaId,
+                                            work.title,
+                                            work.coverUrl,
+                                        )
+                                        storeWork(workDir, record.copy(favorite = favorite))
+                                    }
+                                    workVersion += 1
+                                }
+                            },
+                            onAssignCategory = { works, category ->
+                                val requestedCategory = category?.trim()?.takeIf(String::isNotEmpty)
+                                resumeScope.launch {
+                                    withContext(Dispatchers.IO) {
+                                        val records = listLibraryWorks(workDir)
+                                        val normalizedCategory = requestedCategory?.let { requested ->
+                                            records.firstOrNull {
+                                                it.category.equals(requested, ignoreCase = true)
+                                            }?.category ?: requested
+                                        }
+                                        works.forEach { work ->
+                                            val record = records.firstOrNull {
+                                                it.sourceId == work.sourceId && it.mangaId == work.mangaId
+                                            } ?: app.shura.manga.LibraryWork(
+                                                work.sourceId,
+                                                work.mangaId,
+                                                work.title,
+                                                work.coverUrl,
+                                            )
+                                            storeWork(workDir, record.copy(category = normalizedCategory))
+                                        }
+                                    }
+                                    workVersion += 1
+                                }
+                            },
                             cleanupNotice = cleanupNotice,
                             onDelete = { entry ->
                                 // Recursive delete on the main thread is the same ANR
@@ -682,6 +726,8 @@ fun ShuraRoot(
                             onLanguage = onLanguage,
                             dark = dark,
                             onDark = onDark,
+                            dynamicColor = dynamicColor,
+                            onDynamicColor = onDynamicColor,
                             repositoryNotice = repositoryNotice,
                             onInstallRepository = onInstallRepository,
                             onOpenStore = { go(ShuraScreen.Extensions) },

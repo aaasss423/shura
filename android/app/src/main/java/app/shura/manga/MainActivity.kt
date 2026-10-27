@@ -42,6 +42,7 @@ class MainActivity : ComponentActivity() {
 }
 
 private const val KEY_LANGUAGE = "ui-language"
+private const val KEY_DYNAMIC_COLOR = "ui-dynamic-color"
 
 /**
  * What an install row is doing right now.
@@ -89,6 +90,9 @@ private fun ShuraApp() {
         )
     }
     var dark by remember { mutableStateOf(preferences.getBoolean(KEY_DARK, true)) }
+    var dynamicColor by remember {
+        mutableStateOf(preferences.getBoolean(KEY_DYNAMIC_COLOR, false))
+    }
 
     val translationStore = remember { TranslationSettingsStore(context) }
     val progressStore = remember { ReadingProgressStore(context) }
@@ -436,6 +440,11 @@ private fun ShuraApp() {
         onDark = { chosen ->
             dark = chosen
             preferences.edit().putBoolean(KEY_DARK, chosen).apply()
+        },
+        dynamicColor = dynamicColor,
+        onDynamicColor = { chosen ->
+            dynamicColor = chosen
+            preferences.edit().putBoolean(KEY_DYNAMIC_COLOR, chosen).apply()
         },
         // A chapter that is still downloading renders from the loader's own
         // list, which grows as pages land. A stored or saved chapter has no

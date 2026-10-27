@@ -3,6 +3,8 @@ package app.shura.manga
 import app.shura.manga.StoredChapter
 import app.shura.manga.reader.ReadingProgress
 import app.shura.manga.ui.screens.LibraryWork
+import app.shura.manga.ui.screens.LibraryFilter
+import app.shura.manga.ui.screens.libraryRows
 
 import app.shura.manga.ui.screens.buildLibrary
 import java.io.File
@@ -33,12 +35,23 @@ class WorkLibraryTest {
     @Test
     fun `a work is stored and read back whole`() {
         val dir = folder.newFolder("works")
-        storeWork(dir, work())
+        storeWork(dir, work().copy(favorite = true, category = "Reading"))
         val stored = listLibraryWorks(dir)
         assertEquals(1, stored.size)
         assertEquals("A title", stored[0].title)
         assertEquals("https://cdn/x.jpg", stored[0].coverUrl)
         assertEquals("s", stored[0].sourceId)
+        assertTrue(stored[0].favorite)
+        assertEquals("Reading", stored[0].category)
+    }
+
+    @Test
+    fun `older work records default to not favorite and no category`() {
+        val file = File(folder.newFolder("works"), "legacy.json")
+        file.writeText("""{"sourceId":"s","mangaId":"m1","title":"Legacy"}""")
+        val stored = readWork(file)!!
+        assertFalse(stored.favorite)
+        assertNull(stored.category)
     }
 
     @Test
@@ -145,5 +158,24 @@ class FollowedWorksInLibraryTest {
         val followed = listOf(LibraryWork("s", "m1", "A title", ""))
         val work = buildLibrary(emptyList(), history, followed)[0]
         assertEquals(null, work.resumeChapter)
+    }
+
+    @Test
+    fun `favorite and category metadata survive library grouping and filters`() {
+        val followed = listOf(
+            app.shura.manga.LibraryWork("s", "fav", "Favorite title", favorite = true, category = "Reading"),
+            app.shura.manga.LibraryWork("s", "other", "Other title", category = "Later"),
+        )
+        val works = buildLibrary(emptyList(), history, followed)
+
+        assertEquals(listOf("Favorite title"), libraryRows(
+            works, "", app.shura.manga.ui.screens.LibrarySort.TITLE, LibraryFilter.Favorites,
+        ).map { it.title })
+        assertEquals(listOf("Other title"), libraryRows(
+            works, "", app.shura.manga.ui.screens.LibrarySort.TITLE, LibraryFilter.Category("Later"),
+        ).map { it.title })
+        assertEquals(listOf("Favorite title", "Other title"), libraryRows(
+            works, "", app.shura.manga.ui.screens.LibrarySort.TITLE,
+        ).map { it.title })
     }
 }

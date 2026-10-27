@@ -22,6 +22,8 @@ data class LibraryWork(
     val title: String,
     val coverUrl: String = "",
     val addedAt: Long = 0L,
+    val favorite: Boolean = false,
+    val category: String? = null,
 ) {
     val key: String get() = keyOf(sourceId, mangaId)
 
@@ -58,6 +60,8 @@ fun readWork(file: File): LibraryWork? {
         title = title,
         coverUrl = json.optString("coverUrl"),
         addedAt = json.optLong("addedAt"),
+        favorite = json.optBoolean("favorite", false),
+        category = json.optString("category").takeIf(String::isNotBlank),
     )
 }
 
@@ -71,6 +75,8 @@ fun storeWork(dir: File, work: LibraryWork): LibraryWork {
         .put("title", record.title)
         .put("coverUrl", record.coverUrl)
         .put("addedAt", record.addedAt)
+        .put("favorite", record.favorite)
+        .put("category", record.category)
     entryFile(dir, record).writeText(json.toString())
     return record
 }

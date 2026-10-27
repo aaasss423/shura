@@ -26,6 +26,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
@@ -331,6 +333,8 @@ internal fun CoverTile(
     selectable: Boolean = true,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
+    favorite: Boolean = false,
+    onFavoriteClick: (() -> Unit)? = null,
 ) {
     Box(
         modifier
@@ -374,6 +378,20 @@ internal fun CoverTile(
         }
         badge?.takeIf { it > 0 }?.let {
             CountBadge(it, Modifier.align(Alignment.TopEnd).padding(6.dp), outlined = true)
+        }
+        onFavoriteClick?.let { toggle ->
+            IconButton(
+                onClick = toggle,
+                modifier = Modifier.align(Alignment.TopStart).padding(2.dp).size(40.dp),
+            ) {
+                Icon(
+                    if (favorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                    contentDescription = shura(
+                        if (favorite) "library.favorite.remove" else "library.favorite.add",
+                    ),
+                    tint = if (favorite) MaterialTheme.colorScheme.primary else Color.White,
+                )
+            }
         }
         Column(
             Modifier

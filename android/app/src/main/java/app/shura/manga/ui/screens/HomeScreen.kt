@@ -110,7 +110,12 @@ fun HomeScreen(
                     Modifier.padding(horizontal = ShuraSpacing.screen),
                 )
             }
-            item {
+            item(key = "featured-resume") {
+                ResumeHero(unfinished.first()) {
+                    onOpenEntry(unfinished.first())
+                }
+            }
+            if (unfinished.size > 1) item {
                 // A strip, not a grid: these are chapters you are in the middle of,
                 // and the fastest way back into one is to see them side by side and
                 // tap the right one.
@@ -123,7 +128,7 @@ fun HomeScreen(
                     ),
                     horizontalArrangement = Arrangement.spacedBy(ShuraSpacing.row),
                 ) {
-                    items(unfinished, key = { "open:${it.sourceId}|${it.chapterId}" }) { entry ->
+                    items(unfinished.drop(1), key = { "open:${it.sourceId}|${it.chapterId}" }) { entry ->
                         ContinueCard(entry) { onOpenEntry(entry) }
                     }
                 }
@@ -176,6 +181,59 @@ private const val CONTINUE_LIMIT = 8
 
 /** How many finished ones the list shows. */
 private const val RECENT_LIMIT = 20
+
+@Composable
+private fun ResumeHero(entry: ReadingProgress, onClick: () -> Unit) {
+    AppPlate(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = ShuraSpacing.screen),
+        color = MaterialTheme.colorScheme.primaryContainer,
+        shape = MaterialTheme.shapes.large,
+        onClick = onClick,
+    ) {
+        Row(
+            Modifier.padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CoverPlate(
+                coverUrl = entry.coverUrl,
+                width = 88.dp,
+                label = entry.mangaTitle,
+                modifier = Modifier.clip(MaterialTheme.shapes.medium),
+            )
+            Column(Modifier.weight(1f)) {
+                Text(
+                    shura("home.continue"),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f),
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    entry.mangaTitle,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    entry.chapterName,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(12.dp))
+                Button(onClick = onClick) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text(shura("details.continue"))
+                }
+            }
+        }
+    }
+}
 
 /**
  * One chapter you are in the middle of.
