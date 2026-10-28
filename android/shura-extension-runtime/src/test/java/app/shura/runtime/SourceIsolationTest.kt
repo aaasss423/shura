@@ -68,6 +68,6 @@ class SourceIsolationTest {
  */
 private fun anchorPolicy(digest: String?) =
     TrustPolicy(TrustAnchor(digest), listOf(TrustedPublisher(
-        "a".repeat(64), listOf("eu.kanade.tachiyomi.extension.ar.procomic"), "unused")))
+        "a".repeat(64), listOf("eu.kanade.tachiyomi.extension.ar.anyonemanga"), "unused")))
 
 }

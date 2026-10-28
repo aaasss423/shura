@@ -6,7 +6,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Signature-level ABI conformance against the real published ProComic DEX.
+ * Signature-level ABI conformance against a real APK in the bundled repository.
  *
  * [AbiSurfaceTest] checks that the names the extension needs appear in the DEX
  * string pool. That is not compatibility: the pool also contains descriptors that
@@ -32,7 +32,8 @@ class AbiSignatureTest {
         val dir = File(repoDir, "apk")
         val files = dir.listFiles { f: File -> f.name.endsWith(".apk") }?.sortedBy { it.name }
         assertTrue("no published APK under $dir", !files.isNullOrEmpty())
-        return files!!.firstOrNull { it.name.contains("1.5.1") } ?: files.first()
+        return files!!.firstOrNull { it.name.contains("anyonemanga") }
+            ?: error("the bundled repository has no AnyoneManga APK under $dir")
     }
 
     /** One DEX method_id_item: what the bytecode actually invokes. */
@@ -112,11 +113,10 @@ class AbiSignatureTest {
     private val hostOwnedPrefix = "Leu/kanade/tachiyomi/"
 
     /**
-     * The extension ships its own classes, including a whole
-     * `eu.kanade.tachiyomi.extension.ar.procomic` package. Those are supplied by
-     * the APK, not the host, so asserting the runtime provides them would be
-     * asserting that it ships the extension. Only the framework layer below is
-     * the host's responsibility.
+     * The extension ships its own source classes under its package. Those are
+     * supplied by the APK, not the host, so asserting the runtime provides them
+     * would be asserting that it ships the extension. Only the framework layer
+     * below is the host's responsibility.
      */
     private val hostExcluded = listOf("Leu/kanade/tachiyomi/extension/")
 

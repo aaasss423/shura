@@ -23,14 +23,18 @@ class ExtensionCatalogTest {
 
     @get:Rule val folder = TemporaryFolder()
 
-    private val procomicSigner = "a".repeat(64)
+    private val repositorySigner = "a".repeat(64)
     private val shuraSigner = "b".repeat(64)
     private val strangerSigner = "c".repeat(64)
 
     private fun policy() = TrustPolicy(
         TrustAnchor("f".repeat(64)),
         listOf(
-            TrustedPublisher(procomicSigner, listOf("eu.kanade.tachiyomi.extension.ar.procomic"), "procomic"),
+            TrustedPublisher(
+                repositorySigner,
+                listOf("eu.kanade.tachiyomi.extension.ar.anyonemanga"),
+                "shura-repo",
+            ),
             TrustedPublisher(shuraSigner, listOf("app.shura.extension."), "shura"),
         ),
     )
@@ -67,8 +71,8 @@ class ExtensionCatalogTest {
 
     @Test
     fun `an extension signed by a pinned publisher in scope is trusted`() {
-        val dir = index(row("eu.kanade.tachiyomi.extension.ar.procomic", procomicSigner))
-        publish(dir, "eu.kanade.tachiyomi.extension.ar.procomic")
+        val dir = index(row("eu.kanade.tachiyomi.extension.ar.anyonemanga", repositorySigner))
+        publish(dir, "eu.kanade.tachiyomi.extension.ar.anyonemanga")
 
         val entry = ExtensionCatalog(policy(), dir).describe(dir).single()
         assertEquals(ExtensionTrust.TRUSTED, entry.trust)
@@ -78,7 +82,7 @@ class ExtensionCatalogTest {
     fun `a known publisher signing outside its scope is out of scope, not trusted`() {
         // The signature is genuine. The authority simply does not cover this
         // package - which is the whole point of scoping a publisher.
-        val dir = index(row("app.shura.extension.evil", procomicSigner))
+        val dir = index(row("app.shura.extension.evil", repositorySigner))
         publish(dir, "app.shura.extension.evil")
 
         val entry = ExtensionCatalog(policy(), dir).describe(dir).single()
@@ -136,25 +140,25 @@ class ExtensionCatalogTest {
     @Test
     fun `only trusted extensions are reported runnable`() {
         val dir = index(
-            row("eu.kanade.tachiyomi.extension.ar.procomic", procomicSigner, "ProComic"),
+            row("eu.kanade.tachiyomi.extension.ar.anyonemanga", repositorySigner, "AnyoneManga"),
             row("app.shura.extension.asurascans", strangerSigner, "Asura"),
         )
-        publish(dir, "eu.kanade.tachiyomi.extension.ar.procomic")
+        publish(dir, "eu.kanade.tachiyomi.extension.ar.anyonemanga")
         publish(dir, "app.shura.extension.asurascans")
 
         val catalog = ExtensionCatalog(policy(), dir)
         val entries = catalog.describe(dir)
-        assertEquals(listOf("ProComic"), catalog.runnable(entries).map { it.identity })
+        assertEquals(listOf("AnyoneManga"), catalog.runnable(entries).map { it.identity })
     }
 
     @Test
     fun `two versions of one package are an update, not two extensions`() {
-        val pkg = "eu.kanade.tachiyomi.extension.ar.procomic"
+        val pkg = "eu.kanade.tachiyomi.extension.ar.anyonemanga"
         val dir = index(
-            row(pkg, procomicSigner, "ProComic", "v1.5.0", "6"),
-            row(pkg, procomicSigner, "ProComic", "v1.5.1", "7"),
+            row(pkg, repositorySigner, "AnyoneManga", "v1.6.55", "655"),
+            row(pkg, repositorySigner, "AnyoneManga", "v1.6.56", "656"),
         )
-        publish(dir, pkg, "v1.5.0")
+        publish(dir, pkg, "v1.6.55")
 
         val catalog = ExtensionCatalog(policy(), dir)
         val entries = catalog.describe(dir)
@@ -164,7 +168,7 @@ class ExtensionCatalogTest {
         // the "only one extension" symptom the real repository produced.
         val shown = ExtensionCatalog.newestPerPackage(entries)
         assertEquals(1, shown.size)
-        assertEquals("v1.5.1", shown.single().version)
+        assertEquals("v1.6.56", shown.single().version)
     }
 
     @Test

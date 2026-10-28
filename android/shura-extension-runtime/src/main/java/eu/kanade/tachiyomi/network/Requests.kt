@@ -17,6 +17,7 @@ import okhttp3.CacheControl
 import okhttp3.Headers
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 /** Owns the single client every extension uses. */
@@ -56,3 +57,5 @@ fun GET(
     headers?.let { headers(it) }
     cache?.let { cacheControl(it) }
 }.build()
+
+class HttpException(code: Int) : IOException("HTTP $code")

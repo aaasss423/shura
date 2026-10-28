@@ -84,17 +84,23 @@ object RepositorySeed {
     }
 
     private fun copyAssetTree(context: Context, path: String, into: File): Boolean {
-        into.mkdirs()
         val children = context.assets.list(path).orEmpty()
-        if (children.isEmpty()) {
-            // A leaf: copy it across.
-            context.assets.open(path).use { input ->
-                into.outputStream().use { output -> input.copyTo(output) }
+        if (children.isNotEmpty()) {
+            if (!into.isDirectory && !into.mkdirs()) {
+                throw IOException("could not create bundled repository directory $into")
+            }
+            for (child in children) {
+                if (!copyAssetTree(context, "$path/$child", File(into, child))) return false
             }
             return true
         }
-        for (child in children) {
-            if (!copyAssetTree(context, "$path/$child", File(into, child))) return false
+
+        val parent = into.parentFile
+        if (parent != null && !parent.isDirectory && !parent.mkdirs()) {
+            throw IOException("could not create bundled repository directory $parent")
+        }
+        context.assets.open(path).use { input ->
+            into.outputStream().use { output -> input.copyTo(output) }
         }
         return true
     }

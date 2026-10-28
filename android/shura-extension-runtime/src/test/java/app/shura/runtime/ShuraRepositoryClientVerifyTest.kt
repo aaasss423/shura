@@ -77,7 +77,7 @@ class ShuraRepositoryClientVerifyTest {
             signatures = null,
             policy = TrustPolicy(
                 TrustAnchor(ANCHOR),
-                listOf(TrustedPublisher(ANCHOR, listOf("eu.kanade.tachiyomi.extension.ar.procomic")))),
+                listOf(TrustedPublisher(ANCHOR, listOf("app.shura.extension.")))),
         )
         client.useStaging(File(repo, "staging"))
 
@@ -164,7 +164,7 @@ class ShuraRepositoryClientVerifyTest {
             signatures = null,
             policy = TrustPolicy(
                 TrustAnchor(ANCHOR),
-                listOf(TrustedPublisher(ANCHOR, listOf("eu.kanade.tachiyomi.extension.ar.procomic")))),
+                listOf(TrustedPublisher(ANCHOR, listOf("app.shura.extension.")))),
         )
         client.useStaging(File(repo, "staging2"))
         val entry = client.entries().single()

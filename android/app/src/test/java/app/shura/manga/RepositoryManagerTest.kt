@@ -78,8 +78,8 @@ class RepositoryManagerTest {
         listOf(
             TrustedPublisher(
                 ShuraExtensions.TRUSTED_REPOSITORY_ANCHOR,
-                listOf("eu.kanade.tachiyomi.extension.ar.procomic"),
-                "procomic",
+                listOf("eu.kanade.tachiyomi.extension."),
+                "shura-repo",
             ),
         ),
     )
@@ -209,10 +209,10 @@ class RepositoryManagerTest {
         val index = JSONObject()
             .put("packages", JSONArray().put(
                 JSONObject()
-                    .put("pkg", "eu.kanade.tachiyomi.extension.ar.procomic")
+                    .put("pkg", "eu.kanade.tachiyomi.extension.ar.anyonemanga")
                     .put("version", "1.0")
                     .put("lang", "ar")
-                    .put("identity", "eu.kanade.tachiyomi.extension.ar.procomic|1.0")
+                    .put("identity", "eu.kanade.tachiyomi.extension.ar.anyonemanga|1.0")
                     .put("apk", "sample.apk")
                     .put("artifact_sha256", "a".repeat(64))
                     .put("signing_certificate_sha256", foreignAnchor)

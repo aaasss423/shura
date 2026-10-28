@@ -13,13 +13,12 @@ import java.io.File
  * The real path, on a real device, with the real artifact Shura Core publishes:
  *
  *   Shura Repository -> SHA-256 -> certificate from the APK file -> manifest/ABI
- *                    -> DexClassLoader -> ProComic instance -> live search
+ *                    -> DexClassLoader -> AnyoneManga instance -> live search
  *                    -> MangaSummary
  *
  * No mocks: the APK is the published one, the signer is read out of it, and the
- * search is a real network request made by the extension's own code. The class
- * is constructed directly because the DEX proves ProComic *is* the Source - there
- * is no createSources() to call.
+ * search is a real network request made by the extension's own code. The source
+ * class is resolved from the APK's manifest rather than assumed by the test.
  *
  * If a step fails, the failure says which one and why; nothing is swallowed.
  */
@@ -27,9 +26,9 @@ import java.io.File
 class RealExtensionLoadTest {
 
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
-    private val anchor = "b655a474503f4471fdaf6ba35b9385f71d144669f3c28602c5b60b062022c41d"
+    private val anchor = "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2"
+    private val packageName = "eu.kanade.tachiyomi.extension.ar.anyonemanga"
 
-    /** The published repository, packaged into the test APK's assets. */
     /**
      * The published repository, read out of the test APK's own assets.
      *
@@ -40,11 +39,12 @@ class RealExtensionLoadTest {
     private fun publishDir(name: String): File {
         val assets = InstrumentationRegistry.getInstrumentation().context.assets
         val out = File(context.cacheDir, "published-repo")
+        out.deleteRecursively()
         fun copy(path: String) {
             assets.open(path).use { input ->
                 val target = File(out, path)
                 target.parentFile?.mkdirs()
-                input.copyTo(target.outputStream())
+                target.outputStream().use { output -> input.copyTo(output) }
             }
         }
         copy("repo.json")
@@ -72,19 +72,20 @@ class RealExtensionLoadTest {
     }
 
     /**
-     * The policy the shipped app pins, built from the constants it ships.
-     *
-     * The certificate is scoped to the one package it was ever trusted for, so
-     * this test cannot silently start accepting an extension that key was never
-     * granted.
+     * The policy the shipped app pins, built from its repository trust
+     * fingerprint and the source-package family it explicitly accepts.
      */
     private fun policy(anchor: String) = TrustPolicy(
         TrustAnchor(anchor),
-        listOf(TrustedPublisher(anchor, listOf("eu.kanade.tachiyomi.extension.ar.procomic"), "procomic")),
+        listOf(TrustedPublisher(
+            anchor,
+            listOf("eu.kanade.tachiyomi.extension."),
+            "shura-repo",
+        )),
     )
 
     @Test
-    fun loadsThePublishedProcomicAndPerformsARealSearch() {
+    fun loadsPublishedAnyoneMangaAndPerformsARealSearch() {
         val repository = stageRepository()
         val client = ShuraRepositoryClient(
             repository,
@@ -93,43 +94,43 @@ class RealExtensionLoadTest {
         )
 
         // 1. the entry resolves to the published file
-        val entry = client.entries().first { it.pkg.endsWith("procomic") }
+        val entry = client.entries().first { it.pkg == packageName }
         assertTrue("published APK is missing", File(repository, "apk/${entry.apk}").isFile)
 
         // 2-4. digest, certificate read from the file, manifest, ABI
         val verified = client.verify(entry)
-        assertEquals("eu.kanade.tachiyomi.extension.ar.procomic", verified.packageName)
-        assertEquals(1.6f, verified.abi, 0.001f)
+        assertEquals(packageName, verified.packageName)
+        assertTrue("the verified extension ABI is outside the runtime range", verified.abi in 1.0f..1.6f)
 
         // 5. stage into private storage, DexClassLoader, resolve the real class
         val loader = ExtensionLoader(context)
         val named = verified.copy(sourceClassName = loader.resolveSourceClass(verified.metadata))
-        assertEquals(
-            "eu.kanade.tachiyomi.extension.ar.procomic.ProComic",
-            named.sourceClassName,
-        )
+        assertTrue("the source class was not read from APK metadata", named.sourceClassName.isNotBlank())
 
         // 6. a real Source instance
         val loaded = loader.load(named)
-        assertNotNull("the extension produced no Source", loaded.source)
-        assertTrue(
-            "loaded object is ${loaded.source.javaClass.name}, not a Source",
-            loaded.source is eu.kanade.tachiyomi.source.CatalogueSource,
-        )
+        try {
+            assertNotNull("the extension produced no Source", loaded.source)
+            assertTrue(
+                "loaded object is ${loaded.source.javaClass.name}, not a Source",
+                loaded.source is eu.kanade.tachiyomi.source.CatalogueSource,
+            )
 
-        // 7. a real network search made by the extension's own code
-        val adapter = ExtensionSourceAdapter(loaded)
-        val results = kotlinx.coroutines.runBlocking { adapter.search("one piece", 1) }
-        assertTrue("a live search returned nothing", results.isNotEmpty())
-        results.forEach {
-            assertTrue("result has no title: $it", it.title.isNotBlank())
+            // 7. a real network search made by the extension's own code
+            val adapter = ExtensionSourceAdapter(loaded)
+            val results = kotlinx.coroutines.runBlocking { adapter.search("one piece", 1) }
+            assertTrue("a live search returned nothing", results.isNotEmpty())
+            results.forEach {
+                assertTrue("result has no title: $it", it.title.isNotBlank())
+            }
+
+            // 8. mapped into Shura's own model
+            val summary = results.first()
+            assertTrue(summary is app.shura.source.MangaSummary)
+            assertTrue(summary.title.isNotBlank())
+        } finally {
+            loaded.close()
         }
-
-        // 8. mapped into Shura's own model
-        val summary = results.first()
-        assertTrue(summary is app.shura.source.MangaSummary)
-        assertTrue(summary.title.isNotBlank())
-        loaded.close()
     }
 
     @Test

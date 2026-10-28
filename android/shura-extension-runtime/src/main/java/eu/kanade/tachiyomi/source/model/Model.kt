@@ -1,6 +1,6 @@
 // Transitional model types.
 //
-// Signatures are NOT guesses. Every one was read out of the shipped ProComic
+// Signatures are NOT guesses. Every one was read out of a shipped extension
 // APK's DEX (see app.shura.runtime.AbiSurfaceTest), which records:
 //
 //   SManga   getUrl/setUrl String, getTitle/setTitle String,
@@ -34,6 +34,13 @@ open class SManga {
     var thumbnail_url: String = ""
     var status: Int = 0
     var initialized: Boolean = false
+    private var memoValue: JsonObject = JsonObject(emptyMap())
+
+    fun setMemo(value: JsonObject) {
+        memoValue = value
+    }
+
+    fun getMemo(): JsonObject = memoValue
 
     companion object {
         @JvmStatic fun create(): SManga = SManga()
@@ -94,10 +101,14 @@ open class Filter(val name: String) {
     class Select(
         name: String,
         val values: Array<Any?>,
-        val mask: Int,
+        selectedIndex: Int = 0,
     ) : Filter(name) {
-        var state: Any? = values.firstOrNull()
+        var state: Any? = values.getOrNull(selectedIndex)
     }
+
+    class Header(name: String) : Filter(name)
+
+    class Separator(name: String = "") : Filter(name)
 
     override fun equals(other: Any?): Boolean = other is Filter && other.name == name
     override fun hashCode(): Int = name.hashCode()

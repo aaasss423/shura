@@ -34,6 +34,12 @@ class RepositorySeedTest {
             val installed = ShuraRepository.directory(context)
             assertTrue(File(installed, "index.shura.json").isFile)
             assertTrue(File(installed, "repo.json").isFile)
+            val apks = File(installed, "apk").listFiles().orEmpty()
+            assertTrue("the bundled APK files were not copied", apks.isNotEmpty())
+            apks.forEach { apk ->
+                assertTrue("${apk.name} must be a file, not a directory", apk.isFile)
+                assertTrue("${apk.name} must not be empty", apk.length() > 0L)
+            }
             assertFalse("a second seed must leave the installed repository alone", RepositorySeed.seed(context))
         } finally {
             testRoot.deleteRecursively()

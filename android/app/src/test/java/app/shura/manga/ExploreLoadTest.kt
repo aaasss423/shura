@@ -25,18 +25,18 @@ class ExploreLoadTest {
 
     @Test
     fun `the first request for a source is allowed`() {
-        assertTrue(ExploreLoadGate().shouldStart("procomic"))
+        assertTrue(ExploreLoadGate().shouldStart("anyonemanga"))
     }
 
     @Test
     fun `recomposing does not start another request`() {
         val gate = ExploreLoadGate()
-        assertTrue("the first entry asks", gate.shouldStart("procomic"))
+        assertTrue("the first entry asks", gate.shouldStart("anyonemanga"))
 
         // A recomposition is the same screen being drawn again. Fifty of them is
         // not fifty requests; the second one is already a bug.
-        repeat(50) { assertFalse("recomposition #$it started a request", gate.shouldStart("procomic")) }
-        assertTrue(gate.hasStarted("procomic"))
+        repeat(50) { assertFalse("recomposition #$it started a request", gate.shouldStart("anyonemanga")) }
+        assertTrue(gate.hasStarted("anyonemanga"))
     }
 
     @Test
@@ -54,15 +54,15 @@ class ExploreLoadTest {
         // Leaving and returning builds a new screen, so it gets a new gate. A
         // reader who went away and came back to a stale list would rightly call
         // that a bug of its own.
-        assertTrue(ExploreLoadGate().shouldStart("procomic"))
-        assertTrue(ExploreLoadGate().shouldStart("procomic"))
+        assertTrue(ExploreLoadGate().shouldStart("anyonemanga"))
+        assertTrue(ExploreLoadGate().shouldStart("anyonemanga"))
     }
 
     @Test
     fun `a gate that has not started a source says so`() {
         val gate = ExploreLoadGate()
-        assertFalse(gate.hasStarted("procomic"))
-        gate.shouldStart("procomic")
-        assertTrue(gate.hasStarted("procomic"))
+        assertFalse(gate.hasStarted("anyonemanga"))
+        gate.shouldStart("anyonemanga")
+        assertTrue(gate.hasStarted("anyonemanga"))
     }
 }

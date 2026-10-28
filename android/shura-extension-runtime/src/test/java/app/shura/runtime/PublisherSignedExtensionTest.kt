@@ -108,7 +108,7 @@ class PublisherSignedExtensionTest {
         val policy = TrustPolicy(
             TrustAnchor(digest),
             listOf(TrustedPublisher(
-                digest, listOf("eu.kanade.tachiyomi.extension.ar.procomic"), "procomic")),
+                digest, listOf("eu.kanade.tachiyomi.extension."), "shura-repo")),
         )
         val client = ShuraRepositoryClient(dir, PinnedDigest(digest), policy)
         val failure = runCatching { client.verify(client.entries().single()) }.exceptionOrNull()
@@ -129,7 +129,7 @@ class PublisherSignedExtensionTest {
         // Trusted, but only for someone else's package.
         val policy = TrustPolicy(
             TrustAnchor(digest),
-            listOf(TrustedPublisher(digest, listOf("eu.kanade.tachiyomi.extension.ar.procomic"), "other")),
+            listOf(TrustedPublisher(digest, listOf("eu.kanade.tachiyomi.extension."), "other")),
         )
         val client = ShuraRepositoryClient(dir, PinnedDigest(digest), policy)
         val failure = runCatching { client.verify(client.entries().single()) }.exceptionOrNull()

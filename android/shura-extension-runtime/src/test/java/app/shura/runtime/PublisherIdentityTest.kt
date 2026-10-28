@@ -7,29 +7,24 @@ import org.junit.Test
 /**
  * Who is allowed to sign for what.
  *
- * The build pinned one certificate, and it was the one signing ProComic - a
- * third party's extension. So "Shura's publisher" was "whoever published
- * ProComic", and an extension Shura built could never have loaded: it cannot be
- * signed with a third party's private key.
- *
- * These are the rules that replace that, and the refusals they are supposed to
- * produce. No APK is involved: what is being decided here is which identity is
- * permitted to speak for a package, and a repository has no say in the answer.
+ * No APK is involved: these tests decide which identity is permitted to speak
+ * for a package, and a repository has no say in the answer.
  */
 class PublisherIdentityTest {
 
-    private val procomicKey = "b655a474503f4471fdaf6ba35b9385f71d144669f3c28602c5b60b062022c41d"
+    private val repositoryKey = "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2"
+    private val samplePackage = "eu.kanade.tachiyomi.extension.ar.anyonemanga"
     private val shuraKey = "3".repeat(64)
 
     private fun policy(publishers: List<TrustedPublisher>) =
-        TrustPolicy(TrustAnchor(procomicKey), publishers)
+        TrustPolicy(TrustAnchor(repositoryKey), publishers)
 
     // -- scopes ------------------------------------------------------------
 
     @Test
     fun `a scoped publisher covers its own package and nothing else`() {
-        val publisher = TrustedPublisher(procomicKey, listOf("eu.kanade.tachiyomi.extension.ar.procomic"), "procomic")
-        assertTrue(publisher.covers("eu.kanade.tachiyomi.extension.ar.procomic"))
+        val publisher = TrustedPublisher(repositoryKey, listOf(samplePackage), "shura-repo")
+        assertTrue(publisher.covers(samplePackage))
         assertTrue(!publisher.covers("app.shura.extension.asurascans"))
         assertTrue(!publisher.covers("eu.kanade.tachiyomi.extension.en.somethingelse"))
         // A prefix scope is a prefix, not a substring match.
@@ -51,18 +46,17 @@ class PublisherIdentityTest {
     @Test
     fun `a third-party key cannot sign for a Shura extension`() {
         val policy = policy(listOf(
-            TrustedPublisher(procomicKey, listOf("eu.kanade.tachiyomi.extension.ar.procomic"), "procomic"),
+            TrustedPublisher(repositoryKey, listOf(samplePackage), "shura-repo"),
             TrustedPublisher(shuraKey, listOf("app.shura.extension."), "shura"),
         ))
         assertEquals("shura", policy.publisherFor("app.shura.extension.asurascans").label)
-        assertEquals("procomic",
-            policy.publisherFor("eu.kanade.tachiyomi.extension.ar.procomic").label)
+        assertEquals("shura-repo", policy.publisherFor(samplePackage).label)
     }
 
     @Test
     fun `a third-party key trusted for one package cannot speak for another`() {
         val policy = policy(listOf(
-            TrustedPublisher(procomicKey, listOf("eu.kanade.tachiyomi.extension.ar.procomic"), "procomic"),
+            TrustedPublisher(repositoryKey, listOf(samplePackage), "shura-repo"),
         ))
         val failure = runCatching { policy.publisherFor("eu.kanade.tachiyomi.extension.en.other") }.exceptionOrNull()
         assertTrue("a scoped key was accepted for a package outside its scope", failure != null)
@@ -76,7 +70,7 @@ class PublisherIdentityTest {
         // Exactly the state the shipped app is in: the operator's key is not in
         // Git, so the slot is empty and nothing is invented to fill it.
         val policy = policy(listOf(
-            TrustedPublisher(procomicKey, listOf("eu.kanade.tachiyomi.extension.ar.procomic"), "procomic"),
+            TrustedPublisher(repositoryKey, listOf(samplePackage), "shura-repo"),
         ))
         val failure = runCatching { policy.publisherFor("app.shura.extension.asurascans") }.exceptionOrNull()
         assertTrue("an unconfigured publisher was silently filled in", failure != null)
@@ -87,7 +81,7 @@ class PublisherIdentityTest {
 
     @Test
     fun `a build pinning nobody refuses everything, and says so`() {
-        val policy = TrustPolicy(TrustAnchor(procomicKey), emptyList())
+        val policy = TrustPolicy(TrustAnchor(repositoryKey), emptyList())
         val failure = runCatching { policy.publisherFor("anything.at.all") }.exceptionOrNull()
         assertTrue(failure != null)
         assertTrue(failure!!.message!!, failure.message!!.contains("No publisher is pinned at all"))
@@ -96,13 +90,13 @@ class PublisherIdentityTest {
     @Test
     fun `the refusal names what is pinned so the reason is diagnosable`() {
         val policy = policy(listOf(
-            TrustedPublisher(procomicKey, listOf("eu.kanade.tachiyomi.extension.ar.procomic"), "procomic"),
+            TrustedPublisher(repositoryKey, listOf(samplePackage), "shura-repo"),
         ))
         val message = runCatching { policy.publisherFor("app.shura.extension.asurascans") }
             .exceptionOrNull()!!.message!!
-        assertTrue(message, message.contains("procomic"))
+        assertTrue(message, message.contains("shura-repo"))
         assertTrue("the pinned publisher should be identifiable",
-            message.contains("eu.kanade.tachiyomi.extension.ar.procomic"))
+            message.contains(samplePackage))
     }
 
     // -- repository data trust is separate ----------------------------------
@@ -115,7 +109,7 @@ class PublisherIdentityTest {
         val policy = policy(listOf(
             TrustedPublisher(shuraKey, listOf("app.shura.extension."), "shura"),
         ))
-        assertEquals(procomicKey, policy.repository.require())
+        assertEquals(repositoryKey, policy.repository.require())
         assertEquals("shura", policy.publisherFor("app.shura.extension.mangadex").label)
     }
 }

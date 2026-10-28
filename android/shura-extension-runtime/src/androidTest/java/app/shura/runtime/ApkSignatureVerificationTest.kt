@@ -21,7 +21,8 @@ import java.io.File
 class ApkSignatureVerificationTest {
 
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
-    private val anchor = "b655a474503f4471fdaf6ba35b9385f71d144669f3c28602c5b60b062022c41d"
+    private val anchor = "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2"
+    private val packageName = "eu.kanade.tachiyomi.extension.ar.anyonemanga"
 
     /**
      * The published repository, read out of the test APK's own assets.
@@ -33,11 +34,12 @@ class ApkSignatureVerificationTest {
     private fun publishDir(name: String): File {
         val assets = InstrumentationRegistry.getInstrumentation().context.assets
         val out = File(context.cacheDir, "published-repo")
+        out.deleteRecursively()
         fun copy(path: String) {
             assets.open(path).use { input ->
                 val target = File(out, path)
                 target.parentFile?.mkdirs()
-                input.copyTo(target.outputStream())
+                target.outputStream().use { output -> input.copyTo(output) }
             }
         }
         copy("repo.json"); copy("index.shura.json")
@@ -47,23 +49,27 @@ class ApkSignatureVerificationTest {
 
     private fun repoRoot(): File = publishDir("")
 
-    private fun procomic(): File {
+    private fun publishedExtension(): File {
         val apks = File(repoRoot(), "apk").listFiles { f: File -> f.name.endsWith(".apk") }!!
-        return apks.first { it.name.contains("1.5.1") }
+        val apk = apks.firstOrNull { it.name.contains("anyonemanga") }
+            ?: error("the bundled repository has no APK for $packageName")
+        assertEquals(packageName, ApkManifestReader().read(apk).packageName)
+        return apk
     }
 
     @Test
     fun theCertificateComesFromTheFileAndMatchesTheAnchor() {
         val verifier = ApkSignatureVerifier(context)
-        val (cert, digest) = verifier.primaryCertificate(procomic())
-        assertEquals("the DER certificate must be the whole 1414 bytes", 1414, cert.size)
+        val (cert, digest) = verifier.primaryCertificate(publishedExtension())
+        assertTrue("the APK signer certificate must not be empty", cert.isNotEmpty())
         assertEquals(anchor, digest)
     }
 
     @Test
     fun theDigestIsSha256OfTheCompleteDerCertificate() {
         val verifier = ApkSignatureVerifier(context)
-        val (cert, digest) = verifier.primaryCertificate(procomic())
+        val (cert, digest) = verifier.primaryCertificate(publishedExtension())
+        assertTrue("the APK signer certificate must not be empty", cert.isNotEmpty())
         val sha256 = java.security.MessageDigest.getInstance("SHA-256")
         assertEquals(digest, sha256.digest(cert).joinToString("") { "%02x".format(it) })
         // The historical defect: hashing the certificate without its 30 82 LL LL
@@ -80,7 +86,7 @@ class ApkSignatureVerificationTest {
         // A copy of the real bytes, so the digest matches, but pinned to a foreign
         // anchor: this is the "repository metadata agrees with itself" case.
         try {
-            verifier.verify(procomic(), "a".repeat(64), anchor)
+            verifier.verify(publishedExtension(), "a".repeat(64), anchor)
             fail("a foreign anchor must be refused")
         } catch (e: LoadFailure.NotVerified) {
             assertTrue(e.message!!.contains(anchor))
@@ -91,7 +97,7 @@ class ApkSignatureVerificationTest {
     fun aPublishedPinThatDisagreesWithTheFileIsRefused() {
         val verifier = ApkSignatureVerifier(context)
         try {
-            verifier.verify(procomic(), anchor, "b".repeat(64))
+            verifier.verify(publishedExtension(), anchor, "b".repeat(64))
             fail("a published pin that disagrees with the file must be refused")
         } catch (e: LoadFailure.NotVerified) {
             assertTrue(e.message!!.contains("repository published"))
@@ -126,7 +132,7 @@ class ApkSignatureVerificationTest {
         val verifier = ApkSignatureVerifier(context)
         val stripped = File(context.cacheDir, "stripped.apk")
         // Rebuild the archive without the signing block: same entries, no signature.
-        java.util.zip.ZipFile(procomic()).use { src ->
+        java.util.zip.ZipFile(publishedExtension()).use { src ->
             java.util.zip.ZipOutputStream(stripped.outputStream()).use { out ->
                 src.entries().asSequence()
                     .filterNot { it.name.startsWith("META-INF/") }

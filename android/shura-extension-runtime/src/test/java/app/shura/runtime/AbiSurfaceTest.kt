@@ -31,8 +31,8 @@ class AbiSurfaceTest {
         // No assumeTrue: a missing artifact is a failure with a clear reason, not a
         // silent skip that makes these assertions vacuous.
         assertTrue("no published APK under $dir", !files.isNullOrEmpty())
-        return files!!.firstOrNull { it.name.contains("1.5.1") }
-            ?: files.first()
+        return files!!.firstOrNull { it.name.contains("anyonemanga") }
+            ?: error("the bundled repository has no AnyoneManga APK under $dir")
     }
 
     /**
@@ -47,6 +47,11 @@ class AbiSurfaceTest {
         "Leu/kanade/tachiyomi/source/model/SManga;",
         "Leu/kanade/tachiyomi/source/model/SChapter;",
         "Leu/kanade/tachiyomi/source/model/Page;",
+        "Leu/kanade/tachiyomi/source/model/Filter\$Select;",
+        "Leu/kanade/tachiyomi/source/model/Filter\$Header;",
+        "Leu/kanade/tachiyomi/source/model/Filter\$Separator;",
+        "Leu/kanade/tachiyomi/network/HttpException;",
+        "Leu/kanade/tachiyomi/network/OkHttpExtensionsKt;",
         "Leu/kanade/tachiyomi/source/online/HttpSource;",
         "Leu/kanade/tachiyomi/network/NetworkHelper;",
     )
@@ -99,26 +104,18 @@ class AbiSurfaceTest {
     @Test
     fun hostSuppliesEveryRequiredMember() {
         val strings = dexStrings()
-        // These are the actual host-owned members the published extension calls in
-        // the live DEX: the source base must offer getNetwork and the network
-        // helper must expose getClient. We assert against the real bytecode rather
-        // than a speculative broader ABI list that includes synthetic Kotlin
-        // helpers the extension never resolves.
-        // This is the real published-bytecode surface for the shipped repo. It is
-        // intentionally narrower than a theoretical "all Tachiyomi types" list:
-        // these are the names the DEX actually references, and the host must
-        // supply each one for the extension to resolve at runtime.
+        // These are the member names referenced by the current AnyoneManga DEX.
+        // AbiSignatureTest checks their complete JVM descriptors.
         val required = mapOf(
             "Leu/kanade/tachiyomi/network/NetworkHelper;" to listOf("getClient"),
+            "Leu/kanade/tachiyomi/network/OkHttpExtensionsKt;" to listOf("await", "awaitSuccess"),
             "Leu/kanade/tachiyomi/source/model/SManga;" to listOf(
-                "getUrl", "setUrl", "setTitle", "getAuthor", "setAuthor",
-                "setGenre", "setDescription", "setStatus", "setThumbnail_url",
-                "create",
-            ),
-            "Leu/kanade/tachiyomi/source/model/SChapter;" to listOf(
-                "getUrl", "setUrl", "getName", "setName", "create",
+                "getDescription", "getMemo", "getUrl", "setArtist", "setAuthor",
+                "setDescription", "setGenre", "setInitialized", "setMemo",
+                "setStatus", "setThumbnail_url", "setTitle", "setUrl",
             ),
             "Leu/kanade/tachiyomi/source/model/Page;" to listOf("getImageUrl"),
+            "Leu/kanade/tachiyomi/source/model/Filter\$Select;" to listOf("getState"),
             "Leu/kanade/tachiyomi/source/online/HttpSource;" to listOf("getNetwork"),
         )
         for ((descriptor, members) in required) {
