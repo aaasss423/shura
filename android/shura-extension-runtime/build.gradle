@@ -33,7 +33,6 @@ tasks.matching { it.name ==~ /androidTest.*Assets/ || it.name ==~ /merge.*Androi
 afterEvaluate {
     tasks.matching { it.name ==~ /connected.*AndroidTest/ }.configureEach {
         dependsOn 'stagePublishedRepoForTests'
-        systemProperty 'shura.repo.dir', publishedRepo.absolutePath
     }
 }
 
