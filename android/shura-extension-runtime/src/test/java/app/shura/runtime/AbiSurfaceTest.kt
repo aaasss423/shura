@@ -160,6 +160,21 @@ class AbiSurfaceTest {
     }
 
     @Test
+    fun httpSourceProvidesTheDelegatedHeadersFieldExpectedByPublishedExtensions() {
+        val httpSource = Class.forName("eu.kanade.tachiyomi.source.online.HttpSource")
+        val delegate = httpSource.getDeclaredField("headers\$delegate")
+        assertTrue(
+            "HttpSource.headers\$delegate must be Kotlin Lazy for the published extension ABI",
+            kotlin.Lazy::class.java.isAssignableFrom(delegate.type),
+        )
+        assertEquals(
+            "headers must expose the JVM getter called by published extensions",
+            okhttp3.Headers::class.java,
+            httpSource.getMethod("getHeaders").returnType,
+        )
+    }
+
+    @Test
     fun abiGateReadsTheApkNotTheIndex() {
         val meta = ApkManifestReader().read(apk())
         assertTrue(meta.packageName.startsWith("eu.kanade.tachiyomi.extension."))

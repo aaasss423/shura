@@ -43,7 +43,7 @@ abstract class HttpSource : CatalogueSource {
     /** The shared, host-owned client. Extensions must not construct their own. */
     open val client: OkHttpClient get() = NetworkHelper.client
 
-    open fun getHeaders(): okhttp3.Headers = okhttp3.Headers.Builder().build()
+    open val headers: okhttp3.Headers by lazy { okhttp3.Headers.Builder().build() }
     open fun headersBuilder(): okhttp3.Headers.Builder = okhttp3.Headers.Builder()
 
     /** Raw GET against the source's base URL. Overridden per extension. */
