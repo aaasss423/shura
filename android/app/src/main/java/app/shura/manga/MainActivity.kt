@@ -100,16 +100,9 @@ private fun ShuraApp() {
 
     val sourceHost = remember {
         SourceHost().apply {
-            // MangaDex stays as the built-in adapter; extensions from the
-            // repository are added beside it, never instead of it.
+            // The built-in source is ready immediately. Reading and loading
+            // extension APKs is deferred to the background startup effect.
             register(MangaDexSource())
-            // Every registered repository, the bundled one first: a repository
-            // added by URL has its own directory and its own index, and reading
-            // only filesDir/repo meant nothing added by URL could ever be
-            // reached even after it had been verified.
-            app.shura.manga.ShuraRepository.allDirectories(context)
-                .flatMap { dir -> ShuraExtensions.load(context, dir) }
-                .forEach { outcome -> outcome.source?.let { register(it) } }
         }
     }
 
@@ -288,46 +281,38 @@ private fun ShuraApp() {
     // Bumped when extensions are removed, so the source list is re-read.
     var sourcesVersion by remember { mutableIntStateOf(0) }
 
-    // The repository this build ships, unpacked once so the store has real
-    // extensions to show instead of an empty list.
-    // Unpacks the repository this build ships.
-    //
-    // Entirely off the main thread. This copies about 4.6 MB of assets out of
-    // the APK and installs them, and it was running inline - so the app froze
-    // for several seconds on every fresh install, long enough for Android to
-    // declare it not responding and close it. The symptom was "I open it and
-    // after a few seconds it is gone", not a crash, which is why it looked
-    // like the app was quitting on its own.
-    //
-    // Nothing here can take the app down: a failure leaves the repository
-    // alone and is reported in Settings instead, because extensions are not
-    // worth losing the app over.
+    // Repository extraction and extension APK verification/class loading can
+    // involve several megabytes of disk I/O. Keep the built-in source available
+    // while this runs away from the UI thread.
     LaunchedEffect(Unit) {
         val outcome = withContext(Dispatchers.IO) {
             runCatching {
-                if (RepositorySeed.seed(context)) {
-                    ShuraRepository.reload(sourceHost, context)
-                } else {
-                    emptyList()
-                }
+                RepositorySeed.seed(context)
+                ShuraRepository.reload(sourceHost, context)
             }
         }
         outcome.onSuccess { failures ->
             repositoryNotice = failures.takeIf { it.isNotEmpty() }?.joinToString("\n")
             storeVersion += 1
+            sourcesVersion += 1
         }.onFailure { error ->
             repositoryNotice = "The bundled extensions could not be prepared: ${error.message}"
+            sourcesVersion += 1
         }
     }
 
 
-    val catalog = remember(storeVersion) { ExtensionCatalog.forBuild(context) }
-    // Every repository, not only the bundled one. `describe(directory)` read the
-    // shipped index only, so a repository added by URL could be listed on the
-    // repositories screen and still contribute nothing here - which is what
-    // made adding one look like it had done nothing at all.
-    val extensions = remember(storeVersion, catalog) {
-        ExtensionCatalog.rowStates(catalog.describeAll())
+    var catalog by remember { mutableStateOf<ExtensionCatalog?>(null) }
+    var extensions by remember {
+        mutableStateOf<List<app.shura.manga.ui.screens.ExtensionRowState>>(emptyList())
+    }
+    LaunchedEffect(storeVersion) {
+        val loaded = withContext(Dispatchers.IO) {
+            val current = ExtensionCatalog.forBuild(context)
+            current to ExtensionCatalog.rowStates(current.describeAll())
+        }
+        catalog = loaded.first
+        extensions = loaded.second
     }
     // Progress and failure text for the row being installed, keyed by package.
     val installState = remember { mutableStateMapOf<String, InstallProgress>() }

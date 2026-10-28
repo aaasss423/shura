@@ -1,9 +1,38 @@
 plugins { id 'com.android.application'; id 'org.jetbrains.kotlin.android'; id 'org.jetbrains.kotlin.plugin.compose' }
 
+def releaseSigning = [
+        storeFile: System.getenv('SHURA_RELEASE_KEYSTORE'),
+        keyAlias: System.getenv('SHURA_RELEASE_KEY_ALIAS'),
+        storePassword: System.getenv('SHURA_RELEASE_STORE_PASSWORD'),
+        keyPassword: System.getenv('SHURA_RELEASE_KEY_PASSWORD'),
+]
+def hasReleaseSigning = releaseSigning.values().every { it?.trim() }
+
 android {
     namespace 'app.shura.manga'
     compileSdk 34
     buildToolsVersion '35.0.0'
+
+    if (hasReleaseSigning) {
+        signingConfigs {
+            release {
+                storeFile file(releaseSigning.storeFile)
+                keyAlias releaseSigning.keyAlias
+                storePassword releaseSigning.storePassword
+                keyPassword releaseSigning.keyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            debuggable false
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+
     defaultConfig {
     applicationId 'app.shura.manga'; minSdk 26; targetSdk 34
     // Bumped so this build installs over the previous one on the same device.
@@ -33,6 +62,18 @@ android {
     buildFeatures { compose true; buildConfig true }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = '17' }
+}
+
+gradle.taskGraph.whenReady { graph ->
+    def releaseBuildRequested = graph.allTasks.any {
+        it.project == project && it.name.toLowerCase().contains('release')
+    }
+    if (releaseBuildRequested && !hasReleaseSigning) {
+        throw new GradleException(
+                'Release builds require SHURA_RELEASE_KEYSTORE, SHURA_RELEASE_KEY_ALIAS, ' +
+                        'SHURA_RELEASE_STORE_PASSWORD, and SHURA_RELEASE_KEY_PASSWORD.'
+        )
+    }
 }
 
 dependencies {

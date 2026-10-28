@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -56,14 +57,14 @@ import java.net.URL
 object ImageStore {
 
     /**
-     * About a quarter of the heap, in KB.
+     * About an eighth of the heap, capped at 24 MiB.
      *
      * Sized against the app's own memory rather than fixed: a low-memory device
      * given a cache sized for a flagship is an out-of-memory kill, which is
      * worse than a slow list.
      */
     private val memory = object : LruCache<String, Bitmap>(
-        ((Runtime.getRuntime().maxMemory() / 1024) / 4).toInt().coerceIn(2 * 1024, 48 * 1024)
+        imageMemoryCacheBudgetKb(Runtime.getRuntime().maxMemory())
     ) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount / 1024
     }
@@ -83,14 +84,15 @@ object ImageStore {
     suspend fun decode(context: Context, source: String, maxEdge: Int): Bitmap? =
         withContext(Dispatchers.IO) {
             try {
-                cached(context, source)?.let { return@withContext it }
+                cached(source)?.let { return@withContext it }
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 open(context, source)?.use { BitmapFactory.decodeStream(it, null, bounds) }
                 if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@withContext null
+                val edge = maxEdge.coerceAtLeast(1)
                 val options = BitmapFactory.Options().apply {
                     inSampleSize = 1
-                    while (bounds.outWidth / inSampleSize > maxEdge ||
-                        bounds.outHeight / inSampleSize > maxEdge
+                    while (bounds.outWidth / inSampleSize > edge ||
+                        bounds.outHeight / inSampleSize > edge
                     ) inSampleSize *= 2
                 }
                 val decoded = open(context, source)?.use {
@@ -98,17 +100,15 @@ object ImageStore {
                 }
                 if (decoded != null) put(source, decoded)
                 decoded
-            } catch (failure: Throwable) {
-                // Throwable, not Exception: an out-of-memory kill from a large bitmap
-                // is an Error, so this catch never saw it and the process died with
-                // no screen and no message. A cover that will not decode is a
-                // placeholder, not a crash.
-                if (failure is OutOfMemoryError) memory.evictAll()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: OutOfMemoryError) {
+                memory.evictAll()
+                null
+            } catch (failure: Exception) {
                 null
             }
         }
-
-    private fun cached(context: Context, source: String): Bitmap? = null
 
     private fun open(context: Context, source: String) = try {
         if (source.startsWith("http")) {
@@ -155,6 +155,9 @@ object ImageStore {
         }
     }
 }
+
+internal fun imageMemoryCacheBudgetKb(maxMemoryBytes: Long): Int =
+    (maxMemoryBytes / 1024 / 8).coerceIn(2 * 1024L, 24 * 1024L).toInt()
 
 /**
  * A cover, cancellable and retryable.
