@@ -123,57 +123,7 @@ jobs:
           # Everything here runs while the emulator is still alive: this action
           # kills the device when the script exits, so adb logcat and the JUnit
           # XML have to be captured in here, not in a later step.
-          script: |
-            bash <<'BASH'
-            set -uo pipefail
-            cd "$GITHUB_WORKSPACE/android" || exit 1
-            mkdir -p "$GITHUB_WORKSPACE/diagnostics"
-            adb logcat -c || echo 'Could not clear logcat before the test run.'
-            gradle --no-daemon -Dorg.gradle.jvmargs="-Xmx1536m -Dfile.encoding=UTF-8" \
-              :app:connectedDebugAndroidTest \
-              :shura-extension-runtime:connectedDebugAndroidTest \
-              2>&1 | tee "$GITHUB_WORKSPACE/android-emulator-gradle.log"
-            status=${PIPESTATUS[0]}
-            cp "$GITHUB_WORKSPACE/android-emulator-gradle.log" \
-              "$GITHUB_WORKSPACE/diagnostics/" 2>/dev/null || true
-            find app/build shura-extension-runtime/build -name '*.xml' -path '*connected*' \
-              -exec cp --parents {} "$GITHUB_WORKSPACE/diagnostics/" \; 2>/dev/null || true
-            find app/build/reports shura-extension-runtime/build/reports -type f \
-              -exec cp --parents {} "$GITHUB_WORKSPACE/diagnostics/" \; 2>/dev/null || true
-            adb logcat -d -v threadtime > "$GITHUB_WORKSPACE/diagnostics/logcat.txt" 2>&1 || \
-              echo 'adb logcat failed: no device' > "$GITHUB_WORKSPACE/diagnostics/logcat.txt"
-            {
-              echo "### Emulator: App startup and real extension load"
-              echo
-              echo "gradle exit status: $status"
-              echo
-              echo '#### Gradle tail'
-              echo '```'
-              tail -60 "$GITHUB_WORKSPACE/android-emulator-gradle.log"
-              echo '```'
-              echo
-              if find "$GITHUB_WORKSPACE/diagnostics" -name 'TEST-*.xml' | grep -q .; then
-                echo '#### Per-test results'
-                echo '```'
-                python3 "$GITHUB_WORKSPACE/scripts/junit_summary.py" \
-                  $(find "$GITHUB_WORKSPACE/diagnostics" -name 'TEST-*.xml') || true
-                echo '```'
-                for f in $(find "$GITHUB_WORKSPACE/diagnostics" -name 'TEST-*.xml'); do
-                  python3 "$GITHUB_WORKSPACE/scripts/junit_summary.py" "$f" \
-                    | grep -E '^   (FAIL|ERROR)' \
-                    | sed 's/^   //' \
-                    | while read -r line; do
-                        echo "::error title=Instrumentation test failed::${line}"
-                      done
-                done
-              else
-                echo '#### No JUnit XML'
-                echo 'The instrumentation produced no XML, so no test reported results.'
-                echo 'See the Gradle tail and logcat above.'
-              fi
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit "$status"
-            BASH
+          script: bash "$GITHUB_WORKSPACE/scripts/android-emulator-test.sh"
       - name: Upload the diagnostics
         if: always()
         uses: actions/upload-artifact@v4

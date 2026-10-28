@@ -1,6 +1,6 @@
 package app.shura.manga
 
-import androidx.compose.ui.test.assertExists
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import org.junit.Rule
@@ -13,6 +13,6 @@ class AppStartupTest {
 
     @Test
     fun firstScreenIsVisibleAfterActivityLaunch() {
-        compose.onNodeWithText("الرئيسية").assertExists()
+        compose.onNodeWithText("الرئيسية").assertIsEnabled()
     }
 }
