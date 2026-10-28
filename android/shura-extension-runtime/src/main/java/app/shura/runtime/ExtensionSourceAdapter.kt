@@ -8,12 +8,13 @@ import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.network.NetworkHelper
 import okhttp3.Request
+import java.lang.reflect.Method
 
 /**
  * Adapts a loaded extension onto Shura's own `app.shura.source.ShuraSource`.
  *
  * The method names and signatures are not invented: they were read out of the
- * shipped ProComic DEX, which declares
+ * shipped AnyoneManga DEX, which declares
  *
  *   searchMangaRequest(int page, String query, FilterList) -> okhttp3.Request
  *   searchMangaParse(okhttp3.Response) -> MangasPage
@@ -99,18 +100,11 @@ class ExtensionSourceAdapter(
     }
 
     private fun callRequest(method: String, types: Array<Class<*>>, args: Array<out Any?>): Any? {
-        val m = source.javaClass.methods.firstOrNull { it.name == method && it.parameterTypes.contentEquals(types) }
-            ?: throw NoSuchMethodException(
-                "${source.javaClass.name}.$method(${types.joinToString { it.simpleName }}) is not declared; " +
-                    "the extension was not built against this ABI"
-            )
-        return m.invoke(source, *args)
+        return findSourceMethod(method, types).invoke(source, *args)
     }
 
     private fun callParse(method: String, body: okhttp3.ResponseBody): Any? {
-        val m = source.javaClass.methods.firstOrNull {
-            it.name == method && it.parameterTypes.contentEquals(arrayOf(okhttp3.Response::class.java))
-        } ?: throw NoSuchMethodException("${source.javaClass.name}.$method(okhttp3.Response) is not declared")
+        val m = findSourceMethod(method, arrayOf(okhttp3.Response::class.java))
         // The ABI takes a Response, so the body is carried in a response whose
         // body has already been read; the extension parses the same bytes.
         val response = okhttp3.Response.Builder()
@@ -125,6 +119,27 @@ class ExtensionSourceAdapter(
         } finally {
             body.close()
         }
+    }
+
+    private fun findSourceMethod(name: String, parameterTypes: Array<Class<*>>): Method {
+        var type: Class<*>? = source.javaClass
+        while (type != null) {
+            val method = type.declaredMethods.firstOrNull {
+                it.name == name &&
+                    it.parameterTypes.contentEquals(parameterTypes) &&
+                    (java.lang.reflect.Modifier.isProtected(it.modifiers) ||
+                        java.lang.reflect.Modifier.isPublic(it.modifiers))
+            }
+            if (method != null) {
+                method.isAccessible = true
+                return method
+            }
+            type = type.superclass
+        }
+        throw NoSuchMethodException(
+            "${source.javaClass.name}.$name(${parameterTypes.joinToString { it.simpleName }}) " +
+                "is not declared; the extension was not built against this ABI"
+        )
     }
 
     private fun SManga.toSummary() = app.shura.source.MangaSummary(url, title, thumbnail_url.takeIf { it.isNotBlank() })

@@ -76,8 +76,8 @@ jobs:
       - run: gradle --no-daemon :app:assembleDebug :app:testDebugUnitTest :shura-source-api:testDebugUnitTest :shura-source-host:testDebugUnitTest :app:compileDebugAndroidTestKotlin
         working-directory: android
 
-  # Real device run: the extension runtime can only be proved by loading the
-  # published ProComic APK and searching through it. That needs an Android
+  # Real device run: the extension runtime can only be proved by loading a
+  # published Mihon-compatible APK and searching through it. That needs an Android
   # runtime, so it runs on an emulator here rather than being left unverified.
   android-emulator:
     runs-on: ubuntu-latest
