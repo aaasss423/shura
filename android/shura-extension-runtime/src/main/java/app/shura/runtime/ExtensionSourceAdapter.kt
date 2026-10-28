@@ -124,15 +124,19 @@ class ExtensionSourceAdapter(
     private fun findSourceMethod(name: String, parameterTypes: Array<Class<*>>): Method {
         var type: Class<*>? = source.javaClass
         while (type != null) {
-            val method = type.declaredMethods.firstOrNull {
-                it.name == name &&
-                    it.parameterTypes.contentEquals(parameterTypes) &&
-                    (java.lang.reflect.Modifier.isProtected(it.modifiers) ||
-                        java.lang.reflect.Modifier.isPublic(it.modifiers))
+            val method = try {
+                type.getDeclaredMethod(name, *parameterTypes)
+            } catch (_: NoSuchMethodException) {
+                null
             }
             if (method != null) {
-                method.isAccessible = true
-                return method
+                val modifiers = method.modifiers
+                if (java.lang.reflect.Modifier.isProtected(modifiers) ||
+                    java.lang.reflect.Modifier.isPublic(modifiers)
+                ) {
+                    method.isAccessible = true
+                    return method
+                }
             }
             type = type.superclass
         }
