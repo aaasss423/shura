@@ -28,7 +28,7 @@ class TrustAnchorIndependenceTest {
     @get:Rule
     val folder = TemporaryFolder()
 
-    private val genuine = "b655a474503f4471fdaf6ba35b9385f71d144669f3c28602c5b60b062022c41d"
+    private val genuine = "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2"
     private val attacker = "a".repeat(64)
 
     private fun sha256(file: File): String {
@@ -104,7 +104,8 @@ class TrustAnchorIndependenceTest {
         // the repository itself is rejected. The APK's own signature is then
         // required separately, which cannot run off-device.
         assertEquals(genuine, client.trustAnchor())
-        assertTrue(client.entries().any { it.pkg.endsWith("procomic") })
+        assertTrue(client.entries().isNotEmpty())
+        assertTrue(client.entries().any { it.pkg.startsWith("eu.kanade.tachiyomi.extension.") })
     }
 
     @Test
@@ -131,6 +132,6 @@ class TrustAnchorIndependenceTest {
  */
 private fun anchorPolicy(digest: String?) =
     TrustPolicy(TrustAnchor(digest), listOf(TrustedPublisher(
-        "a".repeat(64), listOf("eu.kanade.tachiyomi.extension.ar.procomic"), "unused")))
+        "a".repeat(64), listOf("eu.kanade.tachiyomi.extension."), "unused")))
 
 }

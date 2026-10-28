@@ -2,6 +2,8 @@
 //
 // The DEX requires exactly:
 //   eu.kanade.tachiyomi.source.online.HttpSource.<init>() -> void
+//   eu.kanade.tachiyomi.source.online.HttpSource.getNetwork() ->
+//       eu.kanade.tachiyomi.network.NetworkHelper
 //   eu.kanade.tachiyomi.network.NetworkHelper.getClient() -> okhttp3.OkHttpClient
 //   eu.kanade.tachiyomi.network.RequestsKt.GET$default(String, Headers,
 //       CacheControl, int, Object) -> okhttp3.Request
@@ -30,12 +32,19 @@ import okhttp3.Request
  */
 abstract class HttpSource : CatalogueSource {
     abstract val baseUrl: String
+    override val id: Long get() = 0L
     open val versionId: Int = 1
     abstract override val lang: String
     abstract override val name: String
 
+    /** The shared host network surface expected by the published extensions. */
+    open val network: NetworkHelper get() = NetworkHelper
+
     /** The shared, host-owned client. Extensions must not construct their own. */
     open val client: OkHttpClient get() = NetworkHelper.client
+
+    open fun getHeaders(): okhttp3.Headers = okhttp3.Headers.Builder().build()
+    open fun headersBuilder(): okhttp3.Headers.Builder = okhttp3.Headers.Builder()
 
     /** Raw GET against the source's base URL. Overridden per extension. */
     open fun request(path: String): Request = Request.Builder().url(baseUrl + path).build()

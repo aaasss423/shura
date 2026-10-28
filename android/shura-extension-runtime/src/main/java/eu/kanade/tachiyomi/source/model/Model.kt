@@ -21,12 +21,14 @@
 package eu.kanade.tachiyomi.source.model
 
 import android.net.Uri
+import kotlinx.serialization.json.JsonObject
 
 /** Series metadata. `status` is an int on the wire; see the file header. */
 open class SManga {
     var url: String = ""
     var title: String = ""
     var author: String = ""
+    var artist: String = ""
     var genre: String = ""
     var description: String = ""
     var thumbnail_url: String = ""
@@ -44,7 +46,14 @@ open class SChapter {
     var name: String = ""
     var date_upload: Long = 0
     var chapter_number: Float = -1f
+    private var memoValue: Int = 0
     var scanlator: String = ""
+
+    fun setMemo(value: JsonObject) {
+        memoValue = value.toString().hashCode()
+    }
+
+    fun getMemo(): Int = memoValue
 
     companion object {
         @JvmStatic fun create(): SChapter = SChapter()
@@ -110,4 +119,16 @@ class FilterList {
     constructor(filters: List<Filter>) {
         list = filters.toList()
     }
+
+    operator fun iterator(): Iterator<Filter> = list.iterator()
+}
+
+class SMangaUpdate(
+    val manga: SManga,
+    val chapters: List<SChapter>,
+) {
+    @Suppress("unused")
+    val mangaValue: SManga get() = manga
+    @Suppress("unused")
+    val chaptersValue: List<SChapter> get() = chapters
 }

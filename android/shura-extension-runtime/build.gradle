@@ -41,6 +41,7 @@ dependencies {
     // so the host supplies the library. Apache-2.0; this is the transitive
     // compatibility layer only and carries no part of any other project.
     api 'com.squareup.okhttp3:okhttp:4.12.0'
+    api 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.1'
     api project(':shura-source-api')
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1'
     testImplementation 'junit:junit:4.13.2'

@@ -14,34 +14,9 @@ import java.io.File
  * never instead of it, so a failing extension cannot take the other sources
  * down with it. Every load failure is surfaced in the Sources tab.
  *
- * ## Two identities, not one
- *
- * This build previously pinned a single certificate, and that certificate was
- * the one signing `eu.kanade.tachiyomi.extension.ar.procomic` - an extension
- * downloaded from a third party's GitHub releases. So the app's trust model
- * said "Shura's publisher is whoever published ProComic", and any extension
- * Shura built itself could never load: it cannot be signed with a third
- * party's private key.
- *
- * The two are now separate. [REPOSITORY_ANCHOR] says who may speak for the
- * repository. [publishers] says whose extensions this build will run, each
- * scoped to the packages it was granted. A key trusted for one third-party
- * extension cannot mint another, and cannot sign for a `app.shura.extension.*`
- * package.
- *
- * ## The Shura publisher key is not configured
- *
- * [SHURA_PUBLISHER_CERTIFICATE] is empty, and that is deliberate rather than
- * unfinished: the key is the operator's, it is held out of Git, and no
- * substitute was invented for it. While it is empty, extensions Shura built are
- * refused by name with a message saying why - which is the correct outcome, and
- * strictly safer than falling back to a third party's certificate.
- *
- * Provisioning it is an explicit act and never a source edit. The build reads
- * the digest from `-Pshura.publisherCert=<64 hex>` or `SHURA_PUBLISHER_CERT`
- * in the environment, so the value lives with the key and not in this
- * repository. It is checked against the APK at load, so a wrong value refuses
- * rather than trusts.
+ * The repository is generic and source-agnostic: the app trusts the repository
+ * anchor and the package scopes it is explicitly configured to accept, rather
+ * than assuming a single extension or a single upstream publisher.
  */
 object ShuraExtensions {
 
@@ -54,7 +29,7 @@ object ShuraExtensions {
      * the constant and every extension is refused rather than silently believed.
      */
     const val TRUSTED_REPOSITORY_ANCHOR: String =
-        "b655a474503f4471fdaf6ba35b9385f71d144669f3c28602c5b60b062022c41d"
+        "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2"
 
     /**
      * The SHA-256 of the certificate Shura signs its own extensions with.
@@ -69,16 +44,15 @@ object ShuraExtensions {
      * Third-party extensions this build will run, each limited to the packages
      * it was granted.
      *
-     * `procomic` is the extension this repository has always carried, taken from
-     * `github:lonevertex/mihon-extension-ar-procomic` releases and signed by
-     * that project's own certificate. Pinning it to that one package keeps the
-     * existing behaviour working without letting the key sign for anything else.
+     * The shipped repository is generic and published under the Shura trust
+     * anchor, so the allowed scope covers the package family the real repository
+     * actually publishes instead of hard-coding a single upstream extension.
      */
     private val thirdPartyPublishers = listOf(
         TrustedPublisher(
             digest = TRUSTED_REPOSITORY_ANCHOR,
-            packageScopes = listOf("eu.kanade.tachiyomi.extension.ar.procomic"),
-            label = "procomic",
+            packageScopes = listOf("eu.kanade.tachiyomi.extension."),
+            label = "shura-repo",
         ),
     )
 

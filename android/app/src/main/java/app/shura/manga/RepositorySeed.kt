@@ -3,6 +3,7 @@ package app.shura.manga
 import android.content.Context
 import app.shura.runtime.ShuraRepositoryInstaller
 import java.io.File
+import java.io.IOException
 
 /**
  * Puts the repository Shura ships with onto the device, once.
@@ -55,7 +56,8 @@ object RepositorySeed {
     fun seed(context: Context): Boolean {
         if (!isPresent(context)) return false
         val target = ShuraRepository.directory(context)
-        val shipped = readAsset(context, "index.shura.json") ?: return false
+        val shipped = readAsset(context, "index.shura.json")
+            ?: throw IOException("the bundled repository index could not be read")
         val installed = File(target, ExtensionCatalog.INDEX_FILE)
             .takeIf { it.isFile }?.readText()
         if (installed == shipped) return false
@@ -68,10 +70,14 @@ object RepositorySeed {
         val staging = File(context.cacheDir, "repository-seed")
         staging.deleteRecursively()
         return try {
-            copyAssetTree(context, ASSET_ROOT, staging)
-            ShuraRepositoryInstaller.install(staging, target).ok
-        } catch (_: Exception) {
-            false
+            if (!copyAssetTree(context, ASSET_ROOT, staging)) {
+                throw IOException("the bundled repository could not be copied")
+            }
+            val report = ShuraRepositoryInstaller.install(staging, target)
+            if (!report.ok) {
+                throw IOException(report.refused ?: "the bundled repository was refused")
+            }
+            true
         } finally {
             staging.deleteRecursively()
         }
