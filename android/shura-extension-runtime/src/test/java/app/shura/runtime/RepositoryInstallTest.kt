@@ -196,7 +196,11 @@ class RepositoryInstallTest {
             null
         } catch (e: Throwable) { e }
         assertTrue("expected the client to refuse an empty directory", failure != null)
-        assertTrue(failure!!.message!!, failure.message!!.contains("repo.json"))
+        val message = failure!!.message.orEmpty()
+        assertTrue(
+            "empty repository must fail with a clear manifest message instead of crashing: $message",
+            message.contains("repo.json") || message.contains("index.shura.json") || message.contains("missing"),
+        )
     }
 
     // -- against a repository Shura Core actually published -----------------

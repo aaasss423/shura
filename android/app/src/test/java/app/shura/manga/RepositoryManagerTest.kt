@@ -5,6 +5,8 @@ import app.shura.runtime.TrustPolicy
 import app.shura.runtime.TrustedPublisher
 import app.shura.manga.ui.Strings
 import app.shura.manga.ui.theme.UiLanguage
+import org.json.JSONArray
+import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -52,8 +54,11 @@ class RepositoryManagerTest {
     /** The repository this build ships, and therefore the one it trusts. */
     private val shipped = File("src/main/assets/repository")
 
-    /** The publisher's own output directory, when this checkout has one. */
-    private val published = File("../../repo")
+    /** A deliberately mismatched repository: the build pins one anchor, and the
+     *  test repo must be different so the refusal branch is exercised without
+     *  depending on a separate checkout being present.
+     */
+    private val foreignAnchor = "f".repeat(64)
 
     private var server: LoopbackRepositoryServer? = null
 
@@ -199,10 +204,33 @@ class RepositoryManagerTest {
         assertEquals(1, manager.list().size)
     }
 
+    private fun foreignRepository(): File {
+        val root = folder.newFolder("foreign-repo")
+        val index = JSONObject()
+            .put("packages", JSONArray().put(
+                JSONObject()
+                    .put("pkg", "eu.kanade.tachiyomi.extension.ar.procomic")
+                    .put("version", "1.0")
+                    .put("lang", "ar")
+                    .put("identity", "eu.kanade.tachiyomi.extension.ar.procomic|1.0")
+                    .put("apk", "sample.apk")
+                    .put("artifact_sha256", "a".repeat(64))
+                    .put("signing_certificate_sha256", foreignAnchor)
+                    .put("index_version_code", 1)
+                    .put("index_extension_lib", "1.0"),
+            ))
+        val repo = JSONObject()
+            .put("meta", JSONObject().put("name", "foreign").put("signingKeyFingerprint", foreignAnchor))
+        File(root, "apk").mkdirs()
+        File(root, "apk/sample.apk").writeBytes(byteArrayOf(1, 2, 3))
+        File(root, "index.shura.json").writeText(index.toString())
+        File(root, "repo.json").writeText(repo.toString())
+        return root
+    }
+
     @Test
     fun `a repository that fails the anchor check is refused and never added`() {
-        assumeTrue("this checkout has no publisher output at $published", File(published, "repo.json").isFile)
-        val serving = serve(published)
+        val serving = serve(foreignRepository())
         val manager = manager()
 
         val outcome = manager.add(serving.base)
@@ -231,8 +259,7 @@ class RepositoryManagerTest {
         val manager = manager()
         val good = manager.add(trusted.base) as RepositoryOutcome.Registered
 
-        assumeTrue("this checkout has no publisher output at $published", File(published, "repo.json").isFile)
-        val other = serve(published)
+        val other = serve(foreignRepository())
 
         val refused = manager.add(other.base) as? RepositoryOutcome.Refused
         assertNotNull("a refused repository was registered", refused)

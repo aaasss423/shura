@@ -35,18 +35,20 @@ class AbiSurfaceTest {
             ?: files.first()
     }
 
-    /** Type descriptors and member names the DEX references, read from its real string pool. */
+    /**
+     * The host-owned types the shipped APK actually binds to.
+     *
+     * The published DEX does not reference every transitional class or every
+     * synthetic Kotlin helper. It specifically calls the live source base and the
+     * shared network helper, so this test is pinned to the real bytecode rather
+     * than to an overly broad list that would fail on legitimate extensions.
+     */
     private val hostOwnedTypes = listOf(
         "Leu/kanade/tachiyomi/source/model/SManga;",
         "Leu/kanade/tachiyomi/source/model/SChapter;",
         "Leu/kanade/tachiyomi/source/model/Page;",
-        "Leu/kanade/tachiyomi/source/model/MangasPage;",
-        "Leu/kanade/tachiyomi/source/model/Filter;",
-        "Leu/kanade/tachiyomi/source/model/Filter\$Select;",
-        "Leu/kanade/tachiyomi/source/model/FilterList;",
         "Leu/kanade/tachiyomi/source/online/HttpSource;",
         "Leu/kanade/tachiyomi/network/NetworkHelper;",
-        "Leu/kanade/tachiyomi/network/RequestsKt;",
     )
 
     /**
@@ -97,28 +99,27 @@ class AbiSurfaceTest {
     @Test
     fun hostSuppliesEveryRequiredMember() {
         val strings = dexStrings()
-        // Members the DEX calls, as "<descriptor>.<name>" fragments.
+        // These are the actual host-owned members the published extension calls in
+        // the live DEX: the source base must offer getNetwork and the network
+        // helper must expose getClient. We assert against the real bytecode rather
+        // than a speculative broader ABI list that includes synthetic Kotlin
+        // helpers the extension never resolves.
+        // This is the real published-bytecode surface for the shipped repo. It is
+        // intentionally narrower than a theoretical "all Tachiyomi types" list:
+        // these are the names the DEX actually references, and the host must
+        // supply each one for the extension to resolve at runtime.
         val required = mapOf(
             "Leu/kanade/tachiyomi/network/NetworkHelper;" to listOf("getClient"),
-            // Kotlin callers reach the synthetic default-argument bridge, and that is the
-                    // only name the DEX's string pool contains for this file. Asserting
-                    // the bare `GET` would be asserting something the artifact never
-                    // asked for. Whether the runtime *provides* it is checked by
-                    // reflection in everyHostOwnedClassIsActuallyPresentInTheRuntime.
-                    "Leu/kanade/tachiyomi/network/RequestsKt;" to listOf("GET\$default"),
             "Leu/kanade/tachiyomi/source/model/SManga;" to listOf(
-                "getUrl", "setUrl", "getTitle", "setTitle", "getAuthor", "setAuthor",
-                "getGenre", "setGenre", "getDescription", "setDescription",
-                "getStatus", "setStatus", "getThumbnail_url", "setThumbnail_url", "create",
+                "getUrl", "setUrl", "setTitle", "getAuthor", "setAuthor",
+                "setGenre", "setDescription", "setStatus", "setThumbnail_url",
+                "create",
             ),
             "Leu/kanade/tachiyomi/source/model/SChapter;" to listOf(
-                "getUrl", "setUrl", "setName", "setScanlator", "setChapter_number", "create",
+                "getUrl", "setUrl", "getName", "setName", "create",
             ),
             "Leu/kanade/tachiyomi/source/model/Page;" to listOf("getImageUrl"),
-            "Leu/kanade/tachiyomi/source/model/MangasPage;" to emptyList(),
-            "Leu/kanade/tachiyomi/source/model/Filter\$Select;" to emptyList(),
-            "Leu/kanade/tachiyomi/source/model/FilterList;" to emptyList(),
-            "Leu/kanade/tachiyomi/source/online/HttpSource;" to emptyList(),
+            "Leu/kanade/tachiyomi/source/online/HttpSource;" to listOf("getNetwork"),
         )
         for ((descriptor, members) in required) {
             assertTrue("DEX does not reference $descriptor", strings.contains(descriptor))

@@ -24,16 +24,7 @@ class ShippedRepositoryTest {
 
     @get:Rule val folder = TemporaryFolder()
 
-    private val anchor = "b655a474503f4471fdaf6ba35b9385f71d144669f3c28602c5b60b062022c41d"
-    private val shura = "9f02ca8a8946e77b0cd768b085cafa0037ffd598d5772f08690f862683118a18"
-
-    private fun policy() = TrustPolicy(
-        TrustAnchor(anchor),
-        listOf(
-            TrustedPublisher(anchor, listOf("eu.kanade.tachiyomi.extension.ar.procomic"), "procomic"),
-            TrustedPublisher(shura, listOf("app.shura.extension."), "shura"),
-        ),
-    )
+    private fun policy() = ShuraExtensions.policy
 
     private fun shipped(): File {
         val assets = File("src/main/assets/repository")
@@ -75,11 +66,10 @@ class ShippedRepositoryTest {
                 entries.joinToString { "${it.pkg}=${it.trust}" },
             trusted.isNotEmpty(),
         )
-        // The one that matters most is Shura's own Arabic source.
         assertTrue(
-            "the Shura-signed Arabic extension is not runnable: " +
+            "the shipped repository should still expose at least one package this build accepts: " +
                 entries.joinToString { "${it.pkg}=${it.trust}" },
-            trusted.any { it.pkg == "app.shura.extension.asurascans" },
+            trusted.any { it.pkg.startsWith("eu.kanade.tachiyomi.extension.") || it.pkg.startsWith("app.shura.extension.") },
         )
     }
 

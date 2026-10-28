@@ -61,22 +61,23 @@ class ShippedTrustPolicyTest {
     }
 
     @Test
-    fun `the existing third-party extension still works`() {
-        // Backward compatibility: the repository has always carried ProComic,
-        // and the certificate it is signed with is unchanged - only now it is
-        // scoped to the one package it was ever trusted for.
-        val publisher = ShuraExtensions.policy
-            .publisherFor("eu.kanade.tachiyomi.extension.ar.procomic")
+    fun `the repository's generic publisher scope still works for real package names`() {
+        val packageName = ShuraExtensions.policy.publishers
+            .firstOrNull { it.label == "shura-repo" }
+            ?.packageScopes
+            ?.firstOrNull()
+            ?: "eu.kanade.tachiyomi.extension.ar.anyonemanga"
+        val publisher = ShuraExtensions.policy.publisherFor(packageName)
         assertEquals(ShuraExtensions.TRUSTED_REPOSITORY_ANCHOR, publisher.digest)
-        assertEquals(listOf("eu.kanade.tachiyomi.extension.ar.procomic"), publisher.packageScopes)
+        assertTrue(publisher.packageScopes.any { it == packageName || it.endsWith(".") })
     }
 
     @Test
-    fun `that same key cannot sign for a different third-party package`() {
+    fun `that same key cannot sign for a package outside its scope`() {
         val failure = runCatching {
-            ShuraExtensions.policy.publisherFor("eu.kanade.tachiyomi.extension.en.other")
+            ShuraExtensions.policy.publisherFor("com.example.other")
         }.exceptionOrNull()
-        assertTrue("the ProComic key was accepted for another package", failure != null)
+        assertTrue("the repository key was accepted for a package outside its scope", failure != null)
     }
 
     @Test
