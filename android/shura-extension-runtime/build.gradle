@@ -3,7 +3,10 @@ android {
     namespace 'app.shura.runtime'
     compileSdk 34
     buildToolsVersion '35.0.0'
-    defaultConfig { minSdk 26 }
+    defaultConfig {
+        minSdk 26
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+    }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = '17' }
     testOptions { unitTests.all { it.systemProperty 'shura.repo.dir', rootProject.file('../repo').absolutePath } }

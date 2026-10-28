@@ -67,7 +67,7 @@ class ReaderTouchSafetyTest {
         // engine exists. What it must not be is *missing* - an earlier test asserted
         // this chip was disabled, which contradicted the reader's own documented
         // behaviour and would have failed on a real device.
-        compose.onNodeWithText("Translate").assertIsEnabled()
+        compose.onNodeWithText("ترجمة").assertIsEnabled()
     }
 
     @Test
