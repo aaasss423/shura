@@ -26,12 +26,33 @@ data class ApkMetadata(
  */
 class ApkManifestReader {
 
+    private companion object {
+        const val MAX_MANIFEST_BYTES = 1024 * 1024
+    }
+
     fun read(apk: File): ApkMetadata = readBytes(readManifestBytes(apk))
 
     private fun readManifestBytes(apk: File): ByteArray = ZipFile(apk).use { z ->
         val entry = z.getEntry("AndroidManifest.xml")
             ?: error("${apk.name} has no AndroidManifest.xml")
-        z.getInputStream(entry).readBytes()
+        require(entry.size in 1..MAX_MANIFEST_BYTES.toLong()) {
+            "${apk.name} has an invalid or oversized AndroidManifest.xml"
+        }
+        z.getInputStream(entry).use { input ->
+            val output = java.io.ByteArrayOutputStream(entry.size.toInt())
+            val buffer = ByteArray(8 * 1024)
+            var total = 0
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                total += read
+                require(total <= MAX_MANIFEST_BYTES) {
+                    "${apk.name} has an oversized AndroidManifest.xml"
+                }
+                output.write(buffer, 0, read)
+            }
+            output.toByteArray()
+        }
     }
 
     private fun readBytes(data: ByteArray): ApkMetadata {

@@ -35,7 +35,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // Before anything is composed, so the report of a crash that happened on
         // the way out of the last launch is the first thing on screen.
-        CrashReporter.install(this)
+        CrashReporter.install(applicationContext)
         setContent { ShuraApp() }
         CrashReporter.show(this)
     }
@@ -179,15 +179,19 @@ private fun ShuraApp() {
             // built-in address could only ever produce a download failure for
             // everything a URL repository offers.
             val origin = entry.origin
-            val result = installer.install(
-                entry = repositoryPackage,
-                baseUrl = origin?.url ?: REPOSITORY_BASE_URL,
-                directory = origin?.directory ?: app.shura.manga.ShuraRepository.directory(context),
-            ) { done, total ->
-                if (total > 0) {
-                    state[entry.pkg] = InstallProgress(
-                        fraction = (done.toFloat() / total).coerceIn(0f, 1f),
-                    )
+            val result = withContext(Dispatchers.IO) {
+                installer.install(
+                    entry = repositoryPackage,
+                    baseUrl = origin?.url ?: REPOSITORY_BASE_URL,
+                    directory = origin?.directory ?: app.shura.manga.ShuraRepository.directory(context),
+                ) { done, total ->
+                    if (total > 0) {
+                        withContext(Dispatchers.Main.immediate) {
+                            state[entry.pkg] = InstallProgress(
+                                fraction = (done.toFloat() / total).coerceIn(0f, 1f),
+                            )
+                        }
+                    }
                 }
             }
             state[entry.pkg] = when (result) {

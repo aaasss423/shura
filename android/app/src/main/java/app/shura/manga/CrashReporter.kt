@@ -2,6 +2,7 @@ package app.shura.manga
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Context
 import android.os.Build
 import android.os.Bundle
 import java.io.File
@@ -31,9 +32,11 @@ object CrashReporter {
 
     /** The previous handler, so this adds reporting rather than replacing the system. */
     private var previous: Thread.UncaughtExceptionHandler? = null
+    private var installed = false
 
-    fun install(activity: Activity) {
-        if (previous != null) return
+    fun install(context: Context) {
+        if (installed) return
+        val applicationContext = context.applicationContext
         previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
             val report = buildString {
@@ -47,10 +50,11 @@ object CrashReporter {
             // Best effort: if writing the file itself fails there is nothing more
             // to do, and the original handler still runs.
             runCatching {
-                File(activity.filesDir, FILE_NAME).writeText(report)
+                File(applicationContext.filesDir, FILE_NAME).writeText(report)
             }
             previous?.uncaughtException(thread, error)
         }
+        installed = true
     }
 
     /** The last crash, if this launch is after one. */

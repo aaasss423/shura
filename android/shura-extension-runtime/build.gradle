@@ -11,13 +11,10 @@ android {
     kotlinOptions { jvmTarget = '17' }
     testOptions { unitTests.all { it.systemProperty 'shura.repo.dir', rootProject.file('../repo').absolutePath } }
 }
-// The instrumentation tests need the artifacts Shura Core publishes. A device
-// cannot see the build machine's filesystem, and the previous fallback path
-// (/workspace/repo) only exists in the development sandbox, so on CI the tests
-// found no repository at all. The published repository is packaged into the test
-// APK's assets instead, so the tests read exactly the committed bytes wherever
-// they run.
-def publishedRepo = rootProject.file('../repo')
+// Exercise the exact repository bundled into the app, not the separate Core
+// repository at the workspace root. The latter has a different trust anchor
+// and does not contain the APKs this app actually installs.
+def publishedRepo = rootProject.file('app/src/main/assets/repository')
 android {
     sourceSets {
         androidTest {

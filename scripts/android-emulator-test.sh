@@ -21,6 +21,14 @@ find app/build/reports shura-extension-runtime/build/reports -type f \
 adb logcat -d -v threadtime > "$workspace/diagnostics/logcat.txt" 2>&1 || \
   echo 'adb logcat failed: no device' > "$workspace/diagnostics/logcat.txt"
 
+for module in app shura-extension-runtime; do
+  results="$module/build/outputs/androidTest-results/connected/debug"
+  if ! find "$results" -type f -name 'TEST-*.xml' -print -quit | grep -q .; then
+    echo "Missing connected Android instrumentation results for :$module"
+    status=1
+  fi
+done
+
 {
   echo "### Emulator: App startup and real extension load"
   echo

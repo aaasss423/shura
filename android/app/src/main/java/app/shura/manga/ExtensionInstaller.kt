@@ -8,6 +8,7 @@ import app.shura.runtime.TrustPolicy
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import kotlinx.coroutines.CancellationException
 
 /** What happened to one install attempt, in terms the store can show. */
 sealed interface InstallResult {
@@ -51,6 +52,10 @@ class ExtensionInstaller(
     private val policy: TrustPolicy,
 ) {
 
+    private companion object {
+        const val MAX_APK_BYTES = 128L * 1024 * 1024
+    }
+
     /**
      * Reads the certificate out of the APK with Android's own package manager.
      *
@@ -80,7 +85,7 @@ class ExtensionInstaller(
         entry: RepositoryPackage,
         baseUrl: String,
         directory: File = ShuraRepository.directory(context),
-        onProgress: ((Long, Long) -> Unit)? = null,
+        onProgress: (suspend (Long, Long) -> Unit)? = null,
     ): InstallResult {
         val apkDir = File(directory, ExtensionCatalog.APK_DIR).apply { mkdirs() }
         val staged = File.createTempFile("shura-ext-", ".apk", context.cacheDir)
@@ -98,6 +103,9 @@ class ExtensionInstaller(
             val local = File(apkDir, entry.apk.substringAfterLast('/'))
             val declared = when {
                 local.isFile && local.length() > 0L -> {
+                    if (local.length() > MAX_APK_BYTES) {
+                        return InstallResult.Refused("The extension APK is larger than the 128 MiB limit.")
+                    }
                     local.copyTo(staged, overwrite = true)
                     onProgress?.invoke(local.length(), local.length())
                     local.length()
@@ -142,6 +150,8 @@ class ExtensionInstaller(
             val destination = File(apkDir, safeName(entry.apk))
             staged.copyTo(destination, overwrite = true)
             InstallResult.Installed(entry.version)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             InstallResult.DownloadFailed(e.message ?: "the download did not complete")
         } finally {
@@ -155,10 +165,10 @@ class ExtensionInstaller(
         data class Failed(val reason: String) : Head
     }
 
-    private fun fetch(
+    private suspend fun fetch(
         url: URL,
         into: File,
-        onProgress: ((Long, Long) -> Unit)?,
+        onProgress: (suspend (Long, Long) -> Unit)?,
     ): Head {
         var connection: HttpURLConnection? = null
         return try {
@@ -169,21 +179,37 @@ class ExtensionInstaller(
             }
             val code = connection.responseCode
             if (code !in 200..299) return Head.Failed("the server answered $code")
-            val total = connection.contentLengthLong.takeIf { it > 0 } ?: -1L
+            val contentLength = connection.contentLengthLong
+            if (contentLength > MAX_APK_BYTES) {
+                return Head.Failed("the extension APK is larger than the 128 MiB limit")
+            }
+            val total = contentLength.takeIf { it > 0 } ?: -1L
             var done = 0L
+            var lastReportedPercent = -1L
             connection.inputStream.use { input ->
                 into.outputStream().use { output ->
                     val buffer = ByteArray(64 * 1024)
                     while (true) {
                         val read = input.read(buffer)
                         if (read <= 0) break
-                        output.write(buffer, 0, read)
                         done += read
-                        onProgress?.invoke(done, total)
+                        if (done > MAX_APK_BYTES) {
+                            return Head.Failed("the extension APK is larger than the 128 MiB limit")
+                        }
+                        output.write(buffer, 0, read)
+                        if (total > 0) {
+                            val percent = done * 100 / total
+                            if (percent != lastReportedPercent) {
+                                onProgress?.invoke(done, total)
+                                lastReportedPercent = percent
+                            }
+                        }
                     }
                 }
             }
             if (into.length() == 0L) Head.Failed("the download was empty") else Head.Done(total)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             Head.Failed(e.message ?: "the connection failed")
         } finally {

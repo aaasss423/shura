@@ -10,10 +10,12 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.swipeUp
+import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertFalse
 import org.junit.Rule
 import org.junit.Test
+import org.junit.runner.RunWith
 
 /**
  * The reader under touch, and what this application asks the system for.
@@ -23,6 +25,7 @@ import org.junit.Test
  * had not run for several commits, and CI reported the failure only at
  * `compileDebugAndroidTestKotlin`.
  */
+@RunWith(AndroidJUnit4::class)
 class ReaderTouchSafetyTest {
 
     @get:Rule
@@ -71,12 +74,16 @@ class ReaderTouchSafetyTest {
     }
 
     @Test
-    fun noScreenOverlayPermissionIsRequested() {
+    fun noUnneededInstallOrScreenOverlayPermissionsAreRequested() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         @Suppress("DEPRECATION")
         val requested = context.packageManager.getPackageInfo(
             context.packageName, android.content.pm.PackageManager.GET_PERMISSIONS,
         ).requestedPermissions.orEmpty().toSet()
         assertFalse("screen overlay permission must remain absent", "android.permission.SYSTEM_ALERT_WINDOW" in requested)
+        assertFalse(
+            "Shura loads verified extensions in-process and must not request package installation",
+            "android.permission.REQUEST_INSTALL_PACKAGES" in requested,
+        )
     }
 }

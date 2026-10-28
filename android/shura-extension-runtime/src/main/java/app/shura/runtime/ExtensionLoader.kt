@@ -160,9 +160,18 @@ class ExtensionLoader(
         return LoadedExtension(verified, instance, loader)
     }
 
-    private fun sha256(file: File): String =
-        java.security.MessageDigest.getInstance("SHA-256").digest(file.readBytes())
-            .joinToString("") { "%02x".format(it) }
+    private fun sha256(file: File): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
 
     /**
      * Turns the manifest's `tachiyomi.extension.class` into a binary class name.

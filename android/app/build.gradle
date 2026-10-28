@@ -35,10 +35,9 @@ android {
 
     defaultConfig {
     applicationId 'app.shura.manga'; minSdk 26; targetSdk 34
-    // Bumped so this build installs over the previous one on the same device.
-    // The application id and the signing key are both unchanged, so this is an
-    // update and not a second app.
-    versionCode 2; versionName '0.2.0'
+    // The published v0.33.0 APK is versionCode 33. Keep this maintenance build
+    // installable as its update; Android still requires the matching signer.
+    versionCode 34; versionName '0.34.0'
     testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     buildConfigField 'boolean', 'TRANSLATION_ENABLED', 'false'
     // The certificate Shura signs its own extensions with, as a SHA-256.

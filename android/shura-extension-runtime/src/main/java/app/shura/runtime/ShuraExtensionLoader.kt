@@ -24,7 +24,7 @@ object ShuraExtensionLoader {
         val outcomes = mutableListOf<ExtensionOutcome>()
         val entries = try {
             ShuraRepositoryClient(repositoryDir, ApkSignatureVerifier(context), policy).entries()
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             // Reading the index is inside this try on purpose.
             //
             // It was not, and a fresh install has no repository directory yet -
@@ -38,12 +38,16 @@ object ShuraExtensionLoader {
         }
         val client = ShuraRepositoryClient(repositoryDir, ApkSignatureVerifier(context), policy)
         val loader = ExtensionLoader(context)
-        for (entry in entries) {
+        for (entry in entries.groupBy { it.pkg }.values.map { versions ->
+            versions.maxBy { it.indexVersionCode }
+        }) {
             try {
                 val verified = client.verify(entry)
                 val named = verified.copy(sourceClassName = loader.resolveSourceClass(verified.metadata))
                 outcomes += ExtensionOutcome(ExtensionSourceAdapter(loader.load(named)), null)
-            } catch (e: Throwable) {
+            } catch (e: Exception) {
+                outcomes += ExtensionOutcome(null, "${entry.identity}: ${e.message}")
+            } catch (e: LinkageError) {
                 outcomes += ExtensionOutcome(null, "${entry.identity}: ${e.message}")
             }
         }
