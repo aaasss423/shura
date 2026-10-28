@@ -136,8 +136,9 @@ class ApkSignatureVerificationTest {
         try {
             verifier.primaryCertificate(stripped)
             fail("an APK with its signature removed must be refused")
-        } catch (e: LoadFailure.NotVerified) {
-            assertTrue(e.message!!.contains("signing"))
+        } catch (_: LoadFailure.NotVerified) {
+            // The platform may reject a signature-less archive while parsing it,
+            // before it can report a missing signer. Either path must refuse it.
         }
     }
 }

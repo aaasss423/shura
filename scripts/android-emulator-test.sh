@@ -6,7 +6,7 @@ cd "$workspace/android" || exit 1
 mkdir -p "$workspace/diagnostics"
 
 adb logcat -c || echo 'Could not clear logcat before the test run.'
-gradle --no-daemon -Dorg.gradle.jvmargs="-Xmx1536m -Dfile.encoding=UTF-8" \
+gradle --continue --no-daemon -Dorg.gradle.jvmargs="-Xmx1536m -Dfile.encoding=UTF-8" \
   :app:connectedDebugAndroidTest \
   :shura-extension-runtime:connectedDebugAndroidTest \
   2>&1 | tee "$workspace/android-emulator-gradle.log"

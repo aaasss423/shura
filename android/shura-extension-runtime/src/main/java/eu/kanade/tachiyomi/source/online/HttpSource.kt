@@ -35,7 +35,7 @@ abstract class HttpSource : CatalogueSource {
     abstract override val name: String
 
     /** The shared, host-owned client. Extensions must not construct their own. */
-    val client: OkHttpClient get() = NetworkHelper.client
+    open val client: OkHttpClient get() = NetworkHelper.client
 
     /** Raw GET against the source's base URL. Overridden per extension. */
     open fun request(path: String): Request = Request.Builder().url(baseUrl + path).build()

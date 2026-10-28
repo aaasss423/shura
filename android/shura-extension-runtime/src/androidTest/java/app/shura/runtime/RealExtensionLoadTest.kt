@@ -140,9 +140,8 @@ class RealExtensionLoadTest {
             ApkSignatureVerifier(context),
             policy("f".repeat(64)),
         )
-        val entry = client.entries().first { it.pkg.endsWith("procomic") }
         try {
-            client.verify(entry)
+            client.entries()
             org.junit.Assert.fail("a foreign anchor must stop the load")
         } catch (e: LoadFailure.NotVerified) {
             assertTrue(e.message!!.contains("anchor"))
