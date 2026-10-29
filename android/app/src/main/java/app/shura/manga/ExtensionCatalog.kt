@@ -289,5 +289,35 @@ class ExtensionCatalog(
                     versions.maxByOrNull { it.versionCode } ?: versions.first()
                 }
                 .sortedWith(compareBy({ it.identity.lowercase() }, { it.pkg }))
+
+        /**
+         * A name a person can read, out of what the index actually carries.
+         *
+         * The index publishes no display name, only the package and the
+         * language. So the row is named from the package's last segment - the
+         * source's own slug - split at word boundaries and capped, with the
+         * language behind it. The full package stays visible as a fact on the
+         * row; this only decides what the title line says. A package that
+         * cannot be read as a name falls back to the whole identity, never to
+         * nothing.
+         */
+        fun displayName(entry: ExtensionEntry): String {
+            val slug = entry.pkg.split('.').lastOrNull { it.isNotBlank() }
+            val named = slug
+                ?.replace(Regex("(?<=[a-z0-9])(?=[A-Z])"), " ")
+                ?.replace(Regex("[-_]+"), " ")
+                ?.trim()
+                ?.split(' ')
+                ?.filter { it.any { c -> c.isLetterOrDigit() } }
+                ?.map { it.replaceFirstChar { c -> c.uppercase() } }
+                ?.joinToString(" ")
+                ?.takeIf { it.isNotBlank() }
+                ?: entry.identity.ifBlank { entry.pkg }
+            return if (entry.lang.isNotBlank() && entry.lang != "und") {
+                "$named (${entry.lang})"
+            } else {
+                named
+            }
+        }
     }
 }

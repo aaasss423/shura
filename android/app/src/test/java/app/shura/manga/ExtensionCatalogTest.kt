@@ -186,4 +186,46 @@ class ExtensionCatalogTest {
         assertEquals(ExtensionTrust.NOT_DOWNLOADED, entry.trust)
         assertEquals(null, entry.artifactPath)
     }
+
+    private fun entry(pkg: String, lang: String, identity: String = "$pkg|1.0"): ExtensionEntry =
+        ExtensionEntry(
+            pkg = pkg,
+            version = "1.0",
+            lang = lang,
+            identity = identity,
+            trust = ExtensionTrust.TRUSTED,
+            artifactPresent = true,
+            signer = "a",
+            artifactPath = "/tmp/apk",
+            artifactName = "$pkg.apk",
+            publishedSha256 = "d".repeat(64),
+        )
+
+    @Test
+    fun `a row is named from the package slug and language, not the raw identity`() {
+        // The index carries no display name, only the package and the language.
+        // The title a reader sees is the slug split at word boundaries, capped,
+        // with the language behind it - not the whole dotted package string.
+        val entry = entry("eu.kanade.tachiyomi.extension.ar.anyonemanga", "ar")
+        assertEquals("Anyonemanga (ar)", ExtensionCatalog.displayName(entry))
+    }
+
+    @Test
+    fun `camelCase and dash word boundaries in a slug become spaces`() {
+        assertEquals("Mangadex", ExtensionCatalog.displayName(entry("app.shura.extension.mangadex", "")))
+        assertEquals(
+            "Manga Dex",
+            ExtensionCatalog.displayName(entry("eu.kanade.tachiyomi.extension.en.mangaDex", "")),
+        )
+        assertEquals(
+            "Manga Arabia (ar)",
+            ExtensionCatalog.displayName(entry("eu.kanade.tachiyomi.extension.ar.manga-arabia", "ar")),
+        )
+    }
+
+    @Test
+    fun `an unreadable package falls back to the identity, never to nothing`() {
+        val entry = entry("...||", "und", identity = "eu.kanade.tachiyomi.extension.x.y|9")
+        assertEquals("eu.kanade.tachiyomi.extension.x.y|9", ExtensionCatalog.displayName(entry))
+    }
 }

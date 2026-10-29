@@ -182,7 +182,7 @@ private fun ExtensionRow(
     // beside a button - so the store was the one screen that looked like nothing
     // else on the device.
     AppRow(
-        title = entry.identity,
+        title = ExtensionCatalog.displayName(entry),
         // Three facts, in the order a reader asks for them: which version, from
         // where, and - when this build will not run it - why not. The reason is
         // always shown when there is one: a greyed row with no explanation is the
@@ -271,7 +271,7 @@ private fun ExtensionAvatar(entry: ExtensionEntry) {
     ) {
         Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
             Text(
-                entry.identity.trim().take(1).uppercase(),
+                ExtensionCatalog.displayName(entry).trim().take(1).uppercase(),
                 style = MaterialTheme.typography.titleMedium,
                 color = if (trusted) MaterialTheme.colorScheme.onPrimaryContainer
                 else MaterialTheme.colorScheme.onSurfaceVariant,
