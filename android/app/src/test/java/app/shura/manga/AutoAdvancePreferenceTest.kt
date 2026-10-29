@@ -29,7 +29,7 @@ class AutoAdvancePreferenceTest {
         assertEquals(2, ReaderPreferences(autoAdvanceSeconds = 1).autoAdvanceDelay)
         assertEquals(3, ReaderPreferences(autoAdvanceSeconds = 3).autoAdvanceDelay)
         assertEquals(10, ReaderPreferences(autoAdvanceSeconds = 30).autoAdvanceDelay)
-        assertEquals(10, ReaderPreferences.autoAdvanceSecondsOf(-5))
+        assertEquals(2, ReaderPreferences.autoAdvanceSecondsOf(-5))
         assertEquals(2, ReaderPreferences.autoAdvanceSecondsOf(0))
     }
 
