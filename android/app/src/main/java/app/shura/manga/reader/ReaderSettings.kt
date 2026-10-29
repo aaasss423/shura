@@ -46,6 +46,10 @@ class ReaderSettingsStore(context: Context) {
         // setting - or one that stores nothing at all - still opens with the
         // reader's chapters exactly where they were.
         deleteChapterAfterReading = preferences.getBoolean(KEY_DELETE_AFTER, false),
+        autoAdvanceChapter = preferences.getBoolean(KEY_AUTO_ADVANCE, false),
+        autoAdvanceSeconds = ReaderPreferences.autoAdvanceSecondsOf(
+            preferences.getInt(KEY_AUTO_ADVANCE_SECONDS, 3),
+        ),
     )
 
     fun savePreferences(value: ReaderPreferences) {
@@ -55,6 +59,8 @@ class ReaderSettingsStore(context: Context) {
             .putBoolean(KEY_KEEP_ON, value.keepScreenOn)
             .putInt(KEY_PARALLEL, ReaderPreferences.parallelismOf(value.parallelDownloads))
             .putBoolean(KEY_DELETE_AFTER, value.deleteChapterAfterReading)
+            .putBoolean(KEY_AUTO_ADVANCE, value.autoAdvanceChapter)
+            .putInt(KEY_AUTO_ADVANCE_SECONDS, value.autoAdvanceDelay)
             .apply()
     }
 
@@ -65,6 +71,8 @@ class ReaderSettingsStore(context: Context) {
         const val KEY_KEEP_ON = "reader-keep-screen-on"
         const val KEY_PARALLEL = "reader-parallel"
         const val KEY_DELETE_AFTER = "reader-delete-after-reading"
+        const val KEY_AUTO_ADVANCE = "reader-auto-advance"
+        const val KEY_AUTO_ADVANCE_SECONDS = "reader-auto-advance-seconds"
     }
 }
 

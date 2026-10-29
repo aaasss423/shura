@@ -31,6 +31,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -294,6 +295,45 @@ private fun ReadingSettingsSheet(
                 )
             },
         )
+        Spacer(Modifier.height(8.dp))
+
+        // Auto-advance. The countdown that offers it lives in the reader; this
+        // only turns it on and says how long it waits.
+        AppRow(
+            title = shura("reader.autoAdvance"),
+            meta = shura("reader.autoAdvanceHelp"),
+            metaLines = 3,
+            modifier = Modifier.fillMaxWidth(),
+            leading = { RowMark(Icons.Default.KeyboardArrowRight, contentDescription = null) },
+            trailing = {
+                Switch(
+                    checked = preferences.autoAdvanceChapter,
+                    onCheckedChange = {
+                        onPreferencesChange(preferences.copy(autoAdvanceChapter = it))
+                    },
+                )
+            },
+            onClick = {
+                onPreferencesChange(
+                    preferences.copy(autoAdvanceChapter = !preferences.autoAdvanceChapter),
+                )
+            },
+        )
+        if (preferences.autoAdvanceChapter) {
+            Slider(
+                value = preferences.autoAdvanceDelay.toFloat(),
+                onValueChange = {
+                    onPreferencesChange(preferences.copy(autoAdvanceSeconds = it.toInt()))
+                },
+                valueRange = MIN_AUTO_ADVANCE.toFloat()..MAX_AUTO_ADVANCE.toFloat(),
+                steps = MAX_AUTO_ADVANCE - MIN_AUTO_ADVANCE - 1,
+            )
+            Text(
+                shura("reader.autoAdvanceSeconds", preferences.autoAdvanceDelay),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         Spacer(Modifier.height(16.dp))
         HorizontalDivider()
         Spacer(Modifier.height(8.dp))
@@ -315,3 +355,5 @@ private fun ReadingSettingsSheet(
 private const val SYSTEM_SLIDER_VALUE = 0.01f
 private const val MAX_PRELOAD = 10
 private const val MAX_PARALLEL = 8
+private const val MIN_AUTO_ADVANCE = 2
+private const val MAX_AUTO_ADVANCE = 10

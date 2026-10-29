@@ -210,6 +210,77 @@ fun ReaderScreen(
         )
     }
 
+    // Auto-advance, offered only at the very end of the chapter. A countdown is
+    // shown and the reader can cancel it or go now; a plain swipe or tap never
+    // jumps a chapter on its own.
+    var autoAdvanceLeft by remember(chapterId) { mutableIntStateOf(0) }
+    var autoAdvanceCancelled by remember(chapterId) { mutableStateOf(false) }
+    val nextChapter = onNextChapter
+    val autoAdvanceWanted = readerPreferences.autoAdvanceChapter &&
+        nextChapter != null && !autoAdvanceCancelled
+    LaunchedEffect(chapterId, atLastPage, autoAdvanceWanted, readerPreferences.autoAdvanceDelay, pages.size) {
+        if (!atLastPage || !autoAdvanceWanted || pages.isEmpty()) {
+            autoAdvanceLeft = 0
+            return@LaunchedEffect
+        }
+        val total = readerPreferences.autoAdvanceDelay
+        for (left in total downTo 1) {
+            autoAdvanceLeft = left
+            kotlinx.coroutines.delay(1_000L)
+        }
+        autoAdvanceLeft = 0
+        // The chapter is still the one we started on: the effect is cancelled on
+        // a chapterId change, so this only fires when the reader really is at
+        // the end of the chapter they were reading.
+        nextChapter?.invoke()
+    }
+
+    // Now and Cancel. Both stop the countdown for this chapter; one also opens
+    // the next chapter, the other just stays put.
+    val goNextNow: () -> Unit = {
+        autoAdvanceCancelled = true
+        autoAdvanceLeft = 0
+        nextChapter?.invoke()
+    }
+    val cancelAutoAdvance: () -> Unit = {
+        autoAdvanceCancelled = true
+        autoAdvanceLeft = 0
+    }
+
+    // Brightness and screen-awake are stored preferences; these effect blocks
+    // are the only place they touch the Activity. Both are restored on exit so
+    // the rest of the app keeps the system defaults.
+    val readerWindow = androidx.compose.ui.platform.LocalContext.current.findActivity()?.window
+    DisposableEffect(readerWindow, readerPreferences.keepScreenOn) {
+        if (readerPreferences.keepScreenOn) {
+            readerWindow?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            readerWindow?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        onDispose {
+            readerWindow?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+    DisposableEffect(readerWindow, readerPreferences.brightness) {
+        val params = readerWindow?.attributes
+        val previous = params?.screenBrightness
+        if (readerWindow != null && params != null) {
+            params.screenBrightness = if (readerPreferences.overridesBrightness) {
+                readerPreferences.brightness
+            } else {
+                android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+            }
+            readerWindow.attributes = params
+        }
+        onDispose {
+            if (readerWindow != null && params != null) {
+                params.screenBrightness = previous
+                    ?: android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                readerWindow.attributes = params
+            }
+        }
+    }
+
     // Keep the chapter's own place when the page list arrives late: the reader
     // opens at the stored page, not at page 1.
     LaunchedEffect(pages.size) {
@@ -317,6 +388,37 @@ fun ReaderScreen(
                             !translationEngineAvailable,
                         onRetry = { onRetryPage?.invoke(index) },
                     )
+                }
+            }
+        }
+
+        // The end-of-chapter countdown. Small, above the tools, and it never
+        // covers the page: the reader keeps reading while it ticks down, and
+        // can send it now or cancel it. It only appears at the real end.
+        if (autoAdvanceLeft > 0 && pages.isNotEmpty()) {
+            Surface(
+                color = Color.Black.copy(alpha = 0.84f),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = 16.dp, vertical = 16.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                ) {
+                    Text(
+                        shura("reader.autoAdvanceIn", autoAdvanceLeft),
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = goNextNow) {
+                        Text(shura("reader.autoAdvanceNow"))
+                    }
+                    TextButton(onClick = cancelAutoAdvance) {
+                        Text(shura("reader.autoAdvanceCancel"))
+                    }
                 }
             }
         }
@@ -842,4 +944,14 @@ private fun ReaderMessage(
             Button(onClick = onAction) { Text(actionLabel) }
         }
     }
+}
+
+/** Walks the context wrappers up to the hosting Activity, for the window. */
+private fun android.content.Context.findActivity(): android.app.Activity? {
+    var current: android.content.Context? = this
+    while (current is android.content.ContextWrapper) {
+        if (current is android.app.Activity) return current
+        current = current.baseContext
+    }
+    return null
 }

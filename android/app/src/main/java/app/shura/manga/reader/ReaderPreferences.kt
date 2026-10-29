@@ -30,11 +30,24 @@ data class ReaderPreferences(
      * to lose is not a thing to discover afterwards.
      */
     val deleteChapterAfterReading: Boolean = false,
+    /**
+     * Open the next chapter automatically once the last page is reached.
+     *
+     * Off by default. When on, the reader shows a countdown at the end of the
+     * chapter and only moves on after it elapses - a plain swipe or tap is
+     * never enough to jump a chapter, and the reader can cancel at any moment.
+     */
+    val autoAdvanceChapter: Boolean = false,
+    /** Seconds of the end-of-chapter countdown before the next chapter opens. */
+    val autoAdvanceSeconds: Int = 3,
 ) {
     /** Preload clamped to what a phone can actually hold. */
     val preload: Int get() = preloadPages.coerceIn(0, 10)
 
     val parallelism: Int get() = parallelDownloads.coerceIn(1, 8)
+
+    /** The countdown length, clamped to a range a reader can actually wait for. */
+    val autoAdvanceDelay: Int get() = autoAdvanceSeconds.coerceIn(2, 10)
 
     /** True when the reader should override the window brightness. */
     val overridesBrightness: Boolean get() = brightness > 0f
@@ -45,6 +58,8 @@ data class ReaderPreferences(
         fun preloadOf(value: Int): Int = value.coerceIn(0, 10)
 
         fun parallelismOf(value: Int): Int = value.coerceIn(1, 8)
+
+        fun autoAdvanceSecondsOf(value: Int): Int = value.coerceIn(2, 10)
     }
 }
 
